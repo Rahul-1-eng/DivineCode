@@ -1,5 +1,10 @@
 # DivineCode System Design
 
+For the production V2 foundation, see:
+
+- [Level 4 V2 Blueprint](./level4-v2-blueprint.md)
+- [Phase 1 Foundation Plan](../implementation/phase-1-foundation.md)
+
 ## Vision
 
 A unified competitive programming intelligence platform that synchronizes real contests, tracks real performance, and provides AI-powered guidance.

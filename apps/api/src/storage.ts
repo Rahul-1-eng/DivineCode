@@ -11,7 +11,13 @@ export async function upsertGoogleUser(input: { name?: string; email?: string; a
 
 export async function saveContestDocument(contest: any) {
   await connectDB();
-  return (ContestModel as any).findOneAndUpdate({ _id: contest.id }, { $set: { title: contest.title, description: contest.description, startTime: contest.startTime, durationMinutes: contest.durationMinutes, isRated: contest.isRated, createdAt: contest.createdAt, members: contest.members, problems: contest.problems, solves: contest.solves } }, { upsert: true, new: true });
+  return (ContestModel as any).findOneAndUpdate({ _id: contest.id }, { $set: { title: contest.title, description: contest.description, startTime: contest.startTime, durationMinutes: contest.durationMinutes, isRated: contest.isRated, ownerName: contest.ownerName, ownerEmail: contest.ownerEmail, ownerHandle: contest.ownerHandle, createdAt: contest.createdAt, members: contest.members, problems: contest.problems, solves: contest.solves } }, { upsert: true, new: true });
+}
+
+export async function deleteContestDocument(contestId: string) {
+  await connectDB();
+  await (ContestModel as any).deleteOne({ _id: contestId });
+  await (SubmissionModel as any).deleteMany({ contestId });
 }
 
 export async function saveSubmissionDocument(input: any) {
@@ -22,7 +28,7 @@ export async function saveSubmissionDocument(input: any) {
 export async function loadContestDocuments() {
   await connectDB();
   const docs = await (ContestModel as any).find({}).lean();
-  return docs.map((doc: any) => ({ id: String(doc._id), title: doc.title, description: doc.description || '', startTime: doc.startTime, durationMinutes: doc.durationMinutes || 120, isRated: Boolean(doc.isRated), createdAt: doc.createdAt || doc.startTime || new Date().toISOString(), members: doc.members || [], problems: doc.problems || [], solves: doc.solves || [], standings: [], questions: [] }));
+  return docs.map((doc: any) => ({ id: String(doc._id), title: doc.title, description: doc.description || '', startTime: doc.startTime, durationMinutes: doc.durationMinutes || 120, isRated: Boolean(doc.isRated), ownerName: doc.ownerName || '', ownerEmail: doc.ownerEmail || '', ownerHandle: doc.ownerHandle || '', createdAt: doc.createdAt || doc.startTime || new Date().toISOString(), members: doc.members || [], problems: doc.problems || [], solves: doc.solves || [], standings: [], questions: [] }));
 }
 
 export async function loadSubmissionDocuments() {

@@ -1,0 +1,65 @@
+services:
+  - type: keyvalue
+    name: divinecode-redis
+    plan: starter
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+  - type: web
+    name: divinecode-api
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run prisma:generate && npm run build --workspace apps/api
+    preDeployCommand: npm run prisma:deploy
+    startCommand: npm run start --workspace apps/api
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ENABLE_API_WORKERS
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: divinecode-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: divinecode-redis
+          property: connectionString
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: JUDGE0_URL
+        sync: false
+      - key: JUDGE_WORKER_SECRET
+        generateValue: true
+
+  - type: worker
+    name: divinecode-worker
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run prisma:generate && npm run build --workspace apps/api
+    startCommand: npm run worker:start --workspace apps/api
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ENABLE_API_WORKERS
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: divinecode-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: divinecode-redis
+          property: connectionString
+      - key: JUDGE0_URL
+        sync: false
+      - key: JUDGE_WORKER_SECRET
+        generateValue: true
+
+databases:
+  - name: divinecode-postgres
+    databaseName: divinecode
+    user: divinecode
+    plan: starter

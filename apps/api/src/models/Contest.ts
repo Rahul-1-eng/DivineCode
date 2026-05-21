@@ -1,18 +1,27 @@
 import mongoose from 'mongoose';
 
 const ProblemSchema = new mongoose.Schema({
+  id: String,
   title: String,
   platform: String,
   url: String,
   difficulty: String,
+  rating: Number,
   tags: [String],
   stdin: String,
-  expectedOutput: String
+  expectedOutput: String,
+  sourceCode: String,
+  contestCode: String,
+  problemIndex: String
 });
 
 const MemberSchema = new mongoose.Schema({
+  id: String,
   name: String,
-  handle: String
+  email: String,
+  handle: String,
+  codeforcesHandle: String,
+  team: String
 });
 
 const SolveSchema = new mongoose.Schema({
@@ -28,6 +37,10 @@ const ContestSchema = new mongoose.Schema(
     description: String,
     startTime: String,
     durationMinutes: Number,
+    isRated: Boolean,
+    ownerName: String,
+    ownerEmail: String,
+    ownerHandle: String,
     members: [MemberSchema],
     problems: [ProblemSchema],
     solves: [SolveSchema]

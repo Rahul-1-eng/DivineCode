@@ -7,6 +7,91 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserRole {
+  USER
+  PROBLEM_SETTER
+  ADMIN
+}
+
+enum Platform {
+  DIVINECODE
+  CODEFORCES
+  LEETCODE
+  ATCODER
+  CODECHEF
+  HACKERRANK
+  OTHER
+}
+
+enum HandleVerificationStatus {
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+enum ProblemSource {
+  INTERNAL
+  EXTERNAL
+}
+
+enum ProblemVisibility {
+  DRAFT
+  PRIVATE
+  PUBLIC
+  ARCHIVED
+}
+
+enum TestcaseType {
+  SAMPLE
+  PRETEST
+  HIDDEN
+  SYSTEM
+  STRESS
+}
+
+enum CheckerType {
+  EXACT
+  TOKEN
+  FLOAT
+  CUSTOM
+}
+
+enum ContestType {
+  SOLO
+  GROUP
+  MASHUP
+  DUEL_TOURNAMENT
+}
+
+enum ContestStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  FROZEN
+  ENDED
+  CANCELLED
+}
+
+enum ContestParticipantRole {
+  OWNER
+  MANAGER
+  PARTICIPANT
+  OBSERVER
+}
+
+enum SubmissionSource {
+  INTERNAL_JUDGE
+  EXTERNAL_SYNC
+  MANUAL_ADMIN
+}
+
+enum SubmissionStatus {
+  QUEUED
+  RUNNING
+  FINISHED
+  FAILED
+}
+
 enum Verdict {
   ACCEPTED
   WRONG_ANSWER
@@ -14,124 +99,600 @@ enum Verdict {
   RUNTIME_ERROR
   TIME_LIMIT_EXCEEDED
   MEMORY_LIMIT_EXCEEDED
+  PRESENTATION_ERROR
   JUDGE_ERROR
+  SECURITY_VIOLATION
   PENDING
+  SKIPPED
+}
+
+enum ExternalSyncStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  PAUSED
+}
+
+enum DuelMode {
+  MCQ
+  DEBUGGING
+  COUNTEREXAMPLE
+  CODE_SPRINT
+  HYBRID
+}
+
+enum DuelStatus {
+  WAITING
+  RUNNING
+  FINISHED
+  CANCELLED
+}
+
+enum RatingEventType {
+  CONTEST
+  DUEL
+  EXTERNAL_SYNC
+  ADMIN
+}
+
+enum InterviewTrackType {
+  DSA
+  OOPS
+  DATABASE
+  COMPILER
+  OPERATING_SYSTEM
+  NETWORKS
+  SYSTEM_DESIGN
+  BEHAVIORAL
 }
 
 model User {
   id           String   @id @default(cuid())
   username     String   @unique
   email        String   @unique
-  passwordHash String
+  passwordHash String?
+  name         String?
+  avatarUrl    String?
+  role         UserRole @default(USER)
   rating       Int      @default(1200)
   duelRating   Int      @default(1200)
+  globalRating Int      @default(1200)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  submissions  Submission[]
-  contestMembers ContestMember[]
-  ratingHistory RatingHistory[]
+  externalHandles         ExternalHandle[]
+  authoredProblems        Problem[]
+  createdContests         Contest[]
+  contestParticipants     ContestParticipant[]
+  contestProblemsAdded    ContestProblem[]
+  submissions             Submission[]
+  duelMatchesCreated      DuelMatch[]
+  duelPlayers             DuelPlayer[]
+  ratingHistory           RatingHistory[]
+  topicMastery            TopicMastery[]
+  interviewProgress       InterviewProgress[]
+  recommendationSnapshots RecommendationSnapshot[]
+  auditLogs               AuditLog[]
+}
+
+model ExternalHandle {
+  id             String                   @id @default(cuid())
+  userId         String
+  platform       Platform
+  handle         String
+  externalUserId String?
+  rating         Int?
+  maxRating      Int?
+  status         HandleVerificationStatus @default(PENDING)
+  verifiedAt     DateTime?
+  lastSyncAt     DateTime?
+  rawProfile     Json?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contestParticipants ContestParticipant[]
+
+  @@unique([platform, handle])
+  @@unique([userId, platform])
+  @@index([userId])
+}
+
+model Topic {
+  id       String  @id @default(cuid())
+  slug     String  @unique
+  name     String
+  parentId String?
+
+  parent         Topic?          @relation("TopicTree", fields: [parentId], references: [id])
+  children       Topic[]         @relation("TopicTree")
+  problemTopics  ProblemTopic[]
+  topicMastery   TopicMastery[]
+
+  @@index([parentId])
 }
 
 model Problem {
-  id             String   @id @default(cuid())
-  title          String
-  slug           String   @unique
-  statement      String
-  platform       String   @default("DivineCode")
-  externalUrl    String?
-  difficulty     String?
-  tags           String[]
-  sampleInput    String?
-  sampleOutput   String?
-  hiddenInput    String?
-  hiddenOutput   String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String            @id @default(cuid())
+  slug             String            @unique
+  title            String
+  statement        String
+  inputFormat      String?
+  outputFormat     String?
+  constraints      String?
+  difficultyRating Int?
+  difficultyLabel  String?
+  tags             String[]
+  source           ProblemSource     @default(INTERNAL)
+  platform         Platform          @default(DIVINECODE)
+  externalId       String?
+  externalUrl      String?
+  visibility       ProblemVisibility @default(DRAFT)
+  timeLimitMs      Int               @default(2000)
+  memoryLimitMb    Int               @default(256)
+  checkerType      CheckerType       @default(EXACT)
+  checkerCode      String?
+  validatorCode    String?
+  generatorCode    String?
+  createdById      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
-  submissions    Submission[]
+  createdBy       User?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  testcases       Testcase[]
+  officialSolutions OfficialSolution[]
+  editorial       Editorial?
+  problemTopics   ProblemTopic[]
   contestProblems ContestProblem[]
+  submissions     Submission[]
+  duelRounds      DuelRound[]
+
+  @@unique([platform, externalId])
+  @@index([visibility, difficultyRating])
+  @@index([platform])
 }
 
-model Submission {
-  id          String   @id @default(cuid())
-  code        String
-  language    String
-  verdict     Verdict  @default(PENDING)
-  stdout      String?
-  stderr      String?
-  time        String?
-  memory      Int?
-  userId      String?
-  problemId   String
-  contestId   String?
-  createdAt   DateTime @default(now())
+model ProblemTopic {
+  problemId String
+  topicId   String
+  weight    Float  @default(1)
 
-  user        User?    @relation(fields: [userId], references: [id])
-  problem     Problem  @relation(fields: [problemId], references: [id])
-  contest     Contest? @relation(fields: [contestId], references: [id])
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  topic   Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@id([problemId, topicId])
+}
+
+model Testcase {
+  id             String       @id @default(cuid())
+  problemId      String
+  type           TestcaseType @default(HIDDEN)
+  input          String
+  expectedOutput String
+  explanation    String?
+  weight         Int          @default(1)
+  order          Int          @default(0)
+  isPublic       Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  problem     Problem                @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  testResults SubmissionTestResult[]
+
+  @@index([problemId, type])
+}
+
+model OfficialSolution {
+  id          String   @id @default(cuid())
+  problemId   String
+  language    String
+  code        String
+  complexity  String?
+  explanation String
+  isPrimary   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@index([problemId])
+}
+
+model Editorial {
+  id          String    @id @default(cuid())
+  problemId   String    @unique
+  title       String
+  bodyMarkdown String
+  hints       Json?
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
 }
 
 model Contest {
-  id              String   @id @default(cuid())
+  id              String        @id @default(cuid())
+  inviteCode      String        @unique
   title           String
   description     String?
-  inviteCode      String   @unique
+  type            ContestType   @default(GROUP)
+  status          ContestStatus @default(DRAFT)
   startTime       DateTime
-  durationMinutes Int      @default(120)
-  isRated         Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  endTime         DateTime
+  freezeTime      DateTime?
+  durationMinutes Int
+  isRated         Boolean       @default(false)
+  allowLateJoin   Boolean       @default(false)
+  hideProblemMetaDuringContest Boolean @default(true)
+  allowTeamSubmissionView      Boolean @default(true)
+  createdById     String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
-  members         ContestMember[]
-  problems        ContestProblem[]
-  submissions     Submission[]
+  createdBy    User?                @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  participants ContestParticipant[]
+  problems     ContestProblem[]
+  submissions  Submission[]
+  standings    ContestStanding[]
+  syncJobs     ExternalSyncJob[]
+  ratingEvents RatingHistory[]
+  auditLogs    AuditLog[]
+
+  @@index([status, startTime])
+  @@index([createdById])
 }
 
-model ContestMember {
-  id        String   @id @default(cuid())
-  contestId String
-  userId    String?
-  name      String
-  handle    String?
-  joinedAt  DateTime @default(now())
+model ContestParticipant {
+  id               String                 @id @default(cuid())
+  contestId        String
+  userId           String?
+  externalHandleId String?
+  displayName      String
+  teamName         String?
+  role             ContestParticipantRole @default(PARTICIPANT)
+  isOfficial       Boolean                @default(true)
+  ratingBefore     Int?
+  ratingAfter      Int?
+  joinedAt         DateTime               @default(now())
 
-  contest   Contest @relation(fields: [contestId], references: [id])
-  user      User?   @relation(fields: [userId], references: [id])
+  contest        Contest          @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  user           User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  externalHandle ExternalHandle?  @relation(fields: [externalHandleId], references: [id], onDelete: SetNull)
+  submissions    Submission[]
+  standing       ContestStanding?
+
+  @@unique([contestId, userId])
+  @@index([contestId, teamName])
+  @@index([externalHandleId])
 }
 
 model ContestProblem {
-  id        String  @id @default(cuid())
-  contestId String
-  problemId String?
-  title     String
-  platform  String
-  externalUrl String
-  difficulty String?
-  tags      String[]
-  index     Int
+  id            String   @id @default(cuid())
+  contestId     String
+  problemId     String?
+  titleSnapshot String
+  platform      Platform @default(DIVINECODE)
+  externalId    String?
+  externalUrl   String?
+  index         Int
+  label         String
+  points        Int      @default(1000)
+  isLocked      Boolean  @default(false)
+  addedById     String?
+  addedAt       DateTime @default(now())
 
-  contest   Contest @relation(fields: [contestId], references: [id])
-  problem   Problem? @relation(fields: [problemId], references: [id])
+  contest     Contest      @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  problem     Problem?     @relation(fields: [problemId], references: [id], onDelete: SetNull)
+  addedBy     User?        @relation(fields: [addedById], references: [id], onDelete: SetNull)
+  submissions Submission[]
+
+  @@unique([contestId, index])
+  @@unique([contestId, label])
+  @@index([contestId])
+  @@index([problemId])
+}
+
+model Submission {
+  id                   String           @id @default(cuid())
+  userId               String?
+  participantId        String?
+  problemId            String?
+  contestId            String?
+  contestProblemId     String?
+  source               SubmissionSource @default(INTERNAL_JUDGE)
+  status               SubmissionStatus @default(QUEUED)
+  verdict              Verdict          @default(PENDING)
+  language             String
+  code                 String?
+  externalSubmissionId String?
+  externalCreatedAt    DateTime?
+  timeMs               Int?
+  memoryKb             Int?
+  stdout               String?
+  stderr               String?
+  compileOutput        String?
+  judgeMessage         String?
+  createdAt            DateTime         @default(now())
+  judgedAt             DateTime?
+
+  user           User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  participant    ContestParticipant?   @relation(fields: [participantId], references: [id], onDelete: SetNull)
+  problem        Problem?              @relation(fields: [problemId], references: [id], onDelete: SetNull)
+  contest        Contest?              @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  contestProblem ContestProblem?       @relation(fields: [contestProblemId], references: [id], onDelete: SetNull)
+  testResults    SubmissionTestResult[]
+
+  @@unique([source, externalSubmissionId])
+  @@index([contestId, participantId, contestProblemId])
+  @@index([problemId, verdict])
+  @@index([createdAt])
+}
+
+model SubmissionTestResult {
+  id             String  @id @default(cuid())
+  submissionId   String
+  testcaseId     String?
+  index          Int
+  verdict        Verdict
+  timeMs         Int?
+  memoryKb       Int?
+  stdout         String?
+  stderr         String?
+  checkerMessage String?
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  testcase   Testcase?  @relation(fields: [testcaseId], references: [id], onDelete: SetNull)
+
+  @@unique([submissionId, index])
+}
+
+model ContestStanding {
+  id               String   @id @default(cuid())
+  contestId        String
+  participantId    String   @unique
+  rank             Int?
+  solved           Int      @default(0)
+  penalty          Int      @default(0)
+  score            Int      @default(0)
+  solvedProblemIds String[]
+  lastAcceptedAt   DateTime?
+  updatedAt        DateTime @updatedAt
+
+  contest     Contest            @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  participant ContestParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([contestId, rank])
+  @@index([contestId, solved, penalty])
+}
+
+model ExternalSyncJob {
+  id               String             @id @default(cuid())
+  contestId        String?
+  platform         Platform
+  targetKind       String
+  targetId         String
+  status           ExternalSyncStatus @default(PENDING)
+  cursor           String?
+  lastSubmissionId String?
+  error            String?
+  nextRunAt        DateTime?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  contest Contest?            @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  events  ExternalSyncEvent[]
+
+  @@index([platform, targetKind, targetId])
+  @@index([status, nextRunAt])
+}
+
+model ExternalSyncEvent {
+  id                   String   @id @default(cuid())
+  syncJobId            String?
+  platform             Platform
+  externalSubmissionId String
+  accepted             Boolean  @default(false)
+  payload              Json
+  processedAt          DateTime?
+  createdAt            DateTime @default(now())
+
+  syncJob ExternalSyncJob? @relation(fields: [syncJobId], references: [id], onDelete: SetNull)
+
+  @@unique([platform, externalSubmissionId])
+  @@index([syncJobId])
 }
 
 model DuelMatch {
-  id        String   @id @default(cuid())
-  playerA   String
-  playerB   String
-  scoreA    Int      @default(0)
-  scoreB    Int      @default(0)
-  winner    String?
-  createdAt DateTime @default(now())
+  id              String     @id @default(cuid())
+  mode            DuelMode   @default(MCQ)
+  status          DuelStatus @default(WAITING)
+  roomId          String     @unique
+  createdById     String?
+  questionSeconds Int        @default(20)
+  isRated         Boolean    @default(true)
+  startedAt       DateTime?
+  endedAt         DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  createdBy    User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  players      DuelPlayer[]
+  rounds       DuelRound[]
+  ratingEvents RatingHistory[]
+}
+
+model DuelPlayer {
+  id           String    @id @default(cuid())
+  duelId       String
+  userId       String?
+  displayName  String
+  socketId     String?
+  score        Int       @default(0)
+  ratingBefore Int?
+  ratingAfter  Int?
+  rank         Int?
+  joinedAt     DateTime  @default(now())
+  leftAt       DateTime?
+
+  duel    DuelMatch    @relation(fields: [duelId], references: [id], onDelete: Cascade)
+  user    User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  answers DuelAnswer[]
+
+  @@unique([duelId, userId])
+  @@index([duelId, score])
+}
+
+model DuelRound {
+  id               String    @id @default(cuid())
+  duelId           String
+  problemId        String?
+  prompt           String
+  options          Json?
+  correctAnswer    Json?
+  topic            String?
+  difficultyRating Int?
+  order            Int
+  startedAt        DateTime?
+  endedAt          DateTime?
+
+  duel    DuelMatch    @relation(fields: [duelId], references: [id], onDelete: Cascade)
+  problem Problem?     @relation(fields: [problemId], references: [id], onDelete: SetNull)
+  answers DuelAnswer[]
+
+  @@unique([duelId, order])
+}
+
+model DuelAnswer {
+  id          String   @id @default(cuid())
+  roundId     String
+  playerId    String
+  answer      Json
+  isCorrect   Boolean
+  responseMs  Int?
+  scoreDelta  Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  round  DuelRound  @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  player DuelPlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, playerId])
 }
 
 model RatingHistory {
-  id        String   @id @default(cuid())
-  userId    String
-  oldRating Int
-  newRating Int
-  reason    String
-  createdAt DateTime @default(now())
+  id               String          @id @default(cuid())
+  userId           String
+  eventType        RatingEventType
+  oldRating        Int
+  newRating        Int
+  delta            Int
+  reason           String
+  contestId        String?
+  duelId           String?
+  externalPlatform Platform?
+  createdAt        DateTime        @default(now())
 
-  user      User @relation(fields: [userId], references: [id])
+  user    User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contest Contest?   @relation(fields: [contestId], references: [id], onDelete: SetNull)
+  duel    DuelMatch? @relation(fields: [duelId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+}
+
+model TopicMastery {
+  id              String    @id @default(cuid())
+  userId          String
+  topicId         String
+  ability         Float     @default(0)
+  attempts        Int       @default(0)
+  solved          Int       @default(0)
+  lastPracticedAt DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, topicId])
+}
+
+model RecommendationSnapshot {
+  id           String   @id @default(cuid())
+  userId       String
+  reason       String
+  ratingFloor  Int
+  ratingCeil   Int
+  topicWeights Json
+  problemIds   String[]
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model InterviewTrack {
+  id          String             @id @default(cuid())
+  slug        String             @unique
+  title       String
+  type        InterviewTrackType
+  description String?
+  order       Int                @default(0)
+
+  questions InterviewQuestion[]
+}
+
+model InterviewQuestion {
+  id              String   @id @default(cuid())
+  trackId         String
+  title           String
+  prompt          String
+  difficultyLabel String?
+  expectedAnswer  String?
+  tags            String[]
+  sourceCompany   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  track    InterviewTrack      @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  progress InterviewProgress[]
+
+  @@index([trackId])
+}
+
+model InterviewProgress {
+  id             String    @id @default(cuid())
+  userId         String
+  questionId     String
+  status         String    @default("NOT_STARTED")
+  confidence     Int?
+  notes          String?
+  lastReviewedAt DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question InterviewQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, questionId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  contestId  String?
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  actor   User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  contest Contest? @relation(fields: [contestId], references: [id], onDelete: Cascade)
+
+  @@index([contestId, createdAt])
+  @@index([actorId, createdAt])
 }
