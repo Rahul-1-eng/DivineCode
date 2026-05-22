@@ -50,10 +50,17 @@ export default function ContestRoomPage() {
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}${viewerQuery(session)}`);
     const data = await res.json();
     if (!res.ok) { setError(data.error || 'Contest not found'); return; }
-    // Ensure the participant is matched correctly even if backend response is lean
-    if (!data.viewerMember && session?.user?.email && data.participants) {
-      data.viewerMember = data.participants.find((p: any) => p.user?.email === session.user?.email);
+    
+    // 🔥 FIX: Much more robust viewer matching to ensure you are recognized as a player
+    if (!data.viewerMember && session?.user && (data.participants || data.members)) {
+      const arr = data.participants || data.members || [];
+      data.viewerMember = arr.find((p: any) => 
+        (session.user?.email && p.user?.email === session.user?.email) || 
+        (session.user?.name && p.displayName === session.user?.name) ||
+        (session.user?.name && p.name === session.user?.name)
+      );
     }
+    
     setContest(data);
     const elapsed = Math.max(0, Math.floor((Date.now() - new Date(data.startTime).getTime()) / 1000));
     setTimeLeft(Math.max(0, data.durationMinutes * 60 - elapsed));
@@ -147,47 +154,54 @@ export default function ContestRoomPage() {
   useEffect(() => { if (!id || !contest || isFinal) return; if (timeLeft === 0) router.push(`/contests/${id}/final`); }, [timeLeft, id, contest, isFinal]);
 
   const problemById = useMemo(() => Object.fromEntries((contest?.problems || []).map((p: any, i: number) => [p.id, { ...p, label: String.fromCharCode(65 + i) }])), [contest]);
-  const memberById = useMemo(() => Object.fromEntries((contest?.members || []).map((m: any) => [m.id, m])), [contest]);
   
-  // 👉 RECTIFIED LOGIC: Track solved problems for the current group
+  const memberById = useMemo(() => Object.fromEntries(
+    (contest?.members || contest?.participants || []).map((m: any) => [m.id, m])
+  ), [contest]);
+  
+  // 🔥 FIX: Track solved problems instantly from the live `submissions` array instead of waiting for standings
   const teamSolvedProblemIds = useMemo(() => {
-    if (!contest || !contest.standings) return new Set<string>();
     const solvedSet = new Set<string>();
-    const myMemberInfo = contest.viewerMember;
+    const myMemberInfo = contest?.viewerMember;
     
     if (!myMemberInfo) return solvedSet;
-  
-    const myTeam = myMemberInfo.team;
-  
-    contest.standings.forEach((row: any) => {
-      const member = memberById[row.memberId];
-      const isMe = row.memberId === myMemberInfo.id;
-      const isMyTeam = myTeam && myTeam !== 'Individuals' && member?.team === myTeam;
-  
-      if (isMe || isMyTeam) {
-        (row.solvedProblems || []).forEach((problemId: string) => solvedSet.add(problemId));
+
+    const myTeam = myMemberInfo.team || myMemberInfo.teamName || 'Individuals';
+
+    submissions.forEach((sub) => {
+      const verdict = String(sub.verdict).toUpperCase();
+      if (verdict === 'OK' || verdict === 'ACCEPTED') {
+        const rowMemberId = sub.memberId || sub.participantId;
+        const member = memberById[rowMemberId] || {};
+        const subTeam = member.team || member.teamName || 'Individuals';
+        
+        const isMe = rowMemberId === myMemberInfo.id;
+        const isMyTeam = myTeam !== 'Individuals' && subTeam === myTeam;
+        
+        if (isMe || isMyTeam) {
+          solvedSet.add(sub.problemId);
+        }
       }
     });
-  
+
     return solvedSet;
-  }, [contest, memberById]);
+  }, [contest, submissions, memberById]);
 
   const canInspectMember = (memberId: string) => {
-    if (isOwner) return true;
+    if (isOwner || isFinal || timeLeft === 0) return true;
     const member = memberById[memberId];
     return Boolean(viewerMember && (viewerMember.id === memberId || (viewerMember.team && viewerMember.team !== 'Individuals' && member?.team === viewerMember.team)));
   };
 
- const teamStandings = useMemo(() => {
+  const teamStandings = useMemo(() => {
     const grouped: Record<string, any> = {};
     (contest?.standings || []).forEach((standing: any) => {
       const member = memberById[standing.memberId] || {};
-      // ✅ Fallback handles both V1 and V2 database schemas properly
       const team = member.teamName || member.team || 'Individuals';
       if (!grouped[team]) grouped[team] = { team, solved: 0, penalty: 0, score: 0, players: [] };
-      grouped[team].solved += standing.solved;
-      grouped[team].penalty += standing.penalty;
-      grouped[team].score += standing.score;
+      grouped[team].solved += standing.solved || 0;
+      grouped[team].penalty += standing.penalty || 0;
+      grouped[team].score += standing.score || 0;
       grouped[team].players.push({ ...standing, codeforcesHandle: member.codeforcesHandle, team });
     });
     return Object.values(grouped).map((team: any) => ({ ...team, players: team.players.sort((a: any, b: any) => b.solved - a.solved || a.penalty - b.penalty) })).sort((a: any, b: any) => b.solved - a.solved || a.penalty - b.penalty || a.team.localeCompare(b.team));
@@ -245,7 +259,6 @@ export default function ContestRoomPage() {
                 const visibleTitle = canSeeProblemMeta ? p.title : `Problem ${label}`;
                 const safeProblemHref = canSeeProblemMeta ? p.url : `/contests/${contest.id}/problems/${p.id}`;
                 
-                // 👉 THE TICK MARK CHECK
                 const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
 
                 return <div key={p.id} style={{
@@ -267,8 +280,11 @@ export default function ContestRoomPage() {
                     </div>
                   )}
 
-                  {!isFinal && !isSolvedByTeam && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {viewerMember && !isOwner && <a href={`/contests/${contest.id}/problems/${p.id}`} style={primaryLink}>Open problem</a>}
+                  {/* 🔥 FIX: 'Open Problem' button is now ALWAYS visible unless the contest is over, even if you are the owner or solved it */}
+                  {!isFinal && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <a href={`/contests/${contest.id}/problems/${p.id}`} style={primaryLink}>
+                      {isSolvedByTeam ? 'Review problem' : 'Open problem'}
+                    </a>
                     {isOwner && <><button onClick={() => replaceProblem(p.id)} style={ghostButton}>Replace</button><button onClick={() => removeProblem(p.id)} style={ghostButton}>Remove</button></>}
                   </div>}
                 </div>;
@@ -288,7 +304,7 @@ export default function ContestRoomPage() {
         </section>
 
         <section style={{ ...panel, marginTop: 18 }}>
-          <h2>{isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}</h2>
+          <h2>{isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}</h2>
           {submissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
           <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Time</th><th style={th}>User</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Source</th></tr></thead><tbody>{submissions.map((submission) => <tr key={submission.id} onClick={() => setSelectedSubmission(submission)} style={clickRow}><td style={td}>{new Date(submission.createdAt).toLocaleString()}</td><td style={td}>{submission.userId}</td><td style={td}>{problemById[submission.problemId]?.label || ''} {canSeeProblemMeta ? problemById[submission.problemId]?.title || submission.problemId : ''}</td><td style={td}>{submission.verdict}</td><td style={td}>{submission.source || submission.platform || 'DivineCode'}</td></tr>)}</tbody></table></div>
         </section>

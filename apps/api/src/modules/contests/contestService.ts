@@ -110,14 +110,49 @@ function externalUrl(problem: ProblemInput, platform: Platform) {
 function normalizedMember(input: MemberInput) {
   const displayName = String(input.displayName || input.name || input.email || input.codeforcesHandle || '').trim();
   if (!displayName) throw new Error('Each participant needs a displayName, name, email, or Codeforces handle');
-  if (!input.userId && !input.email) {
-    throw new Error(`Participant "${displayName}" needs a userId or email in V2 contests`);
-  }
+  
   return {
     ...input,
     displayName,
     teamName: String(input.teamName || 'Individuals').trim() || 'Individuals'
   };
+}
+
+async function ensureParticipantUser(tx: Prisma.TransactionClient, input: MemberInput) {
+  if (input.userId) {
+    const user = await tx.user.findUnique({ where: { id: input.userId } });
+    if (user) return user;
+  }
+
+  if (input.email) {
+    const email = input.email.trim().toLowerCase();
+    const user = await tx.user.findUnique({ where: { email } });
+    if (user) return user;
+  }
+
+  const normalizedHandle = String(input.codeforcesHandle || '').trim();
+  if (normalizedHandle) {
+    const existingHandle = await tx.externalHandle.findUnique({
+      where: { platform_handle: { platform: Platform.CODEFORCES, handle: normalizedHandle } }
+    });
+    if (existingHandle) {
+      const user = await tx.user.findUnique({ where: { id: existingHandle.userId } });
+      if (user) return user;
+    }
+  }
+
+  const ghostEmail = input.email?.trim().toLowerCase() || `ghost_${randomSuffix()}@divinecode.local`;
+  const usernameSeed = slugify(input.name || input.displayName || ghostEmail.split('@')[0] || 'user') || 'user';
+  
+  return tx.user.upsert({
+    where: { email: ghostEmail },
+    update: { name: input.name || undefined },
+    create: {
+      email: ghostEmail,
+      username: `${usernameSeed}_${randomSuffix()}`,
+      name: input.name || ghostEmail.split('@')[0]
+    }
+  });
 }
 
 async function ensureUser(tx: Prisma.TransactionClient, input: { userId?: string; email?: string; name?: string }) {
@@ -310,7 +345,7 @@ export async function createContestV2(input: CreateContestInput) {
     });
 
     for (const member of members) {
-      const user = await ensureUser(tx, { userId: member.userId, email: member.email, name: member.name || member.displayName });
+      const user = await ensureParticipantUser(tx, member);
       const externalHandle = await ensureCodeforcesHandle(tx, user.id, member.codeforcesHandle);
 
       await tx.contestParticipant.create({
@@ -485,24 +520,24 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
   );
 
   await prisma.$transaction(async (tx) => {
-  const created = await createContestProblemRow(tx, { // 👈 Fixed!
-    contestId,
-    problem,
-    index: contest.problems.length,
-    addedById: actorId || null
-  });
-  
-  await tx.auditLog.create({
-    data: {
-      actorId: actorId || null,
+    const created = await createContestProblemRow(tx, {
       contestId,
-      action: 'CONTEST_PROBLEM_ADD',
-      entityType: 'ContestProblem',
-      entityId: created.id,
-      after: created as any
-    }
+      problem,
+      index: contest.problems.length,
+      addedById: actorId || null
+    });
+    
+    await tx.auditLog.create({
+      data: {
+        actorId: actorId || null,
+        contestId,
+        action: 'CONTEST_PROBLEM_ADD',
+        entityType: 'ContestProblem',
+        entityId: created.id,
+        after: created as any
+      }
+    });
   });
-});
 
   await recomputeContestStandings(contestId);
   return loadContestForViewer(contestId);
@@ -571,16 +606,67 @@ export async function replaceContestProblemV2(contestId: string, contestProblemI
   return loadContestForViewer(contestId);
 }
 
-// 👉 RECTIFIED SUBMISSIONS PIPELINE EXPORTER
-export async function getContestSubmissionsV2(contestId: string) {
+// 👉 RECTIFIED: Handles Post-Contest Visibility & Strict Team Matching
+export async function getContestSubmissionsV2(contestId: string, viewerUserId?: string, viewerEmail?: string) {
+  const contest = await prisma.contest.findUnique({
+    where: { id: contestId },
+    include: { participants: { include: { user: true } } }
+  });
+
+  if (!contest) throw new Error('Contest not found');
+
+  const normalizedEmail = viewerEmail?.trim().toLowerCase();
+
+  let resolvedUserId = viewerUserId;
+  if (!resolvedUserId && normalizedEmail) {
+    const u = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (u) resolvedUserId = u.id;
+  }
+
+  // 🔥 CHECK IF CONTEST IS OVER
+  const isContestOver = Date.now() >= contest.endTime.getTime();
+  const isOwner = contest.createdById === resolvedUserId;
+
+  let allowedParticipantIds: string[] | null = null; // null means can see all
+
+  // Owner OR Contest is Over -> see everything
+  if (isOwner || isContestOver) {
+    allowedParticipantIds = null;
+  } else {
+    // Contest is Live -> enforce privacy filter
+    const viewerParticipant = contest.participants.find(
+      p => (resolvedUserId && p.userId === resolvedUserId) ||
+           (normalizedEmail && p.user?.email?.toLowerCase() === normalizedEmail)
+    );
+
+    if (viewerParticipant) {
+      const team = viewerParticipant.teamName?.trim() || 'Individuals';
+      
+      // If they are in a real team, let them see team submissions
+      if (contest.allowTeamSubmissionView && team !== 'Individuals' && team !== 'Solo') {
+        allowedParticipantIds = contest.participants
+          .filter(p => (p.teamName?.trim() || 'Individuals') === team)
+          .map(p => p.id);
+      } else {
+        // Solo player, strictly see their own
+        allowedParticipantIds = [viewerParticipant.id];
+      }
+    } else {
+      // Viewer isn't a participant -> block view
+      allowedParticipantIds = [];
+    }
+  }
+
+  const whereClause: Prisma.SubmissionWhereInput = { contestId };
+  if (allowedParticipantIds !== null) {
+    whereClause.participantId = { in: allowedParticipantIds };
+  }
+
   const submissions = await prisma.submission.findMany({
-    where: { contestId },
+    where: whereClause,
     include: {
       participant: {
-        include: {
-          user: true,
-          externalHandle: true
-        }
+        include: { user: true, externalHandle: true }
       },
       contestProblem: true
     },

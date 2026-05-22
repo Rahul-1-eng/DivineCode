@@ -26,7 +26,6 @@ function statusFromError(error: Error) {
   return 500;
 }
 
-// 👉 Fixed: This helper function is now correctly defined in the global scope of the file
 async function loadContestOrThrow(contestId: string) {
   const contest = await loadContestForViewer(contestId);
   if (!contest) throw new Error('Contest not found');
@@ -205,29 +204,14 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ ok: true, ...result });
   }));
 
-router.get('/contests/:id/submissions', asyncRoute(async (req, res) => {
-    const contest = await prisma.contest.findUnique({
-      where: { id: req.params.id },
-      include: { participants: { include: { user: true } } }
-    });
-    if (!contest) throw new Error('Contest not found');
-
+  // 👉 RECTIFIED: Explicitly grab email from header fallback to never drop user context
+  router.get('/contests/:id/submissions', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
-    const participant = findViewerParticipant(contest, viewer);
-    const teamMap = new Map(contest.participants.map(p => [p.id, p.teamName || 'Individuals']));
+    const emailFallback = (viewer?.email || req.headers['x-user-email'] || req.query.viewerEmail) as string | undefined;
+    const submissions = await getContestSubmissionsV2(req.params.id, viewer?.userId, emailFallback);
+    res.json(submissions);
+  }));
 
-    const allSubmissions = await getContestSubmissionsV2(req.params.id);
-
-    res.json(allSubmissions.filter((sub) => {
-      if (canManageContest(contest, viewer)) return true;
-      if (!participant) return false;
-      if (sub.memberId === participant.id) return true;
-
-      const myTeam = participant.teamName || 'Individuals';
-      const subTeam = teamMap.get(String(sub.memberId)) || 'Individuals';
-      return contest.allowTeamSubmissionView && myTeam !== 'Individuals' && myTeam === subTeam;
-    }));
-   }));
   router.post('/contests/:id/recompute-standings', asyncRoute(async (req, res) => {
     const contest = await loadContestOrThrow(req.params.id);
     requireOwner(contest, req);
