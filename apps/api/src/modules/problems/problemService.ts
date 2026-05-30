@@ -62,32 +62,24 @@ export async function createInternalProblem(input: CreateProblemInput) {
   if (!title) throw new Error('Problem title is required');
   if (!slug) throw new Error('Problem slug is required');
   if (!statement) throw new Error('Problem statement is required');
-  if (!input.testcases?.length) throw new Error('At least one testcase is required');
-  if (!input.officialSolutions?.length) throw new Error('At least one official solution is required');
 
   return prisma.problem.create({
     data: {
-      slug,
-      title,
-      statement,
-      inputFormat: input.inputFormat || null,
-      outputFormat: input.outputFormat || null,
-      constraints: input.constraints || null,
-      difficultyRating: input.difficultyRating || null,
-      difficultyLabel: input.difficultyLabel || null,
+      problemCode: slug,            // Fills the required problemCode field
+      slug: slug,                   // Fills the optional slug field
+      title: title,
+      description: statement,
+      rating: input.difficultyRating || null,
       tags: input.tags || [],
+      
       source: ProblemSource.INTERNAL,
       platform: Platform.DIVINECODE,
       visibility: input.visibility || ProblemVisibility.DRAFT,
-      timeLimitMs: Math.max(250, Number(input.timeLimitMs || 2000)),
-      memoryLimitMb: Math.max(16, Number(input.memoryLimitMb || 256)),
       checkerType: input.checkerType || CheckerType.EXACT,
-      checkerCode: input.checkerCode || null,
-      validatorCode: input.validatorCode || null,
-      generatorCode: input.generatorCode || null,
-      createdById: input.createdById || null,
+      authorId: input.createdById || null,
+      
       testcases: {
-        create: input.testcases.map((testcase, index) => ({
+        create: (input.testcases || []).map((testcase, index) => ({
           type: testcase.type || (testcase.isPublic ? TestcaseType.SAMPLE : TestcaseType.HIDDEN),
           input: String(testcase.input || ''),
           expectedOutput: String(testcase.expectedOutput || ''),
@@ -98,7 +90,7 @@ export async function createInternalProblem(input: CreateProblemInput) {
         }))
       },
       officialSolutions: {
-        create: input.officialSolutions.map((solution, index) => ({
+        create: (input.officialSolutions || []).map((solution, index) => ({
           language: String(solution.language || 'cpp'),
           code: String(solution.code || ''),
           complexity: solution.complexity || null,

@@ -10,7 +10,7 @@ submissionRouter.post('/run-samples', async (req, res) => {
 
   try {
     const samples = await prisma.testcase.findMany({
-      where: { problemId, isSample: true }
+      where: { problemId, isPublic:true }
     });
 
     if (samples.length === 0) {

@@ -135,24 +135,28 @@ export async function syncCodeforcesContest(contestId: string) {
                 }
               });
 
-              const existingSubmission = await tx.submission.findUnique({
+              // 👉 CHANGED: findUnique to findFirst, and simplified the where clause
+              const existingSubmission = await tx.submission.findFirst({
                 where: {
-                  source_externalSubmissionId: {
-                    source: SubmissionSource.EXTERNAL_SYNC,
-                    externalSubmissionId
-                  }
+                  source: SubmissionSource.EXTERNAL_SYNC,
+                  externalSubmissionId
                 }
               });
 
               // Write the submission records into storage whether they passed or failed!
+              // Write the submission records into storage whether they passed or failed!
               if (!existingSubmission) {
                 const created = await tx.submission.create({
                   data: {
-                    userId: participant.userId,
+                    userId: participant.userId as string, // Cast to guarantee string
                     participantId: participant.id,
                     contestId,
                     contestProblemId: targetContestProblem.id,
-                    problemId: targetContestProblem.problemId,
+                    problemId: targetContestProblem.problemId || null,
+                    
+                    // 👉 FIXED: 'code' is required by the database schema!
+                    code: '// External submission synced from Codeforces', 
+                    
                     source: SubmissionSource.EXTERNAL_SYNC,
                     status: SubmissionStatus.FINISHED,
                     verdict: targetVerdict,
