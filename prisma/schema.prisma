@@ -696,3 +696,43 @@ model AuditLog {
   @@index([contestId, createdAt])
   @@index([actorId, createdAt])
 }
+model Problem {
+  id              String       @id @default(uuid())
+  title           String
+  description     String       @db.Text
+  platform        String       // "Codeforces", "LeetCode", etc.
+  problemCode     String       @unique // e.g., "1805A" or "two-sum"
+  url             String
+  rating          Int?
+  tags            String[]
+  
+  // LeetCode-style boilerplate maps (Language -> Starter Code)
+  boilerplateJson String?      @db.Text 
+  
+  // Storage paths or raw JSON arrays for automated testcases
+  testCases       TestCase[]
+  submissions     Submission[]
+  createdAt       DateTime     @default(now())
+}
+
+model TestCase {
+  id         String   @id @default(uuid())
+  problemId  String
+  problem    Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  input      String   @db.Text
+  expected   String   @db.Text
+  isSample   Boolean  @default(false) // True for "Run Code", False for hidden system tests
+}
+
+model Submission {
+  id          String   @id @default(uuid())
+  problemId   String
+  problem     Problem  @relation(fields: [problemId], references: [id])
+  userId      String
+  code        String   @db.Text
+  language    String   // "cpp", "python", "java"
+  verdict     String   // "ACCEPTED", "WRONG_ANSWER", "TIME_LIMIT_EXCEEDED", "COMPILATION_ERROR"
+  runtimeMs   Int?
+  memoryKb    Int?
+  createdAt   DateTime @default(now())
+}

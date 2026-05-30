@@ -11,6 +11,9 @@ import { createInternalProblem } from '../modules/problems/problemService';
 import { recomputeContestStandings } from '../modules/standings/standingService';
 import { recommendationBand } from '../modules/ratings/recommendationMath';
 
+// 👉 IMPORTS THE SUBMISSION ROUTER
+import { submissionRouter } from './submissionRoutes';
+
 type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<void>;
 
 function asyncRoute(handler: AsyncHandler) {
@@ -204,7 +207,6 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ ok: true, ...result });
   }));
 
-  // 👉 RECTIFIED: Explicitly grab email from header fallback to never drop user context
   router.get('/contests/:id/submissions', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const emailFallback = (viewer?.email || req.headers['x-user-email'] || req.query.viewerEmail) as string | undefined;
@@ -248,5 +250,7 @@ export function mountV2Routes(app: Express, io: Server) {
     });
   });
 
+  // 👉 MOUNT BOTH ROUTERS SAFELY HERE
   app.use('/api/v2', router);
+  app.use('/api/v2/submissions', submissionRouter); 
 }
