@@ -403,6 +403,7 @@ export async function deleteContestV2(contestId: string, actorId?: string) {
 export async function listContestsV2() {
   const contests = await prisma.contest.findMany({
     include: {
+      createdBy: true, // <-- ADDED: Fetch owner data
       _count: {
         select: {
           participants: true,
@@ -411,7 +412,7 @@ export async function listContestsV2() {
       }
     },
     orderBy: { createdAt: 'desc' },
-    take: 100
+    take: 40 // <-- Reduced from 100 to improve DB latency
   });
 
   return contests.map((contest) => ({
@@ -425,7 +426,10 @@ export async function listContestsV2() {
     membersCount: contest._count.participants,
     problemsCount: contest._count.problems,
     questionCount: 0,
-    createdAt: contest.createdAt
+    createdAt: contest.createdAt,
+    // EXPOSE OWNER INFO TO FRONTEND:
+    ownerEmail: contest.createdBy?.email,
+    createdById: contest.createdById
   }));
 }
 

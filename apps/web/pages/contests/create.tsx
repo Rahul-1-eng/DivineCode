@@ -16,7 +16,7 @@ function cleanHandle(value: string) { return value.trim().replace(/^@/, ''); }
 
 export default function CreateContestPage() {
   const { data: session, status } = useSession();
-  const [mounted, setMounted] = useState(false); // 👉 Mount state to prevent hydration errors
+  const [mounted, setMounted] = useState(false);
   const ownerName = session?.user?.name || session?.user?.email || '';
   const [ownerCfHandle, setOwnerCfHandle] = useState('');
   const [mode, setMode] = useState<Mode>('group');
@@ -44,19 +44,33 @@ export default function CreateContestPage() {
   function addProblem() { setProblems([...problems, { platform: 'Codeforces', code: '', contestCode: '', problemIndex: '', title: '', url: '', tags: 'implementation' }]); }
   function updateProblem(index: number, field: keyof ProblemRow, value: string) { const next = [...problems]; next[index] = { ...next[index], [field]: value }; setProblems(next); }
 
+  // 👉 ADDED TRY/CATCH TO PREVENT CRASH ON NETWORK ERROR
   async function lookupProblem(index: number) {
     const p = problems[index];
     if (!p.code.trim()) return alert('Enter problem code like 1805A or two-sum');
     setLookupState({ ...lookupState, [index]: 'Loading...' });
-    const res = await fetch(`${API_BASE_URL}/api/problems/lookup?platform=${encodeURIComponent(p.platform)}&code=${encodeURIComponent(p.code)}`);
-    const data = await res.json();
-    if (!res.ok) { setLookupState({ ...lookupState, [index]: data.error || 'Lookup failed' }); return; }
-    const next = [...problems];
-    next[index] = { ...next[index], contestCode: data.contestCode || '', problemIndex: data.problemIndex || '', title: data.title, url: data.url, rating: data.rating, difficulty: data.difficulty, tags: (data.tags || []).join(',') || next[index].tags };
-    setProblems(next);
-    setLookupState({ ...lookupState, [index]: `Loaded ${data.title}` });
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/problems/lookup?platform=${encodeURIComponent(p.platform)}&code=${encodeURIComponent(p.code)}`);
+      
+      if (!res.ok) { 
+        const data = await res.json().catch(() => ({}));
+        setLookupState({ ...lookupState, [index]: data.error || 'Lookup failed (Server error)' }); 
+        return; 
+      }
+      
+      const data = await res.json();
+      const next = [...problems];
+      next[index] = { ...next[index], contestCode: data.contestCode || '', problemIndex: data.problemIndex || '', title: data.title, url: data.url, rating: data.rating, difficulty: data.difficulty, tags: (data.tags || []).join(',') || next[index].tags };
+      setProblems(next);
+      setLookupState({ ...lookupState, [index]: `Loaded ${data.title}` });
+    } catch (error) {
+      console.error(error);
+      setLookupState({ ...lookupState, [index]: 'Network Error: Backend API unreachable' });
+    }
   }
 
+  // 👉 ADDED TRY/CATCH TO PREVENT CRASH ON NETWORK ERROR
   async function createContest() {
     if (!ownerName) return alert('Sign in first.');
     if (!session?.user?.email) return alert('Your signed-in account needs an email before creating a V2 contest.');
@@ -66,7 +80,7 @@ export default function CreateContestPage() {
     
     const cleanMember = (member: MemberRow, team: string) => ({
       name: member.name.trim() || cleanHandle(member.codeforcesHandle) || member.email.trim(),
-      email: member.email.trim(), // Optional now!
+      email: member.email.trim(),
       codeforcesHandle: cleanHandle(member.codeforcesHandle) || member.name.trim(),
       teamName: team
     });
@@ -77,25 +91,32 @@ export default function CreateContestPage() {
     
     if (cleanedMembers.length === 0) return alert('Add at least one player. The owner manages the contest and is not added as a player automatically.');
     
-    // 👉 REMOVED THE STRICT EMAIL VALIDATION BLOCK HERE
-
     const invalid = hasCfProblems ? cleanedMembers.find((member) => !member.codeforcesHandle || member.codeforcesHandle.includes(' ')) : null;
     if (invalid) return alert(`Invalid Codeforces handle for ${invalid.name}. Use the exact CF handle, without spaces.`);
     
     const contestProblems = problems.map((p) => ({ title: p.title, platform: p.platform, code: p.code || `${p.contestCode}${p.problemIndex}`, contestCode: p.contestCode, problemIndex: p.problemIndex, url: p.url, rating: p.rating, difficulty: p.difficulty, tags: p.tags })).filter((p) => p.url);
     
-    const res = await fetch(`${API_V2_BASE_URL}/contests`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, description: `${mode === 'single' ? 'Solo' : 'Team'} mashup created by ${ownerName}`, durationMinutes: duration, ownerName, ownerEmail: session.user.email, ownerHandle, members: cleanedMembers, problems: contestProblems })
-    });
-    
-    const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Could not create contest');
-    window.location.href = `/contests/${data.id}`;
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/contests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, description: `${mode === 'single' ? 'Solo' : 'Team'} mashup created by ${ownerName}`, durationMinutes: duration, ownerName, ownerEmail: session.user.email, ownerHandle, members: cleanedMembers, problems: contestProblems })
+      });
+      
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return alert(data.error || 'Could not create contest');
+      }
+      
+      const data = await res.json();
+      window.location.href = `/contests/${data.id}`;
+    } catch (error) {
+      console.error(error);
+      alert('Network Error: Could not connect to the backend API.');
+    }
   }
 
-  if (!mounted) return null; // Prevents "Server: 800 Client: 1500" Hydration errors
+  if (!mounted) return null;
   if (status === 'loading') return <main style={page}><h1>Checking account...</h1></main>;
   if (!session) return <main style={page}><section style={gate}><h1>Sign in required</h1><p style={{ color: '#a8b3c7' }}>Create mashups from your account.</p><a href="/signin" style={primaryLink}>Sign in with Google</a></section></main>;
 
