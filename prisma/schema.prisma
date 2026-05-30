@@ -148,18 +148,18 @@ enum InterviewTrackType {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
-  email        String   @unique
-  passwordHash String?
-  name         String?
-  avatarUrl    String?
-  role         UserRole @default(USER)
-  rating       Int      @default(1200)
-  duelRating   Int      @default(1200)
-  globalRating Int      @default(1200)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String       @id @default(cuid())
+  username            String       @unique
+  email               String       @unique
+  passwordHash        String?
+  name                String?
+  avatarUrl           String?
+  role                UserRole     @default(USER)
+  rating              Int          @default(1200)
+  duelRating          Int          @default(1200)
+  globalRating        Int          @default(1200)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
   externalHandles         ExternalHandle[]
   authoredProblems        Problem[]
@@ -205,91 +205,102 @@ model Topic {
   name     String
   parentId String?
 
-  parent         Topic?          @relation("TopicTree", fields: [parentId], references: [id])
-  children       Topic[]         @relation("TopicTree")
-  problemTopics  ProblemTopic[]
-  topicMastery   TopicMastery[]
+  parent        Topic?         @relation("TopicTree", fields: [parentId], references: [id])
+  children      Topic[]        @relation("TopicTree")
+  problemTopics ProblemTopic[]
+  topicMastery  TopicMastery[]
 
   @@index([parentId])
 }
 
+// ------------------------------------------------------------------
+// MERGED: Problem, Testcase, and Submission
+// ------------------------------------------------------------------
+
 model Problem {
-  id               String            @id @default(cuid())
-  slug             String            @unique
-  title            String
-  statement        String
-  inputFormat      String?
-  outputFormat     String?
-  constraints      String?
-  difficultyRating Int?
-  difficultyLabel  String?
-  tags             String[]
-  source           ProblemSource     @default(INTERNAL)
-  platform         Platform          @default(DIVINECODE)
-  externalId       String?
-  externalUrl      String?
-  visibility       ProblemVisibility @default(DRAFT)
-  timeLimitMs      Int               @default(2000)
-  memoryLimitMb    Int               @default(256)
-  checkerType      CheckerType       @default(EXACT)
-  checkerCode      String?
-  validatorCode    String?
-  generatorCode    String?
-  createdById      String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id              String       @id @default(cuid())
+  title           String
+  description     String       @db.Text
+  platform        Platform     @default(DIVINECODE)
+  problemCode     String       @unique
+  url             String?
+  rating          Int?
+  tags            String[]
+  checkerType     CheckerType  @default(EXACT)
+  
+  // Execution Engine Boilerplate
+  boilerplateJson String?      @db.Text
 
-  createdBy       User?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  testcases       Testcase[]
+  createdAt       DateTime     @default(now())
+
+  // Relations matching the rest of the database
+  authorId          String?
+  author            User?              @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  testcases         Testcase[]
+  submissions       Submission[]
   officialSolutions OfficialSolution[]
-  editorial       Editorial?
-  problemTopics   ProblemTopic[]
-  contestProblems ContestProblem[]
-  submissions     Submission[]
-  duelRounds      DuelRound[]
-
-  @@unique([platform, externalId])
-  @@index([visibility, difficultyRating])
-  @@index([platform])
-}
-
-model ProblemTopic {
-  problemId String
-  topicId   String
-  weight    Float  @default(1)
-
-  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  topic   Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
-
-  @@id([problemId, topicId])
+  editorial         Editorial?
+  problemTopics     ProblemTopic[]
+  contestProblems   ContestProblem[]
+  duelRounds        DuelRound[]
 }
 
 model Testcase {
   id             String       @id @default(cuid())
   problemId      String
   type           TestcaseType @default(HIDDEN)
-  input          String
-  expectedOutput String
-  explanation    String?
+  input          String       @db.Text
+  expectedOutput String       @db.Text
+  explanation    String?      @db.Text
   weight         Int          @default(1)
   order          Int          @default(0)
   isPublic       Boolean      @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  problem     Problem                @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  testResults SubmissionTestResult[]
+  problem        Problem      @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  testResults    SubmissionTestResult[]
 
   @@index([problemId, type])
 }
+
+model Submission {
+  id               String           @id @default(cuid())
+  problemId        String?
+  contestId        String?
+  userId           String
+  participantId    String?
+  contestProblemId String?
+  code             String           @db.Text
+  language         String
+  status           SubmissionStatus @default(QUEUED)
+  verdict          Verdict          @default(PENDING)
+  timeMs           Int?
+  memoryKb         Int?
+  judgeMessage     String?          @db.Text
+  judgedAt         DateTime?
+  createdAt        DateTime         @default(now())
+
+  problem          Problem?         @relation(fields: [problemId], references: [id], onDelete: SetNull)
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contest          Contest?         @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  participant      ContestParticipant? @relation(fields: [participantId], references: [id], onDelete: SetNull)
+  contestProblem   ContestProblem?  @relation(fields: [contestProblemId], references: [id], onDelete: SetNull)
+  testResults      SubmissionTestResult[]
+
+  @@index([userId])
+  @@index([contestId])
+}
+
+// ------------------------------------------------------------------
 
 model OfficialSolution {
   id          String   @id @default(cuid())
   problemId   String
   language    String
-  code        String
+  code        String   @db.Text
   complexity  String?
-  explanation String
+  explanation String   @db.Text
   isPrimary   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -300,36 +311,36 @@ model OfficialSolution {
 }
 
 model Editorial {
-  id          String    @id @default(cuid())
-  problemId   String    @unique
-  title       String
-  bodyMarkdown String
-  hints       Json?
-  publishedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id           String    @id @default(cuid())
+  problemId    String    @unique
+  title        String
+  bodyMarkdown String    @db.Text
+  hints        Json?
+  publishedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
 }
 
 model Contest {
-  id              String        @id @default(cuid())
-  inviteCode      String        @unique
-  title           String
-  description     String?
-  type            ContestType   @default(GROUP)
-  status          ContestStatus @default(DRAFT)
-  startTime       DateTime
-  endTime         DateTime
-  freezeTime      DateTime?
-  durationMinutes Int
-  isRated         Boolean       @default(false)
-  allowLateJoin   Boolean       @default(false)
-  hideProblemMetaDuringContest Boolean @default(true)
-  allowTeamSubmissionView      Boolean @default(true)
-  createdById     String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id                           String        @id @default(cuid())
+  inviteCode                   String        @unique
+  title                        String
+  description                  String?       @db.Text
+  type                         ContestType   @default(GROUP)
+  status                       ContestStatus @default(DRAFT)
+  startTime                    DateTime
+  endTime                      DateTime
+  freezeTime                   DateTime?
+  durationMinutes              Int
+  isRated                      Boolean       @default(false)
+  allowLateJoin                Boolean       @default(false)
+  hideProblemMetaDuringContest Boolean       @default(true)
+  allowTeamSubmissionView      Boolean       @default(true)
+  createdById                  String?
+  createdAt                    DateTime      @default(now())
+  updatedAt                    DateTime      @updatedAt
 
   createdBy    User?                @relation(fields: [createdById], references: [id], onDelete: SetNull)
   participants ContestParticipant[]
@@ -394,53 +405,17 @@ model ContestProblem {
   @@index([problemId])
 }
 
-model Submission {
-  id                   String           @id @default(cuid())
-  userId               String?
-  participantId        String?
-  problemId            String?
-  contestId            String?
-  contestProblemId     String?
-  source               SubmissionSource @default(INTERNAL_JUDGE)
-  status               SubmissionStatus @default(QUEUED)
-  verdict              Verdict          @default(PENDING)
-  language             String
-  code                 String?
-  externalSubmissionId String?
-  externalCreatedAt    DateTime?
-  timeMs               Int?
-  memoryKb             Int?
-  stdout               String?
-  stderr               String?
-  compileOutput        String?
-  judgeMessage         String?
-  createdAt            DateTime         @default(now())
-  judgedAt             DateTime?
-
-  user           User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
-  participant    ContestParticipant?   @relation(fields: [participantId], references: [id], onDelete: SetNull)
-  problem        Problem?              @relation(fields: [problemId], references: [id], onDelete: SetNull)
-  contest        Contest?              @relation(fields: [contestId], references: [id], onDelete: Cascade)
-  contestProblem ContestProblem?       @relation(fields: [contestProblemId], references: [id], onDelete: SetNull)
-  testResults    SubmissionTestResult[]
-
-  @@unique([source, externalSubmissionId])
-  @@index([contestId, participantId, contestProblemId])
-  @@index([problemId, verdict])
-  @@index([createdAt])
-}
-
 model SubmissionTestResult {
-  id             String  @id @default(cuid())
+  id             String    @id @default(cuid())
   submissionId   String
   testcaseId     String?
   index          Int
   verdict        Verdict
   timeMs         Int?
   memoryKb       Int?
-  stdout         String?
-  stderr         String?
-  checkerMessage String?
+  stdout         String?   @db.Text
+  stderr         String?   @db.Text
+  checkerMessage String?   @db.Text
 
   submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   testcase   Testcase?  @relation(fields: [testcaseId], references: [id], onDelete: SetNull)
@@ -448,17 +423,28 @@ model SubmissionTestResult {
   @@unique([submissionId, index])
 }
 
+model ProblemTopic {
+  id        String  @id @default(uuid())
+  problemId String
+  topicId   String
+  
+  problem   Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  topic     Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([problemId, topicId])
+}
+
 model ContestStanding {
-  id               String   @id @default(cuid())
+  id               String             @id @default(cuid())
   contestId        String
-  participantId    String   @unique
+  participantId    String             @unique
   rank             Int?
-  solved           Int      @default(0)
-  penalty          Int      @default(0)
-  score            Int      @default(0)
+  solved           Int                @default(0)
+  penalty          Int                @default(0)
+  score            Int                @default(0)
   solvedProblemIds String[]
   lastAcceptedAt   DateTime?
-  updatedAt        DateTime @updatedAt
+  updatedAt        DateTime           @updatedAt
 
   contest     Contest            @relation(fields: [contestId], references: [id], onDelete: Cascade)
   participant ContestParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
@@ -476,7 +462,7 @@ model ExternalSyncJob {
   status           ExternalSyncStatus @default(PENDING)
   cursor           String?
   lastSubmissionId String?
-  error            String?
+  error            String?            @db.Text
   nextRunAt        DateTime?
   startedAt        DateTime?
   finishedAt       DateTime?
@@ -491,14 +477,14 @@ model ExternalSyncJob {
 }
 
 model ExternalSyncEvent {
-  id                   String   @id @default(cuid())
+  id                   String           @id @default(cuid())
   syncJobId            String?
   platform             Platform
   externalSubmissionId String
-  accepted             Boolean  @default(false)
+  accepted             Boolean          @default(false)
   payload              Json
   processedAt          DateTime?
-  createdAt            DateTime @default(now())
+  createdAt            DateTime         @default(now())
 
   syncJob ExternalSyncJob? @relation(fields: [syncJobId], references: [id], onDelete: SetNull)
 
@@ -507,17 +493,17 @@ model ExternalSyncEvent {
 }
 
 model DuelMatch {
-  id              String     @id @default(cuid())
-  mode            DuelMode   @default(MCQ)
-  status          DuelStatus @default(WAITING)
-  roomId          String     @unique
+  id              String        @id @default(cuid())
+  mode            DuelMode      @default(MCQ)
+  status          DuelStatus    @default(WAITING)
+  roomId          String        @unique
   createdById     String?
-  questionSeconds Int        @default(20)
-  isRated         Boolean    @default(true)
+  questionSeconds Int           @default(20)
+  isRated         Boolean       @default(true)
   startedAt       DateTime?
   endedAt         DateTime?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   createdBy    User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
   players      DuelPlayer[]
@@ -526,16 +512,16 @@ model DuelMatch {
 }
 
 model DuelPlayer {
-  id           String    @id @default(cuid())
+  id           String       @id @default(cuid())
   duelId       String
   userId       String?
   displayName  String
   socketId     String?
-  score        Int       @default(0)
+  score        Int          @default(0)
   ratingBefore Int?
   ratingAfter  Int?
   rank         Int?
-  joinedAt     DateTime  @default(now())
+  joinedAt     DateTime     @default(now())
   leftAt       DateTime?
 
   duel    DuelMatch    @relation(fields: [duelId], references: [id], onDelete: Cascade)
@@ -547,10 +533,10 @@ model DuelPlayer {
 }
 
 model DuelRound {
-  id               String    @id @default(cuid())
+  id               String       @id @default(cuid())
   duelId           String
   problemId        String?
-  prompt           String
+  prompt           String       @db.Text
   options          Json?
   correctAnswer    Json?
   topic            String?
@@ -567,14 +553,14 @@ model DuelRound {
 }
 
 model DuelAnswer {
-  id          String   @id @default(cuid())
-  roundId     String
-  playerId    String
-  answer      Json
-  isCorrect   Boolean
-  responseMs  Int?
-  scoreDelta  Int      @default(0)
-  createdAt   DateTime @default(now())
+  id         String     @id @default(cuid())
+  roundId    String
+  playerId   String
+  answer     Json
+  isCorrect  Boolean
+  responseMs Int?
+  scoreDelta Int        @default(0)
+  createdAt  DateTime   @default(now())
 
   round  DuelRound  @relation(fields: [roundId], references: [id], onDelete: Cascade)
   player DuelPlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
@@ -634,27 +620,27 @@ model RecommendationSnapshot {
 }
 
 model InterviewTrack {
-  id          String             @id @default(cuid())
-  slug        String             @unique
+  id          String              @id @default(cuid())
+  slug        String              @unique
   title       String
   type        InterviewTrackType
-  description String?
-  order       Int                @default(0)
+  description String?             @db.Text
+  order       Int                 @default(0)
 
   questions InterviewQuestion[]
 }
 
 model InterviewQuestion {
-  id              String   @id @default(cuid())
-  trackId         String
-  title           String
-  prompt          String
-  difficultyLabel String?
-  expectedAnswer  String?
-  tags            String[]
-  sourceCompany   String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String              @id @default(cuid())
+  trackId          String
+  title            String
+  prompt           String              @db.Text
+  difficultyLabel  String?
+  expectedAnswer   String?             @db.Text
+  tags             String[]
+  sourceCompany    String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
 
   track    InterviewTrack      @relation(fields: [trackId], references: [id], onDelete: Cascade)
   progress InterviewProgress[]
@@ -663,14 +649,14 @@ model InterviewQuestion {
 }
 
 model InterviewProgress {
-  id             String    @id @default(cuid())
+  id             String            @id @default(cuid())
   userId         String
   questionId     String
-  status         String    @default("NOT_STARTED")
+  status         String            @default("NOT_STARTED")
   confidence     Int?
-  notes          String?
+  notes          String?           @db.Text
   lastReviewedAt DateTime?
-  updatedAt      DateTime  @updatedAt
+  updatedAt      DateTime          @updatedAt
 
   user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   question InterviewQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
@@ -695,44 +681,4 @@ model AuditLog {
 
   @@index([contestId, createdAt])
   @@index([actorId, createdAt])
-}
-model Problem {
-  id              String       @id @default(uuid())
-  title           String
-  description     String       @db.Text
-  platform        String       // "Codeforces", "LeetCode", etc.
-  problemCode     String       @unique // e.g., "1805A" or "two-sum"
-  url             String
-  rating          Int?
-  tags            String[]
-  
-  // LeetCode-style boilerplate maps (Language -> Starter Code)
-  boilerplateJson String?      @db.Text 
-  
-  // Storage paths or raw JSON arrays for automated testcases
-  testCases       TestCase[]
-  submissions     Submission[]
-  createdAt       DateTime     @default(now())
-}
-
-model TestCase {
-  id         String   @id @default(uuid())
-  problemId  String
-  problem    Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  input      String   @db.Text
-  expected   String   @db.Text
-  isSample   Boolean  @default(false) // True for "Run Code", False for hidden system tests
-}
-
-model Submission {
-  id          String   @id @default(uuid())
-  problemId   String
-  problem     Problem  @relation(fields: [problemId], references: [id])
-  userId      String
-  code        String   @db.Text
-  language    String   // "cpp", "python", "java"
-  verdict     String   // "ACCEPTED", "WRONG_ANSWER", "TIME_LIMIT_EXCEEDED", "COMPILATION_ERROR"
-  runtimeMs   Int?
-  memoryKb    Int?
-  createdAt   DateTime @default(now())
 }
