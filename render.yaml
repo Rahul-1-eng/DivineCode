@@ -2,7 +2,7 @@ services:
   # --- NEW: PISTON COMPILER SERVICE ---
   - type: web
     name: divinecode-piston
-    image: docker.io/engineeraman/piston
+    image: engineeraman/piston  # <-- REMOVED docker.io/
     plan: starter
     port: 2000
     envVars:
