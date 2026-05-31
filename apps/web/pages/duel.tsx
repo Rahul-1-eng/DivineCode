@@ -24,37 +24,179 @@ export default function DuelPage() {
     socket.on('disconnect', () => { setConnected(false); setStatus('Disconnected from duel server.'); });
     socket.on('duel:waiting', (data) => setStatus(data.message || 'Waiting for opponent...'));
     socket.on('duel:start', (data) => { setRoomId(data.roomId); setPlayers(data.players); setStatus('Duel started!'); setTime(20); });
-    socket.on('duel:state', (state) => { setRoomId(state.roomId); setPlayers(state.players); setQuestion(state.question); setFinished(state.finished); setTime(20); if (!state.finished && state.question) setStatus('Answer before the timer burns out.'); if (state.finished) setStatus('Duel finished.'); });
+    socket.on('duel:state', (state) => { 
+      setRoomId(state.roomId); 
+      setPlayers(state.players); 
+      setQuestion(state.question); 
+      setFinished(state.finished); 
+      setTime(20); 
+      if (!state.finished && state.question) setStatus('Answer before the timer burns out.'); 
+      if (state.finished) setStatus('Duel finished.'); 
+    });
     socket.on('duel:feedback', (data) => { setFeedback(`${data.playerName} answered ${data.correct ? 'correctly ✅' : 'wrong ❌'} · ${data.concept}`); });
     return () => { socket.disconnect(); };
   }, []);
-  useEffect(() => { if (!question || finished) return; const t = setInterval(() => setTime((v) => Math.max(0, v - 1)), 1000); return () => clearInterval(t); }, [question, finished]);
-  function joinDuel() { if (!socketRef.current || joined) return; const name = session?.user?.name || session?.user?.email || `Player-${Math.floor(Math.random() * 1000)}`; socketRef.current.emit('duel:join', { name }); setJoined(true); setStatus('Searching for opponent... open another tab/device and join as another player.'); }
-  function answer(index: number) { if (!socketRef.current || !roomId || !question) return; socketRef.current.emit('duel:answer', { roomId, questionId: question.id, answerIndex: index }); }
+
+  useEffect(() => { 
+    if (!question || finished) return; 
+    const t = setInterval(() => setTime((v) => Math.max(0, v - 1)), 1000); 
+    return () => clearInterval(t); 
+  }, [question, finished]);
+
+  function joinDuel() { 
+    if (!socketRef.current || joined) return; 
+    const name = session?.user?.name || session?.user?.email || `Player-${Math.floor(Math.random() * 1000)}`; 
+    socketRef.current.emit('duel:join', { name }); 
+    setJoined(true); 
+    setStatus('Searching for opponent... open another tab/device to join.'); 
+  }
+
+  function answer(index: number) { 
+    if (!socketRef.current || !roomId || !question) return; 
+    socketRef.current.emit('duel:answer', { roomId, questionId: question.id, answerIndex: index }); 
+  }
+
   const leader = [...players].sort((a, b) => b.score - a.score)[0];
-  return <main style={page}><nav style={nav}><a href="/" style={brand}>⚔️ DivineCode Duel</a><div style={userPill}>{session?.user?.name || session?.user?.email || 'Guest Player'}</div></nav><section style={arena}><div style={hud}><span style={connected ? online : offline}>{connected ? 'SERVER ONLINE' : 'SERVER OFFLINE'}</span><strong>{status}</strong><span>{roomId || 'Match not started'}</span></div><div style={versus}><div style={scoreGrid}>{players.length ? players.map((p) => <div key={p.id} style={p.id === leader?.id ? leaderCard : playerCard}><span style={{ color: '#94a3b8' }}>{p.id === leader?.id ? 'LEADING' : 'CHALLENGER'}</span><strong style={{ fontSize: 32 }}>{p.name}</strong><b style={{ fontSize: 52 }}>{p.score}</b><small>battle score</small></div>) : [0, 1].map((n) => <div key={n} style={playerCard}><span>Waiting Player {n + 1}</span><strong style={{ fontSize: 52 }}>0</strong><small>battle score</small></div>)}</div><div style={vsBadge}>VS</div></div>{!joined && <button onClick={joinDuel} disabled={!connected} style={joinBtn}>Enter Duel Arena</button>}{feedback && <div style={feedbackBox}>{feedback}</div>}{finished && <section style={questionCard}><h2>Duel Finished</h2><p style={{ color: '#a8b3c7' }}>Winner: <b>{leader?.name || 'No winner'}</b></p><a href="/duel" style={primaryLink}>Start New Duel</a></section>}{!finished && question && <section style={questionCard}><div style={progress}>Question {question.number}/{question.total} · {question.concept}<span style={timer}>{time}s</span></div><div style={bar}><span style={{ ...barFill, width: `${(time / 20) * 100}%` }} /></div><h1>{question.question}</h1><div style={optionGrid}>{question.options.map((opt: string, index: number) => <button key={opt} onClick={() => answer(index)} style={optionBtn}><span style={letter}>{String.fromCharCode(65 + index)}</span>{opt}</button>)}</div></section>}{!question && joined && <section style={questionCard}><h2>Matchmaking...</h2><p style={{ color: '#a8b3c7' }}>Waiting for another player to enter the arena.</p></section>}</section></main>;
+
+  return (
+    <main style={page}>
+      <nav style={nav}>
+        <a href="/" style={brand}>⚔️ DivineCode Duel</a>
+        <div style={userPill}>{session?.user?.name || session?.user?.email || 'Guest Player'}</div>
+      </nav>
+      
+      <section style={arena}>
+        <div style={hud}>
+          <span style={connected ? online : offline}>{connected ? 'SERVER ONLINE' : 'SERVER OFFLINE'}</span>
+          <strong style={{ flex: '1 1 auto', textAlign: 'center' }}>{status}</strong>
+          <span style={{ fontSize: 14, color: '#94a3b8' }}>{roomId || 'Match not started'}</span>
+        </div>
+        
+        {/* 👉 MOBILE FIX: Swapped absolute VS badge for a responsive Flex Layout */}
+        <div style={versusContainer}>
+          {players.length ? (
+            <>
+              <div style={players[0].id === leader?.id ? leaderCard : playerCard}>
+                <span style={{ color: '#94a3b8', fontSize: 13, fontWeight: 'bold' }}>{players[0].id === leader?.id ? 'LEADING' : 'PLAYER 1'}</span>
+                <strong style={{ fontSize: 'clamp(24px, 4vw, 32px)' }}>{players[0].name}</strong>
+                <b style={{ fontSize: 'clamp(40px, 6vw, 52px)' }}>{players[0].score}</b>
+                <small style={{ color: '#64748b' }}>battle score</small>
+              </div>
+
+              <div style={vsBadgeContainer}>
+                <div style={vsBadge}>VS</div>
+              </div>
+
+              <div style={players[1]?.id === leader?.id ? leaderCard : playerCard}>
+                <span style={{ color: '#94a3b8', fontSize: 13, fontWeight: 'bold' }}>{players[1]?.id === leader?.id ? 'LEADING' : 'PLAYER 2'}</span>
+                <strong style={{ fontSize: 'clamp(24px, 4vw, 32px)' }}>{players[1]?.name || 'Waiting...'}</strong>
+                <b style={{ fontSize: 'clamp(40px, 6vw, 52px)' }}>{players[1]?.score || 0}</b>
+                <small style={{ color: '#64748b' }}>battle score</small>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={playerCard}>
+                <span style={{ color: '#94a3b8', fontSize: 13, fontWeight: 'bold' }}>Waiting Player 1</span>
+                <strong style={{ fontSize: 'clamp(40px, 6vw, 52px)' }}>0</strong>
+                <small style={{ color: '#64748b' }}>battle score</small>
+              </div>
+
+              <div style={vsBadgeContainer}>
+                <div style={vsBadge}>VS</div>
+              </div>
+
+              <div style={playerCard}>
+                <span style={{ color: '#94a3b8', fontSize: 13, fontWeight: 'bold' }}>Waiting Player 2</span>
+                <strong style={{ fontSize: 'clamp(40px, 6vw, 52px)' }}>0</strong>
+                <small style={{ color: '#64748b' }}>battle score</small>
+              </div>
+            </>
+          )}
+        </div>
+
+        {!joined && (
+          <button onClick={joinDuel} disabled={!connected} style={joinBtn}>
+            Enter Duel Arena
+          </button>
+        )}
+        
+        {feedback && <div style={feedbackBox}>{feedback}</div>}
+        
+        {finished && (
+          <section style={questionCard}>
+            <h2 style={{ margin: '0 0 10px 0' }}>Duel Finished</h2>
+            <p style={{ color: '#a8b3c7', marginBottom: 20 }}>Winner: <b>{leader?.name || 'No winner'}</b></p>
+            <a href="/duel" style={primaryLink}>Start New Duel</a>
+          </section>
+        )}
+        
+        {!finished && question && (
+          <section style={questionCard}>
+            <div style={progress}>
+              <span>Question {question.number}/{question.total} · {question.concept}</span>
+              <span style={timer}>{time}s</span>
+            </div>
+            <div style={bar}>
+              <span style={{ ...barFill, width: `${(time / 20) * 100}%`, transition: 'width 1s linear' }} />
+            </div>
+            
+            <h1 style={{ fontSize: 'clamp(20px, 4vw, 28px)', margin: '24px 0' }}>{question.question}</h1>
+            
+            <div style={optionGrid}>
+              {question.options.map((opt: string, index: number) => (
+                <button key={opt} onClick={() => answer(index)} style={optionBtn}>
+                  <span style={letter}>{String.fromCharCode(65 + index)}</span>
+                  <span style={{ flex: 1, wordBreak: 'break-word' }}>{opt}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+        
+        {!question && joined && (
+          <section style={questionCard}>
+            <h2 style={{ margin: '0 0 10px 0' }}>Matchmaking...</h2>
+            <p style={{ color: '#a8b3c7', margin: 0 }}>Waiting for another player to enter the arena.</p>
+          </section>
+        )}
+      </section>
+    </main>
+  );
 }
-const page: CSSProperties = { minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(239,68,68,.22), transparent 32rem), radial-gradient(circle at top right, rgba(34,211,238,.2), transparent 30rem), #070a16' };
+
+// RESTORED STYLES WITH MOBILE FIXES
+const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(239,68,68,.22), transparent 32rem), radial-gradient(circle at top right, rgba(34,211,238,.2), transparent 30rem), #070a16', boxSizing: 'border-box' };
 const nav: CSSProperties = { maxWidth: 1180, margin: '0 auto 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' };
 const brand: CSSProperties = { color: '#fff', textDecoration: 'none', fontWeight: 950, fontSize: 24 };
-const userPill: CSSProperties = { padding: '10px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)' };
-const arena: CSSProperties = { maxWidth: 1180, margin: '0 auto', padding: 26, borderRadius: 32, background: 'linear-gradient(180deg,rgba(15,23,42,.9),rgba(2,6,23,.72))', border: '1px solid rgba(148,163,184,.22)', boxShadow: '0 30px 100px rgba(0,0,0,.38)' };
+const userPill: CSSProperties = { padding: '10px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)', fontSize: 14 };
+
+const arena: CSSProperties = { maxWidth: 1180, margin: '0 auto', padding: 'clamp(16px, 4vw, 26px)', borderRadius: 32, background: 'linear-gradient(180deg,rgba(15,23,42,.9),rgba(2,6,23,.72))', border: '1px solid rgba(148,163,184,.22)', boxShadow: '0 30px 100px rgba(0,0,0,.38)', boxSizing: 'border-box' };
+
 const hud: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: 16, borderRadius: 22, background: 'rgba(2,6,23,.55)' };
-const online: CSSProperties = { color: '#22c55e', fontWeight: 900 };
-const offline: CSSProperties = { color: '#ef4444', fontWeight: 900 };
-const versus: CSSProperties = { position: 'relative', margin: '18px 0' };
-const scoreGrid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 16 };
-const playerCard: CSSProperties = { padding: 24, borderRadius: 26, background: 'rgba(15,23,42,.85)', border: '1px solid rgba(148,163,184,.18)', display: 'grid', gap: 8 };
+const online: CSSProperties = { color: '#22c55e', fontWeight: 900, fontSize: 13 };
+const offline: CSSProperties = { color: '#ef4444', fontWeight: 900, fontSize: 13 };
+
+// 👉 MOBILE FIX: Flex Container for the VS Layout
+const versusContainer: CSSProperties = { display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 16, margin: '24px 0' };
+
+const playerCard: CSSProperties = { flex: '1 1 250px', padding: 'clamp(16px, 3vw, 24px)', borderRadius: 26, background: 'rgba(15,23,42,.85)', border: '1px solid rgba(148,163,184,.18)', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 8, boxSizing: 'border-box' };
 const leaderCard: CSSProperties = { ...playerCard, border: '1px solid rgba(34,211,238,.8)', background: 'linear-gradient(180deg,rgba(34,211,238,.18),rgba(15,23,42,.86))' };
-const vsBadge: CSSProperties = { position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 64, height: 64, borderRadius: 999, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg,#f97316,#22d3ee)', color: '#020617', fontWeight: 950, boxShadow: '0 15px 50px rgba(0,0,0,.4)' };
-const joinBtn: CSSProperties = { width: '100%', padding: 16, borderRadius: 18, border: 0, background: 'linear-gradient(135deg,#f97316,#22d3ee)', color: '#020617', fontWeight: 950, cursor: 'pointer', fontSize: 18 };
-const feedbackBox: CSSProperties = { marginTop: 16, padding: 15, borderRadius: 18, background: 'rgba(34,211,238,.1)', border: '1px solid rgba(34,211,238,.24)' };
-const questionCard: CSSProperties = { marginTop: 18, padding: 26, borderRadius: 28, background: 'rgba(2,6,23,.62)', border: '1px solid rgba(148,163,184,.2)' };
-const progress: CSSProperties = { color: '#67e8f9', fontWeight: 900, marginBottom: 12, display: 'flex', justifyContent: 'space-between' };
+
+// 👉 MOBILE FIX: Separated the VS badge from absolute positioning
+const vsBadgeContainer: CSSProperties = { display: 'flex', justifyContent: 'center', flex: '0 0 auto', padding: '10px 0' };
+const vsBadge: CSSProperties = { width: 64, height: 64, borderRadius: 999, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'linear-gradient(135deg,#f97316,#22d3ee)', color: '#020617', fontWeight: 950, boxShadow: '0 15px 50px rgba(0,0,0,.4)', fontSize: 20 };
+
+const joinBtn: CSSProperties = { width: '100%', padding: 16, borderRadius: 18, border: 0, background: 'linear-gradient(135deg,#f97316,#22d3ee)', color: '#020617', fontWeight: 950, cursor: 'pointer', fontSize: 18, transition: 'transform 0.1s' };
+const feedbackBox: CSSProperties = { marginTop: 16, padding: 15, borderRadius: 18, background: 'rgba(34,211,238,.1)', border: '1px solid rgba(34,211,238,.24)', textAlign: 'center', fontWeight: 'bold' };
+
+const questionCard: CSSProperties = { marginTop: 24, padding: 'clamp(16px, 4vw, 26px)', borderRadius: 28, background: 'rgba(2,6,23,.62)', border: '1px solid rgba(148,163,184,.2)', boxSizing: 'border-box' };
+const progress: CSSProperties = { color: '#67e8f9', fontWeight: 900, marginBottom: 12, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 14 };
 const timer: CSSProperties = { color: '#fbbf24' };
 const bar: CSSProperties = { height: 8, borderRadius: 999, background: 'rgba(148,163,184,.18)', overflow: 'hidden' };
 const barFill: CSSProperties = { display: 'block', height: '100%', background: 'linear-gradient(135deg,#f97316,#22d3ee)' };
-const optionGrid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 14 };
-const optionBtn: CSSProperties = { padding: 16, borderRadius: 18, border: '1px solid rgba(148,163,184,.24)', background: 'rgba(15,23,42,.88)', color: '#eef2ff', textAlign: 'left', fontWeight: 800, cursor: 'pointer', display: 'flex', gap: 12, alignItems: 'center' };
-const letter: CSSProperties = { width: 32, height: 32, borderRadius: 10, display: 'grid', placeItems: 'center', background: 'rgba(34,211,238,.16)', color: '#67e8f9' };
-const primaryLink: CSSProperties = { display: 'inline-block', padding: '11px 15px', borderRadius: 999, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', textDecoration: 'none', fontWeight: 900 };
+
+const optionGrid: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 14 };
+const optionBtn: CSSProperties = { flex: '1 1 200px', padding: 16, borderRadius: 18, border: '1px solid rgba(148,163,184,.24)', background: 'rgba(15,23,42,.88)', color: '#eef2ff', textAlign: 'left', fontWeight: 800, cursor: 'pointer', display: 'flex', gap: 12, alignItems: 'center', boxSizing: 'border-box' };
+const letter: CSSProperties = { flex: '0 0 32px', height: 32, borderRadius: 10, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(34,211,238,.16)', color: '#67e8f9' };
+const primaryLink: CSSProperties = { display: 'inline-block', padding: '11px 20px', borderRadius: 999, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', textDecoration: 'none', fontWeight: 900 };

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 
@@ -22,8 +22,6 @@ export default function ContestProblemPage() {
   
   const [contest, setContest] = useState<any>(null);
   const [error, setError] = useState('');
-  
-  // 👉 NEW: Global Sound Preference Toggle
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   useEffect(() => {
@@ -46,172 +44,110 @@ export default function ContestProblemPage() {
   const isSolvedByTeam = useMemo(() => {
     if (!contest || !contest.standings || !contest.viewerMember || !problemId) return false;
     const myTeam = contest.viewerMember.team;
-    
     return contest.standings.some((row: any) => {
       const member = (contest.members || []).find((m: any) => m.id === row.memberId);
       const isMe = row.memberId === contest.viewerMember.id;
       const isMyTeam = myTeam && myTeam !== 'Individuals' && member?.team === myTeam;
-      
       return (isMe || isMyTeam) && (row.solvedProblems || []).includes(problemId);
     });
   }, [contest, problemId]);
 
-  // 1. Loading Authentication State
-  if (status === 'loading') {
-    return <main className="min-h-screen flex items-center justify-center bg-slate-950 text-white"><h1 className="text-2xl animate-pulse text-cyan-400 font-bold">Verifying Identity...</h1></main>;
-  }
+  if (status === 'loading') return <main style={page}><div style={centerText}><h1 style={{color: '#67e8f9'}}>Verifying Identity...</h1></div></main>;
+  if (!session) return <main style={page}><section style={gate}><h1>Access Denied</h1><p style={{ color: '#a8b3c7' }}>You must be signed in to view this problem.</p><a href="/signin" style={primaryBtn}>Sign In</a></section></main>;
+  if (error) return <main style={page}><section style={gate}><h1 style={{ color: '#f87171' }}>{error}</h1><a href="/contests" style={ghostBtn}>← Back to Contests</a></section></main>;
+  
+  // 👉 THE SKELETON LOADER
+  if (!contest || !problem) return (
+    <main style={page}>
+      <section style={{ maxWidth: 980, margin: '0 auto' }}>
+        <div style={{ ...panel, opacity: 0.6 }}>
+          <h2 style={{ color: '#67e8f9', margin: '0 0 10px 0' }}>Fetching problem data...</h2>
+          <div style={{ height: 40, background: 'rgba(255,255,255,0.05)', borderRadius: 8, marginBottom: 15 }}></div>
+          <div style={{ height: 20, width: '50%', background: 'rgba(255,255,255,0.05)', borderRadius: 8 }}></div>
+        </div>
+      </section>
+    </main>
+  );
 
-  // 2. Unauthenticated State
-  if (!session) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
-        <section className="max-w-md w-full p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl text-center">
-          <h1 className="text-3xl font-black text-white mb-2">Access Denied</h1>
-          <p className="text-slate-400 mb-8">You must be signed in to view this problem.</p>
-          <a href="/signin" className="inline-block px-8 py-3 rounded-full bg-gradient-to-r from-indigo-300 to-cyan-400 text-slate-950 font-black hover:scale-105 transition-transform">Sign In</a>
-        </section>
-      </main>
-    );
-  }
-
-  // 3. Error State
-  if (error) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
-        <section className="max-w-md w-full p-8 rounded-3xl bg-slate-900 border border-red-900/50 shadow-2xl text-center">
-          <h1 className="text-2xl font-bold text-red-400 mb-6">{error}</h1>
-          <a href="/contests" className="inline-block px-6 py-2 rounded-full border border-slate-700 text-white hover:bg-slate-800 transition-colors">← Back to Contests</a>
-        </section>
-      </main>
-    );
-  }
-
-  // 👉 4. THE SKELETON LOADER (While fetching Codeforces/DB data)
-  if (!contest || !problem) {
-    return (
-      <main className="min-h-screen p-4 md:p-8 bg-slate-950 text-white">
-        <section className="max-w-4xl mx-auto">
-          {/* Skeleton Nav */}
-          <div className="flex justify-between items-center mb-8 animate-pulse">
-            <div className="w-32 h-6 bg-slate-800 rounded"></div>
-            <div className="w-40 h-10 bg-slate-800 rounded-full"></div>
-          </div>
-          {/* Skeleton Main Panel */}
-          <div className="p-6 md:p-8 rounded-3xl border border-slate-800 bg-slate-900/50 mb-6 animate-pulse">
-            <div className="w-24 h-4 bg-slate-800 rounded mb-4"></div>
-            <div className="w-3/4 h-10 bg-slate-700 rounded mb-4"></div>
-            <div className="w-1/2 h-4 bg-slate-800 rounded mb-8"></div>
-            <div className="flex gap-4">
-              <div className="w-32 h-12 bg-slate-700 rounded-full"></div>
-              <div className="w-32 h-12 bg-slate-700 rounded-full"></div>
-            </div>
-          </div>
-        </section>
-      </main>
-    );
-  }
-
-  // Variables for rendering
   const actualTitle = problem.titleSnapshot || problem.problem?.title || `Problem ${label}`;
   const actualUrl = problem.externalUrl || problem.problem?.url;
   const actualRating = problem.problem?.rating || problem.rating || 'Practice';
   const tags = problem.problem?.tags || [];
 
   return (
-    <main className="min-h-screen p-4 md:p-8 font-sans text-indigo-50 bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,.15),transparent_36rem),#070a16]">
-      <section className="max-w-5xl mx-auto">
+    <main style={page}>
+      <section style={{ maxWidth: 980, margin: '0 auto' }}>
         
-        {/* Navigation & Settings */}
-        <nav className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-          <a href={`/contests/${id}`} className="text-cyan-400 font-black hover:text-cyan-300 transition-colors flex items-center gap-2">
-            <span>←</span> Back to Standings
-          </a>
-          
-          <div className="flex items-center gap-4 self-end md:self-auto">
-            {/* Sound Toggle Button */}
-            <button 
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              className="flex items-center gap-2 px-4 py-2 rounded-full border border-slate-700 bg-slate-900 hover:bg-slate-800 transition-colors text-sm"
-            >
+        <nav style={nav}>
+          <a href={`/contests/${id}`} style={link}>← Back to Standings</a>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <button onClick={() => setSoundEnabled(!soundEnabled)} style={soundBtn}>
               {soundEnabled ? '🔊 Sound On' : '🔇 Muted'}
             </button>
-            <div className="px-4 py-2 rounded-full bg-slate-900 border border-slate-700 text-sm font-bold">
-              {session.user?.name || session.user?.email}
-            </div>
+            <div style={pill}>{session.user?.name || session.user?.email}</div>
           </div>
         </nav>
         
-        {/* Problem Header Panel */}
-        <section className="p-6 md:p-10 rounded-3xl border border-slate-800 bg-slate-900/80 shadow-2xl backdrop-blur-sm mb-6">
-          <p className="text-cyan-400 font-black tracking-widest uppercase text-sm mb-2">Problem {label}</p>
-          <h1 className="text-3xl md:text-5xl font-black mb-4 leading-tight">{canSeeMeta ? actualTitle : `Problem ${label}`}</h1>
+        <section style={panel}>
+          <p style={eyebrow}>Problem {label}</p>
+          <h1 style={{ fontSize: 'clamp(24px, 5vw, 36px)', margin: '10px 0' }}>{canSeeMeta ? actualTitle : `Problem ${label}`}</h1>
           
-          <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400 mb-8">
-            <span className="px-3 py-1 bg-slate-950 rounded border border-slate-800">{problem.platform}</span>
+          <div style={tagContainer}>
+            <span style={tagStyle}>{problem.platform}</span>
             {canSeeMeta ? (
               <>
-                <span className="px-3 py-1 bg-indigo-950/50 text-indigo-300 rounded border border-indigo-900/50">Rating {actualRating}</span>
-                {tags.map((tag: string) => (
-                  <span key={tag} className="px-3 py-1 bg-slate-800/50 rounded">{tag}</span>
-                ))}
+                <span style={{ ...tagStyle, background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', borderColor: 'rgba(99,102,241,0.5)' }}>Rating {actualRating}</span>
+                {tags.map((tag: string) => <span key={tag} style={tagStyle}>{tag}</span>)}
               </>
-            ) : (
-              <span className="px-3 py-1 bg-slate-800/50 rounded">Metadata hidden</span>
-            )}
+            ) : <span style={tagStyle}>Metadata hidden</span>}
           </div>
           
-          {/* Solved State UI */}
           {isSolvedByTeam && (
-            <div className="mb-8 p-4 md:p-6 rounded-2xl bg-emerald-950/30 border border-emerald-900/50 text-emerald-400 flex items-start gap-4">
-              <span className="text-2xl">🎉</span>
-              <div>
-                <strong className="block text-lg mb-1">Awesome work!</strong>
-                <span className="opacity-90">Someone in your group has already solved this problem.</span>
-              </div>
+            <div style={successBox}>
+              <strong style={{ display: 'block', fontSize: 18, marginBottom: 4 }}>🎉 Awesome work!</strong>
+              Someone in your group has already solved this problem. 
             </div>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex flex-col md:flex-row gap-4">
-            {actualUrl && (
-              <a href={actualUrl} target="_blank" rel="noreferrer" className="text-center px-8 py-4 rounded-full border border-cyan-800 bg-cyan-950/30 hover:bg-cyan-900 text-cyan-100 font-bold transition-colors">
-                Open Statement ↗
-              </a>
-            )}
-            
-            {/* If player hasn't solved it, show primary submit button */}
-            {isPlayer && !isSolvedByTeam && (
-              <a href={`/submit?contestId=${id}&problemId=${problem.id}`} className="text-center px-8 py-4 rounded-full bg-gradient-to-r from-indigo-400 to-cyan-400 text-slate-950 font-black hover:scale-105 transition-transform shadow-lg shadow-cyan-900/20">
-                Code & Submit ⚡
-              </a>
-            )}
+          <div style={actions}>
+            {actualUrl && <a href={actualUrl} target="_blank" rel="noreferrer" style={primaryOutlined}>Open Statement ↗</a>}
+            {isPlayer && !isSolvedByTeam && <a href={`/submit?contestId=${id}&problemId=${problem.id}`} style={primaryBtn}>Code & Submit ⚡</a>}
           </div>
         </section>
         
-        {/* Match Details Panel */}
-        <section className="p-6 md:p-8 rounded-3xl border border-slate-800 bg-slate-900/60">
-          <h2 className="text-xl font-bold mb-6 text-white">Contest Details</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8 text-sm">
-            <div className="flex flex-col border-b border-slate-800 md:border-none pb-2 md:pb-0">
-              <span className="text-slate-500 mb-1">Contest Name</span>
-              <strong className="text-indigo-100">{contest.title}</strong>
-            </div>
-            <div className="flex flex-col border-b border-slate-800 md:border-none pb-2 md:pb-0">
-              <span className="text-slate-500 mb-1">Player Status</span>
-              <strong className="text-indigo-100">{contest.viewerMember?.name || 'Observer (Not registered)'}</strong>
-            </div>
-            <div className="flex flex-col border-b border-slate-800 md:border-none pb-2 md:pb-0">
-              <span className="text-slate-500 mb-1">Team Affiliation</span>
-              <strong className="text-indigo-100">{contest.viewerMember?.team || 'Individuals'}</strong>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-slate-500 mb-1">Problem Meta</span>
-              <strong className="text-indigo-100">{canSeeMeta ? 'Visible' : 'Hidden for fairness'}</strong>
-            </div>
+        <section style={{ ...panel, background: 'rgba(15,23,42,0.6)' }}>
+          <h2 style={{ marginTop: 0, fontSize: 20 }}>Contest Details</h2>
+          <div style={grid}>
+            <div style={gridItem}><span style={gridLabel}>Contest Name</span><strong style={{ color: '#eef2ff' }}>{contest.title}</strong></div>
+            <div style={gridItem}><span style={gridLabel}>Player Status</span><strong style={{ color: '#eef2ff' }}>{contest.viewerMember?.name || 'Observer (Not registered)'}</strong></div>
+            <div style={gridItem}><span style={gridLabel}>Team Affiliation</span><strong style={{ color: '#eef2ff' }}>{contest.viewerMember?.team || 'Individuals'}</strong></div>
+            <div style={gridItem}><span style={gridLabel}>Problem Meta</span><strong style={{ color: '#eef2ff' }}>{canSeeMeta ? 'Visible' : 'Hidden for fairness'}</strong></div>
           </div>
         </section>
-
       </section>
     </main>
   );
 }
+
+// RESTORED STYLES (Mobile Responsive)
+const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.32), transparent 34rem), #070a16', boxSizing: 'border-box' };
+const centerText: CSSProperties = { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' };
+const nav: CSSProperties = { display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 24 };
+const panel: CSSProperties = { padding: 'clamp(20px, 4vw, 32px)', borderRadius: 26, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', marginBottom: 18, boxSizing: 'border-box', boxShadow: '0 24px 70px rgba(0,0,0,.3)' };
+const gate: CSSProperties = { maxWidth: 620, margin: '15vh auto', padding: 34, borderRadius: 28, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', textAlign: 'center' };
+const link: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900 };
+const pill: CSSProperties = { padding: '10px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)' };
+const soundBtn: CSSProperties = { ...pill, background: '#0f172a', color: '#fff', cursor: 'pointer', fontSize: 14 };
+const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 900, letterSpacing: '.12em', textTransform: 'uppercase', margin: 0 };
+const tagContainer: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 24 };
+const tagStyle: CSSProperties = { padding: '6px 12px', background: 'rgba(2,6,23,0.5)', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 6, fontSize: 13, color: '#94a3b8' };
+const successBox: CSSProperties = { marginBottom: 24, padding: 16, borderRadius: 12, background: 'rgba(74, 222, 128, 0.15)', border: '1px solid rgba(74, 222, 128, 0.3)', color: '#4ade80' };
+const actions: CSSProperties = { display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 20 };
+const primaryBtn: CSSProperties = { display: 'inline-block', padding: '14px 22px', borderRadius: 999, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', textDecoration: 'none', fontWeight: 900, textAlign: 'center', flex: '1 1 auto', maxWidth: 300, cursor: 'pointer', border: 0 };
+const primaryOutlined: CSSProperties = { ...primaryBtn, background: 'rgba(34,211,238,.1)', color: '#67e8f9', border: '1px solid rgba(34,211,238,.4)' };
+const ghostBtn: CSSProperties = { padding: '10px 18px', borderRadius: 999, border: '1px solid rgba(148,163,184,.28)', background: 'transparent', color: '#dbeafe', cursor: 'pointer', textDecoration: 'none' };
+
+// 👉 MOBILE FIX: FlexWrap instead of rigid columns
+const grid: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 24, color: '#cbd5e1' };
+const gridItem: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 200px' };
+const gridLabel: CSSProperties = { fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#94a3b8' };

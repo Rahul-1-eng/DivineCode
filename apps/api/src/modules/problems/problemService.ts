@@ -1,5 +1,7 @@
 import { CheckerType, Platform, ProblemSource, ProblemVisibility, TestcaseType } from '@prisma/client';
 import { prisma } from '../../prisma/client';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 
 type TestcaseInput = {
   type?: TestcaseType;
@@ -65,8 +67,8 @@ export async function createInternalProblem(input: CreateProblemInput) {
 
   return prisma.problem.create({
     data: {
-      problemCode: slug,            // Fills the required problemCode field
-      slug: slug,                   // Fills the optional slug field
+      problemCode: slug,
+      slug: slug,
       title: title,
       description: statement,
       rating: input.difficultyRating || null,
@@ -81,8 +83,8 @@ export async function createInternalProblem(input: CreateProblemInput) {
       testcases: {
         create: (input.testcases || []).map((testcase, index) => ({
           type: testcase.type || (testcase.isPublic ? TestcaseType.SAMPLE : TestcaseType.HIDDEN),
-          input: String(testcase.input || ''),
-          expectedOutput: String(testcase.expectedOutput || ''),
+          input: testcase.input ?? '', // Explicitly fallback to empty string
+          expectedOutput: testcase.expectedOutput ?? '', // Explicitly fallback to empty string
           explanation: testcase.explanation || null,
           weight: Math.max(1, Number(testcase.weight || 1)),
           order: index,
@@ -115,4 +117,44 @@ export async function createInternalProblem(input: CreateProblemInput) {
       editorial: true
     }
   });
+}
+
+export async function syncTestCasesFromCodeforces(problemId: string, url: string) {
+  try {
+    const { data } = await axios.get(url);
+    const $ = cheerio.load(data);
+    const scrapedCases: TestcaseInput[] = [];
+
+    $('.input pre').each((i, el) => {
+      const input = $(el).text();
+      const expectedOutput = $('.output pre').eq(i).text();
+      
+      scrapedCases.push({
+        type: TestcaseType.SAMPLE,
+        input: input.trim(),
+        expectedOutput: expectedOutput.trim(),
+        isPublic: true,
+        weight: 1
+      });
+    });
+
+    return await prisma.problem.update({
+      where: { id: problemId },
+      data: {
+        testcases: {
+          create: scrapedCases.map((tc, index) => ({
+            type: tc.type || TestcaseType.SAMPLE,
+            input: tc.input ?? '', // Resolved TS error here
+            expectedOutput: tc.expectedOutput ?? '', // Resolved TS error here
+            weight: tc.weight || 1,
+            order: index,
+            isPublic: !!tc.isPublic
+          }))
+        }
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    throw new Error('Failed to scrape Codeforces test cases');
+  }
 }

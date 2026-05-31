@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
 
 export async function getServerSideProps() { return { props: {} }; }
@@ -17,8 +17,6 @@ function cleanHandle(value: string) { return value.trim().replace(/^@/, ''); }
 export default function CreateContestPage() {
   const { data: session, status } = useSession();
   const [mounted, setMounted] = useState(false);
-  
-  // 👉 NEW: Loading state for the full-screen animation
   const [isCreating, setIsCreating] = useState(false);
 
   const ownerName = session?.user?.name || session?.user?.email || '';
@@ -60,15 +58,13 @@ export default function CreateContestPage() {
         setLookupState({ ...lookupState, [index]: data.error || 'Lookup failed (Server error)' }); 
         return; 
       }
-      
       const data = await res.json();
       const next = [...problems];
       next[index] = { ...next[index], contestCode: data.contestCode || '', problemIndex: data.problemIndex || '', title: data.title, url: data.url, rating: data.rating, difficulty: data.difficulty, tags: (data.tags || []).join(',') || next[index].tags };
       setProblems(next);
       setLookupState({ ...lookupState, [index]: `Loaded ${data.title}` });
     } catch (error) {
-      console.error(error);
-      setLookupState({ ...lookupState, [index]: 'Network Error: Backend API unreachable' });
+      setLookupState({ ...lookupState, [index]: 'Network Error: API unreachable' });
     }
   }
 
@@ -90,14 +86,13 @@ export default function CreateContestPage() {
     const teamMembers = teams.flatMap((team) => team.players.filter((member) => member.name.trim() || member.email.trim() || member.codeforcesHandle.trim()).map((member) => cleanMember(member, team.name.trim() || 'Group')));
     const cleanedMembers = mode === 'single' ? soloMembers : teamMembers;
     
-    if (cleanedMembers.length === 0) return alert('Add at least one player. The owner manages the contest and is not added as a player automatically.');
+    if (cleanedMembers.length === 0) return alert('Add at least one player.');
     
     const invalid = hasCfProblems ? cleanedMembers.find((member) => !member.codeforcesHandle || member.codeforcesHandle.includes(' ')) : null;
     if (invalid) return alert(`Invalid Codeforces handle for ${invalid.name}. Use the exact CF handle, without spaces.`);
     
     const contestProblems = problems.map((p) => ({ title: p.title, platform: p.platform, code: p.code || `${p.contestCode}${p.problemIndex}`, contestCode: p.contestCode, problemIndex: p.problemIndex, url: p.url, rating: p.rating, difficulty: p.difficulty, tags: p.tags })).filter((p) => p.url);
     
-    // 👉 TRIGGER LOADING OVERLAY
     setIsCreating(true);
 
     try {
@@ -110,143 +105,121 @@ export default function CreateContestPage() {
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         alert(data.error || 'Could not create contest');
-        setIsCreating(false); // Hide overlay on error
+        setIsCreating(false);
         return;
       }
-      
       const data = await res.json();
       window.location.href = `/contests/${data.id}`;
     } catch (error) {
-      console.error(error);
       alert('Network Error: Could not connect to the backend API.');
-      setIsCreating(false); // Hide overlay on error
+      setIsCreating(false);
     }
   }
 
   if (!mounted) return null;
-  if (status === 'loading') return <main className="min-h-screen flex items-center justify-center bg-slate-950 text-white"><h1 className="text-2xl animate-pulse">Checking account...</h1></main>;
-  if (!session) return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-950 text-indigo-50 p-4">
-      <section className="max-w-md w-full p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl text-center">
-        <h1 className="text-3xl font-bold mb-2">Sign in required</h1>
-        <p className="text-slate-400 mb-6">Create mashups from your account.</p>
-        <a href="/signin" className="inline-block px-6 py-3 rounded-full bg-gradient-to-r from-indigo-300 to-cyan-400 text-slate-950 font-bold hover:scale-105 transition-transform">Sign in with Google</a>
-      </section>
-    </main>
-  );
+  if (status === 'loading') return <main style={page}><div style={{textAlign:'center', marginTop:'20vh'}}><h1 style={{color: '#67e8f9'}}>Checking account...</h1></div></main>;
+  if (!session) return <main style={page}><section style={gate}><h1>Sign in required</h1><p style={{ color: '#a8b3c7' }}>Create mashups from your account.</p><a href="/signin" style={primaryLink}>Sign in with Google</a></section></main>;
 
   return (
-    <main className="min-h-screen p-4 md:p-8 font-sans text-indigo-50 bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,.15),transparent_36rem),radial-gradient(circle_at_bottom_right,rgba(34,211,238,.1),transparent_30rem)] bg-slate-950">
+    <main style={page}>
       
       {/* 👉 THE LOADING OVERLAY */}
       {isCreating && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
-          <div className="flex flex-col items-center p-8 bg-slate-900 border border-cyan-900/50 rounded-3xl shadow-2xl animate-pulse">
-            <div className="w-16 h-16 mb-6 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
-            <h2 className="text-2xl font-bold text-white mb-2">Forging Mashup...</h2>
-            <p className="text-cyan-200">Syncing Codeforces data & validating handles</p>
+        <div style={overlay}>
+          <div style={overlayModal}>
+            <h2 style={{ color: '#fff', margin: '0 0 10px 0' }}>Forging Mashup...</h2>
+            <p style={{ color: '#67e8f9', margin: 0, fontSize: 14 }}>Syncing Codeforces data & validating handles</p>
           </div>
         </div>
       )}
 
-      <section className="max-w-6xl mx-auto">
-        <a href="/" className="text-cyan-400 font-black hover:text-cyan-300 transition-colors">← DivineCode Home</a>
+      <section style={{ maxWidth: 1180, margin: '0 auto' }}>
+        <a href="/" style={topLink}>← DivineCode Home</a>
         
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 my-8">
-          <div>
-            <p className="text-cyan-400 font-black tracking-widest uppercase text-sm mb-2">Team mashup builder</p>
-            <h1 className="text-4xl md:text-5xl font-black m-0 leading-tight">Create controlled contests.</h1>
-            <p className="text-slate-400 mt-2 max-w-xl">The owner manages the room. Players are added separately so standings never count the creator by accident.</p>
+        <div style={hero}>
+          <div style={{ flex: '1 1 400px' }}>
+            <p style={eyebrow}>Team mashup builder</p>
+            <h1 style={{ fontSize: 'clamp(32px, 5vw, 52px)', margin: '10px 0' }}>Create controlled contests.</h1>
+            <p style={{ color: '#a8b3c7' }}>The owner manages the room. Players are added separately so standings never count the creator by accident.</p>
           </div>
-          <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-700/50 flex flex-col gap-1 w-full md:w-auto">
-            <span className="text-sm text-slate-400">Creator/admin</span>
-            <strong className="text-xl">{ownerName}</strong>
-            <small className="text-slate-500">Not a player unless added below.</small>
+          <div style={ownerCard}>
+            <span style={{ fontSize: 13, color: '#67e8f9', textTransform: 'uppercase' }}>Creator/admin</span>
+            <strong style={{ fontSize: 20 }}>{ownerName}</strong>
+            <small style={{ color: '#94a3b8' }}>Not a player unless added below.</small>
           </div>
         </div>
         
-        <div className="p-4 md:p-8 rounded-3xl border border-slate-700/50 bg-slate-900/80 shadow-2xl">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <button onClick={() => setMode('single')} className={`p-5 rounded-2xl border text-left transition-all ${mode === 'single' ? 'border-cyan-400 bg-cyan-950/30' : 'border-slate-700 bg-slate-950/40 hover:bg-slate-800'}`}>
-              <strong className="block text-lg mb-1">Solo Contest</strong>
-              <span className="text-sm text-slate-400">One selected player participates.</span>
-            </button>
-            <button onClick={() => setMode('group')} className={`p-5 rounded-2xl border text-left transition-all ${mode === 'group' ? 'border-cyan-400 bg-cyan-950/30' : 'border-slate-700 bg-slate-950/40 hover:bg-slate-800'}`}>
-              <strong className="block text-lg mb-1">Team Mashup</strong>
-              <span className="text-sm text-slate-400">Group vs group with player handles.</span>
-            </button>
+        <div style={shell}>
+          <div style={modeGrid}>
+            <button onClick={() => setMode('single')} style={mode === 'single' ? activeMode : modeBtn}><strong>Solo Contest</strong><span style={{ fontSize: 13, color: '#94a3b8' }}>One selected player participates.</span></button>
+            <button onClick={() => setMode('group')} style={mode === 'group' ? activeMode : modeBtn}><strong>Team Mashup</strong><span style={{ fontSize: 13, color: '#94a3b8' }}>Group vs group with player handles.</span></button>
           </div>
           
-          <label className="block text-sm font-bold mb-2">Contest Title</label>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full p-3 mb-6 rounded-xl border border-slate-700 bg-slate-950/50 text-indigo-50 outline-none focus:border-cyan-400 transition-colors" />
+          <label style={{ fontWeight: 'bold' }}>Contest Title</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
           
-          <label className="block text-sm font-bold mb-2">Duration in minutes</label>
-          <input type="number" value={duration} onChange={(e) => setDuration(Number(e.target.value))} className="w-full md:w-48 p-3 mb-8 rounded-xl border border-slate-700 bg-slate-950/50 text-indigo-50 outline-none focus:border-cyan-400 transition-colors" />
+          <label style={{ fontWeight: 'bold' }}>Duration in minutes</label>
+          <input type="number" value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={{ ...inputStyle, maxWidth: 180 }} />
           
-          <h2 className="text-2xl font-bold mb-4">Players <span className="text-cyan-400">({cleanMemberCount})</span></h2>
-          <div className="p-4 rounded-xl bg-cyan-950/30 border border-cyan-900/50 mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <strong className="text-cyan-400">Owner display:</strong> {ownerName}
-            </div>
-            <input value={ownerCfHandle} onChange={(e) => setOwnerCfHandle(e.target.value)} placeholder="Owner Codeforces handle (optional)" className="w-full md:w-64 p-2 rounded-lg border border-slate-700 bg-slate-900 text-sm outline-none focus:border-cyan-400" />
+          <h2 style={{ marginTop: 24, marginBottom: 12 }}>Players <span style={{ color: '#67e8f9' }}>({cleanMemberCount})</span></h2>
+          <div style={lockedOwner}>
+            <strong style={{ color: '#67e8f9' }}>Owner display:</strong> {ownerName}
+            <input value={ownerCfHandle} onChange={(e) => setOwnerCfHandle(e.target.value)} placeholder="Owner Codeforces handle, optional" style={{ ...smallInput, marginTop: 10 }} />
           </div>
           
           {mode === 'single' && (
-            <section className="p-4 md:p-6 rounded-2xl bg-slate-950/40 border border-slate-800 mb-6">
-              <h2 className="text-lg font-bold mb-4">Solo player</h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <input value={soloPlayer.name} onChange={(e) => setSoloPlayer({ ...soloPlayer, name: e.target.value })} placeholder="Player name" className="w-full p-3 rounded-xl border border-slate-700 bg-slate-900 text-sm outline-none focus:border-cyan-400" />
-                <input value={soloPlayer.email} onChange={(e) => setSoloPlayer({ ...soloPlayer, email: e.target.value })} placeholder="Account email (optional)" className="w-full p-3 rounded-xl border border-slate-700 bg-slate-900 text-sm outline-none focus:border-cyan-400" />
-                <input value={soloPlayer.codeforcesHandle} onChange={(e) => setSoloPlayer({ ...soloPlayer, codeforcesHandle: e.target.value })} placeholder="Exact Codeforces handle" className="w-full p-3 rounded-xl border border-slate-700 bg-slate-900 text-sm outline-none focus:border-cyan-400" />
+            <section style={teamCard}>
+              <h2 style={{ margin: '0 0 16px 0', fontSize: 18 }}>Solo player</h2>
+              <div style={memberRow}>
+                <input value={soloPlayer.name} onChange={(e) => setSoloPlayer({ ...soloPlayer, name: e.target.value })} placeholder="Player name" style={smallInput} />
+                <input value={soloPlayer.email} onChange={(e) => setSoloPlayer({ ...soloPlayer, email: e.target.value })} placeholder="Player account email, optional" style={smallInput} />
+                <input value={soloPlayer.codeforcesHandle} onChange={(e) => setSoloPlayer({ ...soloPlayer, codeforcesHandle: e.target.value })} placeholder="Exact Codeforces handle" style={smallInput} />
               </div>
             </section>
           )}
           
           {mode === 'group' && (
             <>
-              <h2 className="text-lg font-bold mb-4">Teams / Groups</h2>
+              <h2 style={{ margin: '0 0 16px 0', fontSize: 18 }}>Teams / Groups</h2>
               {teams.map((team, ti) => (
-                <section key={ti} className="p-4 md:p-6 rounded-2xl bg-slate-950/40 border border-slate-800 mb-4">
-                  <input value={team.name} onChange={(e) => updateTeam(ti, e.target.value)} placeholder="Group name" className="w-full p-3 mb-4 rounded-xl border border-slate-700 bg-slate-900 font-bold outline-none focus:border-cyan-400" />
+                <section key={ti} style={teamCard}>
+                  <input value={team.name} onChange={(e) => updateTeam(ti, e.target.value)} placeholder="Group name" style={{ ...inputStyle, fontWeight: 'bold' }} />
                   {team.players.map((member, pi) => (
-                    <div key={pi} className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-                      <input value={member.name} onChange={(e) => updatePlayer(ti, pi, 'name', e.target.value)} placeholder="Player name" className="w-full p-3 rounded-xl border border-slate-700 bg-slate-900 text-sm outline-none focus:border-cyan-400" />
-                      <input value={member.email} onChange={(e) => updatePlayer(ti, pi, 'email', e.target.value)} placeholder="Account email (optional)" className="w-full p-3 rounded-xl border border-slate-700 bg-slate-900 text-sm outline-none focus:border-cyan-400" />
-                      <input value={member.codeforcesHandle} onChange={(e) => updatePlayer(ti, pi, 'codeforcesHandle', e.target.value)} placeholder="Exact Codeforces handle" className="w-full p-3 rounded-xl border border-slate-700 bg-slate-900 text-sm outline-none focus:border-cyan-400" />
+                    <div key={pi} style={memberRow}>
+                      <input value={member.name} onChange={(e) => updatePlayer(ti, pi, 'name', e.target.value)} placeholder="Player name" style={smallInput} />
+                      <input value={member.email} onChange={(e) => updatePlayer(ti, pi, 'email', e.target.value)} placeholder="Player account email, optional" style={smallInput} />
+                      <input value={member.codeforcesHandle} onChange={(e) => updatePlayer(ti, pi, 'codeforcesHandle', e.target.value)} placeholder="Exact Codeforces handle" style={smallInput} />
                     </div>
                   ))}
-                  <button onClick={() => addPlayer(ti)} className="px-4 py-2 mt-2 rounded-full border border-slate-700 bg-slate-800 hover:bg-slate-700 text-sm text-cyan-100 transition-colors">+ Add player to {team.name}</button>
+                  <button onClick={() => addPlayer(ti)} style={ghostBtn}>+ Add player to {team.name}</button>
                 </section>
               ))}
-              <button onClick={addTeam} className="px-4 py-2 mt-2 rounded-full border border-slate-700 bg-slate-800 hover:bg-slate-700 text-sm text-cyan-100 transition-colors">+ Add group/team</button>
+              <button onClick={addTeam} style={ghostBtn}>+ Add group/team</button>
             </>
           )}
           
-          <h2 className="text-2xl font-bold mt-10 mb-4">Problems</h2>
-          <div className="grid gap-4">
+          <h2 style={{ marginTop: 40, marginBottom: 16 }}>Problems</h2>
+          <div style={{ display: 'grid', gap: 14 }}>
             {problems.map((p, i) => (
-              <div key={i} className="p-4 md:p-5 rounded-2xl bg-slate-950/50 border border-slate-700 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-                <div className="md:col-span-1 flex justify-between md:block">
-                  <strong className="text-cyan-400">#{String.fromCharCode(65 + i)}</strong>
-                  <span className="md:hidden text-slate-500 text-sm">Problem</span>
-                </div>
-                <select value={p.platform} onChange={(e) => updateProblem(i, 'platform', e.target.value)} className="md:col-span-2 w-full p-2.5 rounded-lg border border-slate-700 bg-slate-900 text-sm outline-none focus:border-cyan-400">
+              <div key={i} style={problemCard}>
+                <strong style={{ color: '#67e8f9', width: 40 }}>#{String.fromCharCode(65 + i)}</strong>
+                <select value={p.platform} onChange={(e) => updateProblem(i, 'platform', e.target.value)} style={{ ...smallInput, flex: '1 1 120px' }}>
                   <option>Codeforces</option><option>LeetCode</option><option>AtCoder</option><option>CodeChef</option>
                 </select>
-                <input value={p.code} onChange={(e) => updateProblem(i, 'code', e.target.value)} placeholder="Code (e.g. 1805A)" className="md:col-span-2 w-full p-2.5 rounded-lg border border-slate-700 bg-slate-900 text-sm outline-none focus:border-cyan-400" />
-                <button onClick={() => lookupProblem(i)} className="md:col-span-2 w-full p-2.5 rounded-lg border border-cyan-800 bg-cyan-900/50 hover:bg-cyan-800 text-sm text-cyan-100 transition-colors">Lookup</button>
-                <input value={p.title} onChange={(e) => updateProblem(i, 'title', e.target.value)} placeholder="Title" className="md:col-span-3 w-full p-2.5 rounded-lg border border-slate-700 bg-slate-900 text-sm outline-none focus:border-cyan-400" />
-                <input value={p.rating || ''} readOnly placeholder="Rating" className="md:col-span-2 w-full p-2.5 rounded-lg border border-slate-700 bg-slate-900 text-sm outline-none" />
-                <input value={p.url} onChange={(e) => updateProblem(i, 'url', e.target.value)} placeholder="URL" className="md:col-span-12 w-full p-2.5 rounded-lg border border-slate-700 bg-slate-900 text-sm outline-none focus:border-cyan-400" />
-                <small className="md:col-span-12 text-slate-500 mt-1">{lookupState[i] || 'Lookup fills title, URL, rating, contest/index. Codeforces additions are rejected if any player already solved them.'}</small>
+                <input value={p.code} onChange={(e) => updateProblem(i, 'code', e.target.value)} placeholder="Code (e.g. 1805A)" style={{ ...smallInput, flex: '1 1 120px' }} />
+                <button onClick={() => lookupProblem(i)} style={{ ...ghostBtn, flex: '1 1 100px' }}>Lookup</button>
+                <input value={p.title} onChange={(e) => updateProblem(i, 'title', e.target.value)} placeholder="Title" style={{ ...smallInput, flex: '2 1 200px' }} />
+                <input value={p.rating || ''} readOnly placeholder="Rating" style={{ ...smallInput, flex: '1 1 80px' }} />
+                <input value={p.url} onChange={(e) => updateProblem(i, 'url', e.target.value)} placeholder="URL" style={{ ...smallInput, width: '100%', flex: '1 1 100%' }} />
+                <small style={{ color: '#94a3b8', width: '100%', marginTop: 4 }}>{lookupState[i] || 'Lookup fills title, URL, rating, contest/index. Codeforces additions are rejected if any player already solved them.'}</small>
               </div>
             ))}
           </div>
           
-          <button onClick={addProblem} className="px-4 py-2 mt-4 rounded-full border border-slate-700 bg-slate-800 hover:bg-slate-700 text-sm text-cyan-100 transition-colors">+ Add problem</button>
+          <button onClick={addProblem} style={{ ...ghostBtn, marginTop: 14 }}>+ Add problem</button>
           
-          <div className="mt-10 border-t border-slate-800 pt-8 flex justify-end">
-            <button onClick={createContest} disabled={isCreating} className="w-full md:w-auto px-8 py-4 rounded-full bg-gradient-to-r from-indigo-300 to-cyan-400 text-slate-950 font-black text-lg hover:scale-105 transition-transform disabled:opacity-50 disabled:scale-100 shadow-lg shadow-cyan-900/20">
+          <div style={{ marginTop: 40, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 24, textAlign: 'right' }}>
+            <button onClick={createContest} disabled={isCreating} style={primaryBtn}>
               Create {mode === 'single' ? 'Solo Contest' : 'Team Mashup'}
             </button>
           </div>
@@ -255,3 +228,30 @@ export default function CreateContestPage() {
     </main>
   );
 }
+
+// RESTORED STYLES (Mobile Responsive)
+const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.35), transparent 36rem), radial-gradient(circle at bottom right, rgba(34,211,238,.18), transparent 30rem), #070a16', boxSizing: 'border-box' };
+const gate: CSSProperties = { maxWidth: 620, margin: '15vh auto', padding: 34, borderRadius: 28, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', boxShadow: '0 24px 70px rgba(0,0,0,.3)', textAlign: 'center' };
+const topLink: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900 };
+const primaryLink: CSSProperties = { display: 'inline-block', padding: '12px 17px', borderRadius: 999, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', textDecoration: 'none', fontWeight: 900 };
+const hero: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24, flexWrap: 'wrap', margin: '24px 0 32px 0' };
+const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 900, letterSpacing: '.14em', textTransform: 'uppercase', margin: 0 };
+const ownerCard: CSSProperties = { padding: 18, borderRadius: 22, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)', display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 250px', maxWidth: 400 };
+const shell: CSSProperties = { padding: 'clamp(20px, 4vw, 32px)', borderRadius: 30, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', boxShadow: '0 28px 90px rgba(0,0,0,.34)', boxSizing: 'border-box' };
+const modeGrid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 14, marginBottom: 26 };
+const modeBtn: CSSProperties = { padding: 20, borderRadius: 22, border: '1px solid rgba(148,163,184,.24)', background: 'rgba(2,6,23,.45)', color: '#e2e8f0', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 8, cursor: 'pointer' };
+const activeMode: CSSProperties = { ...modeBtn, border: '1px solid rgba(34,211,238,.75)', background: 'rgba(34,211,238,.12)' };
+const lockedOwner: CSSProperties = { padding: 18, borderRadius: 16, background: 'rgba(34,211,238,.08)', border: '1px solid rgba(34,211,238,.25)', marginBottom: 20 };
+const inputStyle: CSSProperties = { width: '100%', padding: 14, margin: '8px 0 16px', border: '1px solid rgba(148,163,184,.25)', borderRadius: 14, background: 'rgba(2,6,23,.55)', color: '#eef2ff', outline: 'none', boxSizing: 'border-box' };
+const smallInput: CSSProperties = { width: '100%', padding: 12, border: '1px solid rgba(148,163,184,.25)', borderRadius: 12, background: 'rgba(15,23,42,.8)', color: '#eef2ff', outline: 'none', boxSizing: 'border-box' };
+const memberRow: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12, marginBottom: 12 };
+const teamCard: CSSProperties = { padding: 'clamp(16px, 3vw, 24px)', borderRadius: 20, background: 'rgba(2,6,23,.45)', border: '1px solid rgba(148,163,184,.18)', marginBottom: 16, boxSizing: 'border-box' };
+
+// 👉 MOBILE FIX: Converted problem card to a flex-wrap container so inputs stack on phones
+const problemCard: CSSProperties = { padding: 16, borderRadius: 20, background: 'rgba(2,6,23,.5)', border: '1px solid rgba(148,163,184,.16)', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', boxSizing: 'border-box' };
+
+const ghostBtn: CSSProperties = { padding: '11px 18px', borderRadius: 999, border: '1px solid rgba(148,163,184,.28)', background: 'rgba(15,23,42,.72)', color: '#dbeafe', cursor: 'pointer', fontWeight: 'bold' };
+const primaryBtn: CSSProperties = { padding: '16px 28px', borderRadius: 999, border: 0, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', fontWeight: 900, cursor: 'pointer', fontSize: 16 };
+
+const overlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 50 };
+const overlayModal: CSSProperties = { padding: 30, backgroundColor: '#0f172a', border: '1px solid rgba(103,232,249,0.3)', borderRadius: 20, textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.5)' };
