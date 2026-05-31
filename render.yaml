@@ -1,16 +1,6 @@
 services:
-  # --- NEW: PISTON COMPILER SERVICE ---
-  - type: web
-    name: divinecode-piston
-    image: engineeraman/piston  # <-- REMOVED docker.io/
-    plan: starter
-    port: 2000
-    envVars:
-      - key: PISTON_RUN_DIR
-        value: /tmp
-      - key: ISOLATE_ROOT
-        value: /tmp
-  
+  # (The Piston block has been completely deleted)
+
   # --- EXISTING SERVICES ---
   - type: keyvalue
     name: divinecode-redis
@@ -39,9 +29,13 @@ services:
           type: keyvalue
           name: divinecode-redis
           property: connectionString
-      # --- UPDATED: Connects to internal Piston Service ---
+      # --- UPDATED: Connects to Cloud Judge0 via RapidAPI ---
       - key: JUDGE0_URL
-        value: http://divinecode-piston:2000/api/v2/execute
+        value: https://judge0-ce.p.rapidapi.com
+      - key: RAPIDAPI_HOST
+        value: judge0-ce.p.rapidapi.com
+      - key: RAPIDAPI_KEY
+        sync: false # Set this securely inside the Render Dashboard later!
       - key: JUDGE_WORKER_SECRET
         generateValue: true
 
@@ -65,9 +59,13 @@ services:
           type: keyvalue
           name: divinecode-redis
           property: connectionString
-      # --- UPDATED: Connects to internal Piston Service ---
+      # --- UPDATED: Connects to Cloud Judge0 via RapidAPI ---
       - key: JUDGE0_URL
-        value: http://divinecode-piston:2000/api/v2/execute
+        value: https://judge0-ce.p.rapidapi.com
+      - key: RAPIDAPI_HOST
+        value: judge0-ce.p.rapidapi.com
+      - key: RAPIDAPI_KEY
+        sync: false # Set this securely inside the Render Dashboard later!
       - key: JUDGE_WORKER_SECRET
         generateValue: true
 
