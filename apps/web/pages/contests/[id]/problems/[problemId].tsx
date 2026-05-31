@@ -37,7 +37,7 @@ export default function ContestProblemPage() {
   const problem = problemIndex >= 0 ? contest.problems[problemIndex] : null;
   const label = problemIndex >= 0 ? String.fromCharCode(65 + problemIndex) : '';
   const canSeeMeta = Boolean(contest?.visibility?.canSeeProblemMeta);
-  const isPlayer = Boolean(contest?.viewerMember);
+  const isPlayer = Boolean(contest?.viewerMember || contest?.canManage);
 
   const isSolvedByTeam = useMemo(() => {
     if (!contest || !contest.standings || !contest.viewerMember || !problemId) return false;

@@ -88,7 +88,7 @@ export default function SubmitPage() {
     if (!session?.user?.email) return alert('Sign in first');
     if (!contest || !problem) return alert('Contest problem not loaded');
     const member = contest.viewerMember;
-    if (!member) return alert('Only registered contest players can submit.');
+    if (!member && !contest?.canManage) return alert('Only registered contest players can submit.');
     if (isCodeforces) return alert('For Codeforces problems, submit on Codeforces first, then ask the owner to run Codeforces sync.');
     setSubmitting(true);
     setVerdict(null);
@@ -145,7 +145,7 @@ export default function SubmitPage() {
             {submitting ? 'Submitting...' : isCodeforces ? 'Store as Pending Verification' : 'Final Submit to Judge'}
           </button>
           
-          {!contest?.viewerMember && <p style={{ color: '#fca5a5' }}>Only registered players can submit.</p>}
+          {!contest?.viewerMember && !contest?.canManage && <p style={{ color: '#fca5a5' }}>Only registered players can submit.</p>}
           {verdict && <div style={verdictBox}><h2>{verdict.verdict}</h2><p>{verdict.message}</p></div>}
         </aside>
 

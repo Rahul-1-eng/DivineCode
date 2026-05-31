@@ -69,7 +69,21 @@ function getViewerEmail(req: any) { return String(req.headers?.['x-user-email'] 
 function getViewerName(req: any) { return String(req.headers?.['x-user-name'] || req.query?.viewerName || req.body?.viewerName || req.body?.userName || req.body?.ownerName || '').trim(); }
 function identitiesMatch(left?: string, right?: string) { const a = normalizeIdentity(left); const b = normalizeIdentity(right); return Boolean(a && b && a === b); }
 function isContestOwner(contest: Contest, viewerEmail?: string, viewerName?: string) { return identitiesMatch(contest.ownerEmail, viewerEmail) || identitiesMatch(contest.ownerName, viewerName); }
-function findViewerMember(contest: Contest, viewerEmail?: string, viewerName?: string) { return contest.members.find((member) => identitiesMatch(member.email, viewerEmail) || identitiesMatch(member.name, viewerName) || identitiesMatch(member.name, viewerEmail) || identitiesMatch(member.email, viewerName) || identitiesMatch(member.codeforcesHandle, viewerName)); }
+function findViewerMember(contest: Contest, viewerEmail?: string, viewerName?: string) { 
+  // 1. Prioritize Codeforces handle match (Even if email/name are different)
+  const handleMatch = contest.members.find((member) => 
+    identitiesMatch(member.codeforcesHandle, viewerName)
+  );
+  if (handleMatch) return handleMatch;
+
+  // 2. Fallback to Email/Name matches
+  return contest.members.find((member) => 
+    identitiesMatch(member.email, viewerEmail) || 
+    identitiesMatch(member.name, viewerName) || 
+    identitiesMatch(member.name, viewerEmail) || 
+    identitiesMatch(member.email, viewerName)
+  ); 
+}
 function contestHasEnded(contest: Contest) { return Date.now() >= new Date(contest.startTime).getTime() + contest.durationMinutes * 60000; }
 function sanitizeProblemForViewer(problem: ContestProblem, canSeeMeta: boolean) { if (canSeeMeta) return problem; const { rating, difficulty, tags, stdin, expectedOutput, sourceCode, contestCode, problemIndex, ...safeProblem } = problem; return { ...safeProblem, tags: [] }; }
 function sanitizeContestForViewer(contest: Contest, req: any) { const viewerEmail = getViewerEmail(req); const viewerName = getViewerName(req); const canManage = isContestOwner(contest, viewerEmail, viewerName); const viewerMember = findViewerMember(contest, viewerEmail, viewerName); const canSeeProblemMeta = canManage || contestHasEnded(contest); return { ...contest, ownerEmail: canManage ? contest.ownerEmail : undefined, canManage, viewerMember: viewerMember || null, visibility: { canSeeProblemMeta, canViewAllSubmissions: canManage, submissionScope: canManage ? 'all' : viewerMember?.team && viewerMember.team !== 'Individuals' ? 'team' : viewerMember ? 'own' : 'none' }, problems: contest.problems.map((problem) => sanitizeProblemForViewer(problem, canSeeProblemMeta)), questions: canManage ? contest.questions : [] }; }

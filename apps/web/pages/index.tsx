@@ -4,7 +4,8 @@ const features = [
   { title: 'Create Mashup', href: '/contests/create', icon: '👥', text: 'Smart problem lookup, CF handles, fairness checks.' },
   { title: 'Duel Arena', href: '/duel', icon: '⚔️', text: 'Real-time MCQ battles with live scoring.' },
   { title: 'Interview Arena', href: '/interview', icon: '🎓', text: 'Rated CSE MCQs by topic and difficulty.' },
-  { title: 'Submission Judge', href: '/contests', icon: '⚙️', text: 'Judge0-ready for custom problems, CF sync for external problems.' }
+  // 👉 UPDATED: Now points to the standalone '/judge' workspace
+  { title: 'Submission Judge', href: '/judge', icon: '⚙️', text: 'Judge0-ready for custom problems, CF sync for external problems.' }
 ];
 
 export default function Home() {
