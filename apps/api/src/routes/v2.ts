@@ -6,11 +6,10 @@ import { canManageContest, findViewerParticipant, sanitizeContestForViewer, sani
 import { addContestProblemV2, createContestV2, deleteContestV2, extendContestV2, listContestsV2, loadContestForViewer, removeContestProblemV2, replaceContestProblemV2, updateContestSettingsV2, getContestSubmissionsV2 } from '../modules/contests/contestService';
 import { createQueuedContestSubmission } from '../modules/contests/submissionService';
 import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncService';
-import { judgeQueuedSubmission } from '../modules/judge/judge0Service';
 import { createInternalProblem } from '../modules/problems/problemService';
 import { recomputeContestStandings } from '../modules/standings/standingService';
 import { recommendationBand } from '../modules/ratings/recommendationMath';
-
+import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
 // 👉 IMPORTS THE SUBMISSION ROUTER
 import { submissionRouter } from './submissionRoutes';
 
@@ -76,6 +75,12 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ ok: true, sourceOfTruth: 'postgres-prisma' });
   }));
 
+  router.post('/execute', asyncRoute(async (req, res) => {
+    const { sourceCode, language, input, expectedOutput } = req.body;
+    const result = await executeSubmission(sourceCode, language, input || '', expectedOutput);
+    res.json(result);
+  }));
+  
   router.post('/problems', asyncRoute(async (req, res) => {
     const problem = await createInternalProblem(req.body);
     res.status(201).json(problem);

@@ -198,20 +198,22 @@ export async function judgeQueuedSubmission(submissionId: string) {
 }
 
 // ---------------------------------------------------------
-// 2. LIVE EDITOR PATH
+// 2. LIVE EDITOR PATH (UPDATED FOR CPH-STYLE)
 // ---------------------------------------------------------
 interface ExecutionResult {
-  verdict: 'ACCEPTED' | 'WRONG_ANSWER' | 'TIME_LIMIT_EXCEEDED' | 'RUNTIME_ERROR' | 'COMPILATION_ERROR';
+  verdict: 'ACCEPTED' | 'WRONG_ANSWER' | 'TIME_LIMIT_EXCEEDED' | 'RUNTIME_ERROR' | 'COMPILATION_ERROR' | 'EXECUTED';
   runtimeMs?: number;
   memoryKb?: number;
   compileError?: string;
+  stdout?: string;
+  stderr?: string;
 }
 
 export async function executeSubmission(
   sourceCode: string,
   language: string,
   input: string,
-  expectedOutput: string
+  expectedOutput?: string
 ): Promise<ExecutionResult> {
   const mappedLang = languageMap[language];
   if (!mappedLang) throw new Error(`Unsupported language: ${language}`);
@@ -233,23 +235,30 @@ export async function executeSubmission(
 
     // 2. Runtime / Timeout
     if (data.run && data.run.signal === 'SIGKILL') {
-      return { verdict: 'TIME_LIMIT_EXCEEDED' };
+      return { verdict: 'TIME_LIMIT_EXCEEDED', stderr: 'Execution timed out (SIGKILL)' };
     }
     if (data.run && data.run.code !== 0) {
-      return { verdict: 'RUNTIME_ERROR' };
+      return { verdict: 'RUNTIME_ERROR', stderr: data.run.stderr || 'Runtime error occurred', stdout: data.run.stdout };
     }
 
-    // 3. Output comparison (Exact match)
+    // 3. Output comparison (If expected output is provided)
     const actual = String(data.run?.stdout || '').trim().replace(/\s+/g, ' ');
-    const expected = String(expectedOutput || '').trim().replace(/\s+/g, ' ');
-
-    if (actual === expected) {
-      return { verdict: 'ACCEPTED', runtimeMs: Math.floor(Math.random() * 20) + 10, memoryKb: 2048 };
-    } else {
-      return { verdict: 'WRONG_ANSWER' };
+    
+    let verdict: ExecutionResult['verdict'] = 'EXECUTED';
+    if (expectedOutput) {
+      const expected = String(expectedOutput || '').trim().replace(/\s+/g, ' ');
+      verdict = actual === expected ? 'ACCEPTED' : 'WRONG_ANSWER';
     }
+
+    return { 
+      verdict, 
+      runtimeMs: 15, // Mocked for free Piston API
+      memoryKb: 2048,
+      stdout: data.run?.stdout,
+      stderr: data.run?.stderr
+    };
   } catch (error) {
     console.error('Piston connection error:', error);
-    return { verdict: 'RUNTIME_ERROR' };
+    return { verdict: 'RUNTIME_ERROR', stderr: 'Could not connect to execution engine.' };
   }
 }
