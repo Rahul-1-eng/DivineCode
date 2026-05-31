@@ -1,20 +1,19 @@
 import { CheckerType, SubmissionStatus, Verdict } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
-import axios from 'axios';
 
-// 👉 BYPASSING JUDGE0: We are using the 100% Free Piston API (No Keys Required)
-const PISTON_URL = 'https://emkc.org/api/v2/piston/execute';
+// 👉 BYPASSING PISTON: We are using the 100% Free Wandbox API (No Keys Required)
+const WANDBOX_URL = 'https://wandbox.org/api/compile.json';
 
 type JudgeLanguage = 'cpp' | 'c' | 'java' | 'python' | 'javascript';
 
-// Map your frontend languages to Piston's language strings
+// Map your frontend languages to Wandbox's specific compiler strings
 const languageMap: Record<string, string> = {
-  cpp: 'c++',
-  c: 'c',
-  java: 'java',
-  python: 'python',
-  javascript: 'javascript'
+  cpp: 'gcc-head',
+  c: 'gcc-head-c',
+  java: 'openjdk-head',
+  python: 'cpython-head',
+  javascript: 'nodejs-head'
 };
 
 type Judge0Result = {
@@ -60,7 +59,7 @@ function aggregateVerdict(results: { verdict: Verdict }[]) {
 }
 
 // ---------------------------------------------------------
-// 1. CONTEST SUBMISSION PATH
+// 1. CONTEST SUBMISSION PATH (WANDBOX)
 // ---------------------------------------------------------
 async function submitToJudge0(input: {
   sourceCode: string;
@@ -68,39 +67,40 @@ async function submitToJudge0(input: {
   stdin: string;
   expectedOutput: string;
 }): Promise<Judge0Result> {
-  const response = await fetch(PISTON_URL, {
+  const compiler = languageMap[input.language];
+  
+  const response = await fetch(WANDBOX_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      language: languageMap[input.language],
-      version: '*', // Auto-selects the latest language version
-      files: [{ content: input.sourceCode }],
+      compiler: compiler,
+      code: input.sourceCode,
       stdin: input.stdin || ''
     })
   });
 
-  if (!response.ok) throw new Error(`Piston API request failed`);
+  if (!response.ok) throw new Error(`Wandbox API request failed`);
   const data = await response.json();
 
   let statusId = 3;
   let statusDesc = 'Accepted';
 
-  if (data.compile && data.compile.code !== 0) {
+  if (data.compiler_error) {
     statusId = 6;
     statusDesc = 'Compilation Error';
-  } else if (data.run && data.run.signal === 'SIGKILL') {
+  } else if (data.status !== '0' && data.program_error?.toLowerCase().includes('killed')) {
     statusId = 5;
     statusDesc = 'Time Limit Exceeded';
-  } else if (data.run && data.run.code !== 0) {
+  } else if (data.status !== '0') {
     statusId = 11;
     statusDesc = 'Runtime Error (NZEC)';
   }
 
   return {
-    stdout: data.run?.stdout,
-    stderr: data.run?.stderr,
-    compile_output: data.compile?.stderr || data.compile?.output,
-    time: 0.1, // Piston hides exact exec time on standard queries
+    stdout: data.program_message,
+    stderr: data.program_error,
+    compile_output: data.compiler_error || data.compiler_message,
+    time: 0.1, // Mocked for free tier
     memory: 2048,
     status: { id: statusId, description: statusDesc }
   };
@@ -198,7 +198,7 @@ export async function judgeQueuedSubmission(submissionId: string) {
 }
 
 // ---------------------------------------------------------
-// 2. LIVE EDITOR PATH (UPDATED FOR CPH-STYLE)
+// 2. LIVE EDITOR PATH (WANDBOX)
 // ---------------------------------------------------------
 interface ExecutionResult {
   verdict: 'ACCEPTED' | 'WRONG_ANSWER' | 'TIME_LIMIT_EXCEEDED' | 'RUNTIME_ERROR' | 'COMPILATION_ERROR' | 'EXECUTED';
@@ -215,43 +215,43 @@ export async function executeSubmission(
   input: string,
   expectedOutput?: string
 ): Promise<ExecutionResult> {
-  const mappedLang = languageMap[language];
-  if (!mappedLang) throw new Error(`Unsupported language: ${language}`);
+  const compiler = languageMap[language];
+  if (!compiler) throw new Error(`Unsupported language: ${language}`);
 
   try {
-    // SWITCHED FROM AXIOS TO NATIVE FETCH
-    const response = await fetch(PISTON_URL, {
+    const response = await fetch(WANDBOX_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        language: mappedLang,
-        version: '*',
-        files: [{ content: sourceCode }],
+        compiler: compiler,
+        code: sourceCode,
         stdin: input || ''
       })
     });
 
     if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`Wandbox HTTP error! status: ${response.status}`);
     }
 
     const data = await response.json();
 
     // 1. Compilation Error
-    if (data.compile && data.compile.code !== 0) {
-      return { verdict: 'COMPILATION_ERROR', compileError: data.compile.stderr || data.compile.output };
+    if (data.compiler_error) {
+      return { verdict: 'COMPILATION_ERROR', compileError: data.compiler_error };
     }
 
-    // 2. Runtime / Timeout
-    if (data.run && data.run.signal === 'SIGKILL') {
-      return { verdict: 'TIME_LIMIT_EXCEEDED', stderr: 'Execution timed out (SIGKILL)' };
-    }
-    if (data.run && data.run.code !== 0) {
-      return { verdict: 'RUNTIME_ERROR', stderr: data.run.stderr || 'Runtime error occurred', stdout: data.run.stdout };
+    // 2. Runtime Error
+    if (data.status !== '0') {
+      const isTimeout = data.program_error?.toLowerCase().includes('killed');
+      return { 
+        verdict: isTimeout ? 'TIME_LIMIT_EXCEEDED' : 'RUNTIME_ERROR', 
+        stderr: data.program_error || 'Runtime error occurred', 
+        stdout: data.program_message 
+      };
     }
 
     // 3. Output comparison (If expected output is provided)
-    const actual = String(data.run?.stdout || '').trim().replace(/\s+/g, ' ');
+    const actual = String(data.program_message || '').trim().replace(/\s+/g, ' ');
     
     let verdict: ExecutionResult['verdict'] = 'EXECUTED';
     if (expectedOutput) {
@@ -261,14 +261,13 @@ export async function executeSubmission(
 
     return { 
       verdict, 
-      runtimeMs: 15, // Mocked for free Piston API
+      runtimeMs: 15,
       memoryKb: 2048,
-      stdout: data.run?.stdout,
-      stderr: data.run?.stderr
+      stdout: data.program_message,
+      stderr: data.program_error
     };
   } catch (error) {
-    // IMPROVED ERROR LOGGING
-    console.error('Piston connection error details:', error);
+    console.error('Wandbox connection error details:', error);
     return { verdict: 'RUNTIME_ERROR', stderr: 'Could not connect to execution engine.' };
   }
 }
