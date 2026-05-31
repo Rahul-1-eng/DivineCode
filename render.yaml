@@ -1,4 +1,17 @@
 services:
+  # --- NEW: PISTON COMPILER SERVICE ---
+  - type: web
+    name: divinecode-piston
+    image: docker.io/engineeraman/piston
+    plan: starter
+    port: 2000
+    envVars:
+      - key: PISTON_RUN_DIR
+        value: /tmp
+      - key: ISOLATE_ROOT
+        value: /tmp
+  
+  # --- EXISTING SERVICES ---
   - type: keyvalue
     name: divinecode-redis
     plan: starter
@@ -26,10 +39,9 @@ services:
           type: keyvalue
           name: divinecode-redis
           property: connectionString
-      - key: CLIENT_ORIGIN
-        sync: false
+      # --- UPDATED: Connects to internal Piston Service ---
       - key: JUDGE0_URL
-        sync: false
+        value: http://divinecode-piston:2000/api/v2/execute
       - key: JUDGE_WORKER_SECRET
         generateValue: true
 
@@ -53,8 +65,9 @@ services:
           type: keyvalue
           name: divinecode-redis
           property: connectionString
+      # --- UPDATED: Connects to internal Piston Service ---
       - key: JUDGE0_URL
-        sync: false
+        value: http://divinecode-piston:2000/api/v2/execute
       - key: JUDGE_WORKER_SECRET
         generateValue: true
 
