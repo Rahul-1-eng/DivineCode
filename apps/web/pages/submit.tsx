@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { CSSProperties, useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 
@@ -7,15 +7,8 @@ export async function getServerSideProps() { return { props: {} }; }
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
-// Wandbox API for the local Scratchpad/Run button
 const WANDBOX_URL = 'https://wandbox.org/api/compile.json';
-const languageMap: Record<string, string> = {
-  cpp: 'gcc-head',
-  c: 'gcc-head-c',
-  java: 'openjdk-head',
-  python: 'cpython-head',
-  javascript: 'nodejs-head'
-};
+const languageMap: Record<string, string> = { cpp: 'gcc-head', c: 'gcc-head-c', java: 'openjdk-head', python: 'cpython-head', javascript: 'nodejs-head' };
 
 const starter = `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n\n    // write your solution here\n    return 0;\n}\n`;
 
@@ -45,15 +38,13 @@ export default function SubmitPage() {
   const [language, setLanguage] = useState('cpp');
   const [code, setCode] = useState(starter);
   
-  // Audio State
+  // 👉 NEW: Audio State
   const [soundEnabled, setSoundEnabled] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Submission States
   const [verdict, setVerdict] = useState<any>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Terminal States
   const [testInput, setTestInput] = useState('');
   const [testOutput, setTestOutput] = useState('');
   const [testError, setTestError] = useState('');
@@ -80,33 +71,27 @@ export default function SubmitPage() {
     }
   };
 
-  // 👉 UPDATED: Direct execution to Wandbox for the scratchpad
+  // 👉 UPDATED: Uses Wandbox for scratchpad to avoid connection errors
   async function runCustomTest() {
     setExecuting(true);
     setActiveTab('output');
-    setTestOutput('Compiling and running in sandbox...');
+    setTestOutput('Compiling code in sandbox...');
     setTestError('');
     
     const compiler = languageMap[language];
-    
     try {
-      const response = await fetch(WANDBOX_URL, {
+      const res = await fetch(WANDBOX_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ compiler, code, stdin: testInput || '' })
       });
-
-      if (!response.ok) throw new Error('Execution failed');
-      const data = await response.json();
+      const data = await res.json();
       
-      if (data.compiler_error) {
-        setTestError(data.compiler_error);
-      } else if (data.status !== '0') {
-        setTestError(data.program_error || 'Runtime error occurred');
+      if (data.compiler_error) setTestError(data.compiler_error);
+      else if (data.status !== '0') setTestError(data.program_error || 'Runtime error');
+      else {
         setTestOutput(data.program_message || '');
-      } else {
-        setTestOutput(data.program_message || '');
-        if (data.program_message) playSuccessSound(); // Little ding for a successful run!
+        playSuccessSound(); // Sound on successful execution
       }
     } catch (e) {
       setTestError('Network error connecting to execution engine.');
@@ -115,7 +100,6 @@ export default function SubmitPage() {
     }
   }
 
-  // Final Submit Logic (Hits your actual DivineCode backend)
   async function submitCode() {
     if (!session?.user?.email) return alert('Sign in first');
     if (!contest || !problem) return alert('Contest problem not loaded');
@@ -131,7 +115,6 @@ export default function SubmitPage() {
       headers: viewerHeaders(session),
       body: JSON.stringify({ code, language, contestProblemId: problemId })
     });
-    
     const submissionData = await res.json();
     
     if (!res.ok) {
@@ -144,91 +127,56 @@ export default function SubmitPage() {
       method: 'POST',
       headers: viewerHeaders(session)
     });
-    
     const data = await judgeRes.json();
     setSubmitting(false);
     
     const finalVerdict = data.submission?.verdict || 'Finished';
     setVerdict(judgeRes.ok ? { verdict: finalVerdict, message: data.submission?.judgeMessage || 'Judged' } : { verdict: 'Judge Error', message: data.error || 'Could not judge submission' });
 
-    // Ding on actual Accepted Submission!
     if (finalVerdict === 'ACCEPTED' || finalVerdict === 'Accepted') {
       playSuccessSound();
     }
   }
 
-  if (status === 'loading') return <main className="min-h-screen flex items-center justify-center bg-slate-950 text-white"><h1 className="text-2xl animate-pulse">Checking account...</h1></main>;
-  if (!session) return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
-      <section className="max-w-md w-full p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl text-center">
-        <h1 className="text-3xl font-bold text-white mb-6">Sign in required</h1>
-        <a href="/signin" className="inline-block px-8 py-3 rounded-full bg-gradient-to-r from-indigo-300 to-cyan-400 text-slate-950 font-bold hover:scale-105 transition-transform">Sign In</a>
-      </section>
-    </main>
-  );
+  if (status === 'loading') return <main style={page}>Checking account...</main>;
+  if (!session) return <main style={page}><section style={panel}><h1>Sign in required</h1><a href="/signin" style={primaryLink}>Sign in</a></section></main>;
 
   return (
-    <main className="min-h-screen p-4 md:p-6 font-sans text-indigo-50 bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,.15),transparent_36rem),#070a16] flex flex-col h-screen">
-      
-      {/* Hidden Audio Element */}
+    <main style={page}>
       <audio ref={audioRef} src="/accepted.mp3" preload="auto" />
 
-      {/* Submitting Overlay Animation */}
+      {/* 👉 NEW: Frosted Glass Overlay for Backend Submissions */}
       {submitting && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
-          <div className="flex flex-col items-center p-8 bg-slate-900 border border-cyan-900/50 rounded-3xl shadow-2xl">
-            <div className="w-16 h-16 mb-6 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
-            <h2 className="text-2xl font-bold text-white mb-2 animate-pulse">Judging Submission...</h2>
-            <p className="text-cyan-200 text-sm">Evaluating against system test cases</p>
+        <div style={overlay}>
+          <div style={overlayModal}>
+            <h2 style={{ color: '#fff', margin: '0 0 10px 0' }}>Judging Submission...</h2>
+            <p style={{ color: '#67e8f9', margin: 0, fontSize: 14 }}>Evaluating against hidden system test cases</p>
           </div>
         </div>
       )}
 
-      {/* Navigation */}
-      <nav className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 shrink-0 max-w-[1600px] w-full mx-auto">
-        <a href={contestId ? `/contests/${contestId}` : '/contests'} className="text-cyan-400 font-black hover:text-cyan-300 transition-colors">
-          ← Back to Contest
-        </a>
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className="flex items-center gap-2 px-4 py-2 rounded-full border border-slate-700 bg-slate-900 hover:bg-slate-800 transition-colors text-sm"
-          >
+      <nav style={nav}>
+        <a href={contestId ? `/contests/${contestId}` : '/contests'} style={brand}>Back to contest</a>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <button onClick={() => setSoundEnabled(!soundEnabled)} style={soundBtn}>
             {soundEnabled ? '🔊 Sound On' : '🔇 Muted'}
           </button>
-          <div className="px-4 py-2 rounded-full bg-slate-900 border border-slate-700 text-sm font-bold">
-            {session.user?.name || session.user?.email}
-          </div>
+          <div style={userPill}>{session.user?.name || session.user?.email}</div>
         </div>
       </nav>
 
-      {/* Main Workspace Layout */}
-      <section className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0 max-w-[1600px] w-full mx-auto">
-        
-        {/* Left Meta Panel */}
-        <aside className="w-full lg:w-1/3 xl:w-1/4 flex flex-col p-6 md:p-8 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-xl overflow-y-auto shrink-0">
-          <p className="text-cyan-400 font-black tracking-widest uppercase text-sm mb-2">
-            {isCodeforces ? 'External verified submission' : 'DivineCode local judge'}
-          </p>
-          <h1 className="text-3xl md:text-4xl font-black mb-2">{canSeeProblemMeta ? problem?.title || 'Loading problem...' : `Problem ${problemLabel}`}</h1>
-          <p className="text-slate-400 mb-6">{problem?.platform}</p>
+      <section style={layout}>
+        <aside style={asideStyle}>
+          <p style={eyebrow}>{isCodeforces ? 'External verified submission' : 'DivineCode local judge'}</p>
+          <h1 style={{ margin: '10px 0' }}>{canSeeProblemMeta ? problem?.title || 'Loading problem...' : `Problem ${problemLabel}`}</h1>
+          <p style={{ color: '#94a3b8', margin: '0 0 20px 0' }}>{problem?.platform}</p>
 
-          {isCodeforces && (
-            <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200">
-              <strong className="block mb-1 font-bold">Codeforces Problem</strong>
-              <p className="text-sm opacity-90">Submit your solution on Codeforces. DivineCode updates standings only after Codeforces sync.</p>
-            </div>
-          )}
+          {isCodeforces && <div style={warning}><strong>Codeforces problem</strong><p style={{ margin: '6px 0 0 0', fontSize: 14 }}>Submit your solution on Codeforces. DivineCode updates standings only after Codeforces sync.</p></div>}
+          {problem?.url && <a href={problem.url} target="_blank" rel="noreferrer" style={primaryLink}>{isCodeforces ? 'Open and Submit on Codeforces' : 'Open original problem'}</a>}
           
-          {problem?.url && (
-            <a href={problem.url} target="_blank" rel="noreferrer" className="text-center px-6 py-3 rounded-full border border-slate-700 bg-slate-800 hover:bg-slate-700 text-white font-bold transition-colors mb-8">
-              {isCodeforces ? 'Open on Codeforces ↗' : 'Open Problem Statement ↗'}
-            </a>
-          )}
-          
-          <div className="mb-6">
-            <label className="block text-sm font-bold mb-2 text-slate-300">Language</label>
-            <select value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full p-3 rounded-xl border border-slate-700 bg-slate-950 text-white outline-none focus:border-cyan-400 cursor-pointer">
+          <div style={{ marginTop: 22 }}>
+            <label style={{ fontWeight: 'bold' }}>Language</label>
+            <select value={language} onChange={(e) => setLanguage(e.target.value)} style={input}>
               <option value="cpp">C++</option>
               <option value="java">Java</option>
               <option value="python">Python</option>
@@ -237,90 +185,87 @@ export default function SubmitPage() {
             </select>
           </div>
           
-          <button 
-            onClick={submitCode} 
-            disabled={submitting || !contest?.viewerMember} 
-            className="w-full p-4 rounded-2xl bg-gradient-to-r from-indigo-400 to-cyan-400 text-slate-950 font-black text-lg hover:scale-[1.02] transition-transform disabled:opacity-50 disabled:scale-100 shadow-lg shadow-cyan-900/20"
-          >
-            {isCodeforces ? 'Store as Pending' : 'Final Submit to Judge'}
+          <button onClick={submitCode} disabled={submitting || !contest?.viewerMember} style={submitBtn}>
+            {isCodeforces ? 'Store as Pending Verification' : 'Final Submit to Judge'}
           </button>
           
-          {!contest?.viewerMember && !contest?.canManage && (
-            <p className="text-red-400 text-sm mt-4 text-center">Only registered players can submit.</p>
-          )}
-
-          {/* Verdict Box */}
+          {!contest?.viewerMember && !contest?.canManage && <p style={{ color: '#fca5a5', marginTop: 12, textAlign: 'center' }}>Only registered players can submit.</p>}
           {verdict && (
-            <div className={`mt-6 p-6 rounded-2xl border ${verdict.verdict === 'ACCEPTED' || verdict.verdict === 'Accepted' ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-400' : 'bg-red-950/30 border-red-500/30 text-red-400'}`}>
-              <h2 className="text-xl font-black mb-1 uppercase tracking-wider">{verdict.verdict}</h2>
-              <p className="text-sm opacity-90">{verdict.message}</p>
+            <div style={{ ...verdictBox, borderColor: verdict.verdict.includes('Accept') ? 'rgba(74,222,128,.4)' : 'rgba(239,68,68,.4)', backgroundColor: verdict.verdict.includes('Accept') ? 'rgba(74,222,128,.1)' : 'rgba(239,68,68,.1)' }}>
+              <h2 style={{ margin: '0 0 6px 0', color: verdict.verdict.includes('Accept') ? '#4ade80' : '#f87171' }}>{verdict.verdict}</h2>
+              <p style={{ margin: 0, color: '#e2e8f0' }}>{verdict.message}</p>
             </div>
           )}
         </aside>
 
-        {/* Right Editor & Terminal Panel */}
-        <section className="w-full lg:w-2/3 xl:w-3/4 rounded-3xl bg-[#0d1117] border border-slate-800 overflow-hidden flex flex-col lg:h-full shadow-2xl min-h-[600px]">
-          
-          {/* Editor Header */}
-          <div className="flex justify-between items-center p-4 bg-slate-900 border-b border-slate-800 shrink-0">
-            <strong className="text-slate-300">{isCodeforces ? 'Scratchpad only' : 'Code Editor'}</strong>
-            <button 
-              onClick={runCustomTest} 
-              disabled={executing} 
-              className="px-6 py-2 rounded-full bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 font-bold hover:bg-emerald-600/30 transition-colors flex items-center gap-2"
-            >
-              {executing ? (
-                <><span className="w-4 h-4 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin"></span> Running...</>
-              ) : (
-                <>▶ Run Code</>
-              )}
+        <section style={editorPanelStyle}>
+          <div style={editorTop}>
+            <strong>{isCodeforces ? 'Scratchpad only' : 'Code editor'}</strong>
+            <button onClick={runCustomTest} disabled={executing} style={runBtn}>
+              {executing ? 'Running...' : '▶ Run Code'}
             </button>
           </div>
           
-          {/* Code Area */}
-          <textarea 
-            value={code} 
-            onChange={(e) => setCode(e.target.value)} 
-            spellCheck={false} 
-            className="flex-1 w-full p-6 bg-transparent text-slate-300 font-mono text-[15px] leading-relaxed outline-none resize-none"
-            style={{ tabSize: 4 }}
-          />
+          <textarea value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} style={editor} />
           
-          {/* Bottom Terminal */}
-          <div className="h-64 flex flex-col bg-slate-950 border-t border-slate-800 shrink-0">
-            <div className="flex bg-slate-900 border-b border-slate-800">
-              <button 
-                onClick={() => setActiveTab('input')} 
-                className={`px-6 py-3 text-sm font-bold transition-colors ${activeTab === 'input' ? 'text-cyan-400 border-b-2 border-cyan-400 bg-slate-950' : 'text-slate-500 hover:text-slate-300'}`}
-              >
-                Custom Input
-              </button>
-              <button 
-                onClick={() => setActiveTab('output')} 
-                className={`px-6 py-3 text-sm font-bold transition-colors ${activeTab === 'output' ? 'text-cyan-400 border-b-2 border-cyan-400 bg-slate-950' : 'text-slate-500 hover:text-slate-300'}`}
-              >
-                Console Output
-              </button>
+          <div style={terminal}>
+            <div style={terminalTabs}>
+              <button onClick={() => setActiveTab('input')} style={activeTab === 'input' ? activeTabStyle : tabStyle}>Custom Input</button>
+              <button onClick={() => setActiveTab('output')} style={activeTab === 'output' ? activeTabStyle : tabStyle}>Console Output</button>
             </div>
-            
-            <div className="flex-1 p-4 overflow-y-auto">
+            <div style={terminalBody}>
               {activeTab === 'input' ? (
                 <textarea 
                   value={testInput} 
                   onChange={e => setTestInput(e.target.value)} 
-                  placeholder="Paste custom standard input (stdin) here..." 
-                  className="w-full h-full bg-transparent text-slate-300 font-mono text-sm outline-none resize-none placeholder-slate-700"
+                  placeholder="Paste your test cases here..." 
+                  style={terminalInput} 
                 />
               ) : (
-                <pre className={`w-full h-full font-mono text-sm whitespace-pre-wrap ${testError ? 'text-red-400' : 'text-slate-300'}`}>
-                  {testError || testOutput || 'No output generated. Click "▶ Run Code" to test against custom input.'}
+                <pre style={testError ? terminalError : terminalOutput}>
+                  {testError || testOutput || 'No output generated. Click "Run Code" to test.'}
                 </pre>
               )}
             </div>
           </div>
-
         </section>
       </section>
     </main>
   );
 }
+
+// RESTORED STYLES (WITH FLEX WRAP FOR MOBILE)
+const page: CSSProperties = { minHeight: '100vh', padding: 24, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.35), transparent 34rem), #070a16', boxSizing: 'border-box' };
+const nav: CSSProperties = { maxWidth: 1320, margin: '0 auto 24px', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 };
+const brand: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900 };
+const userPill: CSSProperties = { padding: '8px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)', fontSize: 14 };
+const soundBtn: CSSProperties = { padding: '8px 14px', borderRadius: 999, background: '#0f172a', border: '1px solid rgba(148,163,184,.22)', color: '#fff', fontSize: 14, cursor: 'pointer' };
+
+// 👉 MOBILE FIX: Flex Wrap
+const layout: CSSProperties = { maxWidth: 1320, margin: '0 auto', display: 'flex', flexWrap: 'wrap', gap: 18 };
+const panel: CSSProperties = { padding: 24, borderRadius: 26, background: 'rgba(15,23,42,.86)', border: '1px solid rgba(148,163,184,.22)', boxShadow: '0 24px 70px rgba(0,0,0,.3)' };
+const asideStyle: CSSProperties = { ...panel, flex: '1 1 320px', maxWidth: '100%', boxSizing: 'border-box' };
+const editorPanelStyle: CSSProperties = { ...panel, flex: '2 1 500px', padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: '70vh', boxSizing: 'border-box' };
+
+const editorTop: CSSProperties = { padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#cbd5e1', background: 'rgba(2,6,23,.65)', borderBottom: '1px solid rgba(148,163,184,.16)' };
+const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 900, letterSpacing: '.12em', textTransform: 'uppercase', margin: '0 0 8px 0' };
+const input: CSSProperties = { width: '100%', padding: 12, marginTop: 8, borderRadius: 14, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', boxSizing: 'border-box' };
+const submitBtn: CSSProperties = { width: '100%', marginTop: 18, padding: 14, borderRadius: 16, border: 0, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', fontWeight: 950, cursor: 'pointer', fontSize: 16 };
+const primaryLink: CSSProperties = { display: 'inline-block', padding: '11px 15px', borderRadius: 999, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', textDecoration: 'none', fontWeight: 900, textAlign: 'center' };
+const verdictBox: CSSProperties = { marginTop: 18, padding: 16, borderRadius: 18, border: '1px solid' };
+const warning: CSSProperties = { margin: '16px 0', padding: 16, borderRadius: 18, background: 'rgba(251,191,36,.1)', border: '1px solid rgba(251,191,36,.28)', color: '#fde68a' };
+
+// Terminal Styles
+const editor: CSSProperties = { width: '100%', flex: 1, minHeight: '30vh', padding: 20, border: 0, outline: 0, resize: 'none', background: '#020617', color: '#e2e8f0', fontSize: 15, lineHeight: 1.65, fontFamily: 'JetBrains Mono, Consolas, monospace', boxSizing: 'border-box' };
+const runBtn: CSSProperties = { background: '#22c55e', color: 'white', border: 0, borderRadius: 8, padding: '6px 16px', fontWeight: 'bold', cursor: 'pointer' };
+const terminal: CSSProperties = { height: '32vh', background: '#0f172a', borderTop: '1px solid rgba(148,163,184,.16)', display: 'flex', flexDirection: 'column' };
+const terminalTabs: CSSProperties = { display: 'flex', background: '#020617', borderBottom: '1px solid rgba(148,163,184,.16)' };
+const tabStyle: CSSProperties = { padding: '10px 20px', background: 'transparent', border: 0, color: '#94a3b8', cursor: 'pointer', fontWeight: 'bold' };
+const activeTabStyle: CSSProperties = { ...tabStyle, color: '#67e8f9', borderBottom: '2px solid #67e8f9' };
+const terminalBody: CSSProperties = { flex: 1, padding: 12, overflow: 'auto' };
+const terminalInput: CSSProperties = { width: '100%', height: '100%', background: 'transparent', border: 0, outline: 0, color: '#e2e8f0', fontFamily: 'monospace', resize: 'none' };
+const terminalOutput: CSSProperties = { margin: 0, color: '#e2e8f0', fontFamily: 'monospace', whiteSpace: 'pre-wrap' };
+const terminalError: CSSProperties = { ...terminalOutput, color: '#ef4444' };
+
+const overlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 50 };
+const overlayModal: CSSProperties = { padding: 30, backgroundColor: '#0f172a', border: '1px solid rgba(103,232,249,0.3)', borderRadius: 20, textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.5)' };

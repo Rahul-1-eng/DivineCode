@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { CSSProperties, useState, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 
 export async function getServerSideProps() { return { props: {} }; }
@@ -39,11 +39,10 @@ export default function StandaloneJudgePage() {
   const currentTestCase = testCases.find(tc => tc.id === selectedTestCaseId) || testCases[0];
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Play sound if at least one test case passes and sound is enabled
   const playSuccessSound = () => {
     if (soundEnabled && audioRef.current) {
       audioRef.current.currentTime = 0;
-      audioRef.current.play().catch(e => console.log("Audio autoplay blocked by browser"));
+      audioRef.current.play().catch(e => console.log("Audio autoplay blocked"));
     }
   };
 
@@ -64,21 +63,16 @@ export default function StandaloneJudgePage() {
     setSelectedTestCaseId(filtered[0].id);
   }
 
-  // 👉 Direct Frontend-to-Wandbox Execution
   async function runTestCase(tc: TestCase) {
     const compiler = languageMap[language];
     try {
       const response = await fetch(WANDBOX_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          compiler: compiler,
-          code: code,
-          stdin: tc.input || ''
-        })
+        body: JSON.stringify({ compiler, code, stdin: tc.input || '' })
       });
 
-      if (!response.ok) throw new Error('Wandbox execution failed');
+      if (!response.ok) throw new Error('Execution failed');
       const data = await response.json();
 
       let error = '';
@@ -96,7 +90,7 @@ export default function StandaloneJudgePage() {
           const expected = String(tc.expectedOutput || '').trim().replace(/\s+/g, ' ');
           verdict = actual === expected ? 'ACCEPTED' : 'WRONG_ANSWER';
         } else {
-          verdict = 'ACCEPTED'; // If no expected output, treat execution success as accepted
+          verdict = 'ACCEPTED'; 
         }
       }
 
@@ -107,7 +101,6 @@ export default function StandaloneJudgePage() {
         verdict: verdict
       };
     } catch (e) {
-      console.error(e);
       return {
         id: tc.id,
         actualOutput: '',
@@ -126,150 +119,153 @@ export default function StandaloneJudgePage() {
       setSelectedTestCaseId(updatedCases[i].id);
       const result = await runTestCase(updatedCases[i]);
       
-      updatedCases[i] = {
-        ...updatedCases[i],
-        actualOutput: result.actualOutput,
-        error: result.error,
-        verdict: result.verdict
-      };
-
+      updatedCases[i] = { ...updatedCases[i], actualOutput: result.actualOutput, error: result.error, verdict: result.verdict };
       if (result.verdict === 'ACCEPTED') anyPassed = true;
     }
 
     setTestCases(updatedCases);
     setExecuting(false);
-    
     if (anyPassed) playSuccessSound();
   }
 
   const passedCount = testCases.filter(tc => tc.verdict === 'ACCEPTED').length;
 
   return (
-    <main className="min-h-screen p-4 md:p-6 font-sans text-indigo-50 bg-slate-950 flex flex-col h-screen">
-      
-      {/* Hidden Audio Element */}
+    <main style={page}>
       <audio ref={audioRef} src="/accepted.mp3" preload="auto" />
 
-      {/* 👉 THE EXECUTION OVERLAY */}
       {executing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md">
-          <div className="flex flex-col items-center p-8 bg-slate-900 border border-cyan-900/50 rounded-3xl shadow-2xl">
-            <div className="w-16 h-16 mb-6 border-4 border-cyan-400 border-b-transparent rounded-full animate-spin"></div>
-            <h2 className="text-2xl font-black text-white mb-2 animate-pulse">Compiling Suite...</h2>
-            <p className="text-cyan-200 font-mono text-sm">Running test cases against execution engine</p>
+        <div style={overlay}>
+          <div style={overlayModal}>
+            <h2 style={{ color: '#fff', margin: '0 0 10px 0' }}>Compiling Suite...</h2>
+            <p style={{ color: '#67e8f9', margin: 0, fontSize: 14 }}>Running test cases against execution engine</p>
           </div>
         </div>
       )}
 
-      {/* Navigation */}
-      <nav className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4 shrink-0">
-        <a href="/" className="text-cyan-400 font-black text-xl hover:text-cyan-300 transition-colors">DivineCode Sandbox</a>
-        
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className="flex items-center gap-2 px-4 py-2 rounded-full border border-slate-700 bg-slate-900 hover:bg-slate-800 transition-colors text-sm font-bold"
-          >
+      <nav style={nav}>
+        <a href="/" style={brand}>DivineCode Sandbox</a>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <button onClick={() => setSoundEnabled(!soundEnabled)} style={soundBtn}>
             {soundEnabled ? '🔊 Sound On' : '🔇 Muted'}
           </button>
-          <div className="px-4 py-2 rounded-full bg-slate-900 border border-slate-700 text-sm font-bold">
-            {session?.user?.name || session?.user?.email || 'Guest Debugger'}
-          </div>
+          <div style={userPill}>{session?.user?.name || session?.user?.email || 'Guest Debugger'}</div>
         </div>
       </nav>
 
-      {/* Main Layout: Stacks on mobile, side-by-side on lg desktop */}
-      <section className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
-        
-        {/* Left Panel: Test Cases & Judge (Scrollable independently) */}
-        <aside className="w-full lg:w-5/12 flex flex-col p-5 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-xl overflow-hidden shrink-0 lg:h-full">
-          
-          <div className="flex justify-between items-center mb-4 shrink-0">
-            <h2 className="font-black text-lg">CPH JUDGE: RESULTS</h2>
-            <span className="px-3 py-1 bg-cyan-900/30 text-cyan-400 rounded-lg text-sm font-bold border border-cyan-900/50">
-              {passedCount} / {testCases.length} passed
-            </span>
+      <section style={layout}>
+        <aside style={leftPanel}>
+          <div style={panelHeader}>
+            <h2 style={{ margin: 0 }}>CPH JUDGE: RESULTS</h2>
+            <span style={badge}>{passedCount} / {testCases.length} passed</span>
           </div>
 
-          <div className="flex gap-2 mb-4 overflow-x-auto pb-2 shrink-0 scrollbar-thin scrollbar-thumb-slate-700">
+          <div style={tabBar}>
             {testCases.map((tc, idx) => (
               <button 
                 key={tc.id} 
                 onClick={() => setSelectedTestCaseId(tc.id)}
-                className={`whitespace-nowrap px-4 py-2 rounded-xl font-bold text-sm border transition-colors ${tc.id === selectedTestCaseId ? 'bg-slate-800 text-cyan-400 border-cyan-400/50' : 'bg-slate-950/50 text-slate-400 border-slate-800 hover:bg-slate-800'}`}
+                style={tc.id === selectedTestCaseId ? activeTab : tab}
               >
                 TC {idx + 1} {tc.verdict === 'ACCEPTED' ? '✅' : tc.verdict === 'WRONG_ANSWER' ? '❌' : ''}
               </button>
             ))}
-            <button onClick={addNewTestCase} className="whitespace-nowrap px-4 py-2 rounded-xl font-bold text-sm bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition-colors">
-              + New
-            </button>
+            <button onClick={addNewTestCase} style={addTabBtn}>+ New</button>
           </div>
 
-          <div className="flex-1 overflow-y-auto pr-2 flex flex-col gap-3 scrollbar-thin scrollbar-thumb-slate-700">
-            <div className="flex justify-between items-center mt-2">
-              <h3 className="font-bold text-slate-300">Test Case Parameters</h3>
+          <div style={workspace}>
+            <div style={rowHeader}>
+              <h3 style={{ margin: 0 }}>Test Case Parameters</h3>
               {testCases.length > 1 && (
-                <button onClick={() => deleteTestCase(currentTestCase.id)} className="px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg text-xs font-bold hover:bg-red-500/20 transition-colors">
-                  Wipe Case
-                </button>
+                <button onClick={() => deleteTestCase(currentTestCase.id)} style={deleteBtn}>Wipe Case</button>
               )}
             </div>
 
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mt-2">Input Data:</label>
+            <label style={label}>Input Data:</label>
             <textarea
               value={currentTestCase.input}
               onChange={e => updateCurrentTestCase({ input: e.target.value })}
               placeholder="Provide system stdin data..."
-              className="w-full min-h-[100px] p-3 bg-slate-950 border border-slate-800 rounded-xl font-mono text-sm text-slate-300 outline-none focus:border-cyan-500/50 resize-y"
+              style={terminalBox}
             />
 
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mt-2">Expected Output (Optional):</label>
+            <label style={label}>Expected Output (Optional):</label>
             <textarea
               value={currentTestCase.expectedOutput}
               onChange={e => updateCurrentTestCase({ expectedOutput: e.target.value })}
               placeholder="Provide matching assertions..."
-              className="w-full min-h-[100px] p-3 bg-slate-950 border border-slate-800 rounded-xl font-mono text-sm text-slate-300 outline-none focus:border-cyan-500/50 resize-y"
+              style={terminalBox}
             />
 
             {currentTestCase.verdict && (
-              <div className="mt-4 animate-fadeIn">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Execution Status Output:</label>
-                <pre className={`mt-1 p-3 rounded-xl font-mono text-sm whitespace-pre-wrap border ${currentTestCase.error ? 'bg-red-950/20 text-red-400 border-red-900/30' : 'bg-cyan-950/10 text-cyan-400 border-cyan-900/30'}`}>
+              <div style={{ marginTop: 12 }}>
+                <label style={label}>Execution Status Output:</label>
+                <pre style={currentTestCase.error ? errBox : outBox}>
                   {currentTestCase.error || currentTestCase.actualOutput || 'Empty system stdout returned.'}
                 </pre>
               </div>
             )}
           </div>
 
-          <button onClick={runAllTestCases} disabled={executing} className="w-full mt-4 p-4 rounded-2xl bg-gradient-to-r from-indigo-400 to-cyan-400 text-slate-950 font-black text-lg hover:scale-[1.02] transition-transform disabled:opacity-50 disabled:scale-100 shadow-lg shadow-cyan-900/20 shrink-0">
+          <button onClick={runAllTestCases} disabled={executing} style={runAllBtn}>
             ⚡ Run All Test Cases
           </button>
         </aside>
 
-        {/* Right Panel: Interactive Editor */}
-        <section className="w-full lg:w-7/12 rounded-3xl bg-[#0d1117] border border-slate-800 overflow-hidden flex flex-col h-[600px] lg:h-full shadow-2xl">
-          <div className="flex justify-between items-center p-4 bg-slate-900 border-b border-slate-800 shrink-0">
-            <strong className="text-slate-200">Interactive Workspace</strong>
-            <select value={language} onChange={e => setLanguage(e.target.value)} className="px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white outline-none focus:border-cyan-500/50 cursor-pointer">
-              <option value="cpp">C++</option>
-              <option value="java">Java</option>
-              <option value="python">Python</option>
-              <option value="javascript">JavaScript</option>
-              <option value="c">C</option>
-            </select>
+        <section style={rightPanel}>
+          <div style={editorHeader}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <strong style={{ color: '#eef2ff' }}>Interactive Workspace</strong>
+              <select value={language} onChange={e => setLanguage(e.target.value)} style={selector}>
+                <option value="cpp">C++</option>
+                <option value="java">Java</option>
+                <option value="python">Python</option>
+                <option value="javascript">JavaScript</option>
+                <option value="c">C</option>
+              </select>
+            </div>
           </div>
-          
           <textarea
             value={code}
             onChange={e => setCode(e.target.value)}
             spellCheck={false}
-            className="flex-1 w-full p-6 bg-transparent text-slate-300 font-mono text-[15px] leading-relaxed outline-none resize-none"
-            style={{ tabSize: 4 }}
+            style={editorCodeBox}
           />
         </section>
-
       </section>
     </main>
   );
 }
+
+// RESTORED CSS PROPERTIES
+const page: CSSProperties = { minHeight: '100vh', padding: 24, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: '#070a16', boxSizing: 'border-box' };
+const nav: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 };
+const brand: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900, fontSize: 20 };
+const userPill: CSSProperties = { padding: '8px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)', fontSize: 14 };
+const soundBtn: CSSProperties = { padding: '8px 14px', borderRadius: 999, background: '#0f172a', border: '1px solid rgba(148,163,184,.22)', color: '#fff', fontSize: 14, cursor: 'pointer' };
+
+// 👉 THE FIX FOR DEVICES: Using Flex Wrap instead of rigid Grid
+const layout: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 20, minHeight: 'calc(100vh - 100px)' };
+const leftPanel: CSSProperties = { flex: '1 1 400px', minWidth: 300, padding: 20, borderRadius: 22, background: 'rgba(15,23,42,.86)', border: '1px solid rgba(148,163,184,.22)', display: 'flex', flexDirection: 'column' };
+const rightPanel: CSSProperties = { flex: '2 1 500px', minWidth: 300, minHeight: 600, borderRadius: 22, background: '#020617', border: '1px solid rgba(148,163,184,.22)', overflow: 'hidden', display: 'flex', flexDirection: 'column' };
+
+const panelHeader: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 };
+const badge: CSSProperties = { padding: '4px 10px', background: 'rgba(34,211,238,.15)', color: '#67e8f9', borderRadius: 6, fontSize: 13, fontWeight: 'bold' };
+const tabBar: CSSProperties = { display: 'flex', gap: 6, marginBottom: 16, overflowX: 'auto', paddingBottom: 4 };
+const tab: CSSProperties = { padding: '8px 14px', background: 'rgba(2,6,23,.6)', border: '1px solid rgba(148,163,184,.1)', borderRadius: 8, color: '#94a3b8', cursor: 'pointer', fontWeight: 'bold', fontSize: 13, whiteSpace: 'nowrap' };
+const activeTab: CSSProperties = { ...tab, background: '#1e293b', color: '#67e8f9', borderColor: '#67e8f9' };
+const addTabBtn: CSSProperties = { ...tab, background: '#22c55e', color: 'white', borderColor: 'transparent' };
+const workspace: CSSProperties = { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 };
+const rowHeader: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
+const label: CSSProperties = { fontSize: 13, color: '#94a3b8', fontWeight: 'bold', marginTop: 4 };
+const terminalBox: CSSProperties = { width: '100%', boxSizing: 'border-box', minHeight: '120px', padding: 10, background: '#020617', border: '1px solid rgba(148,163,184,.16)', borderRadius: 10, color: '#e2e8f0', fontFamily: 'monospace', fontSize: 13, outline: 'none', resize: 'vertical' };
+const outBox: CSSProperties = { margin: 0, padding: 10, background: 'rgba(34,211,238,.05)', border: '1px solid rgba(34,211,238,.15)', borderRadius: 10, color: '#38bdf8', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap' };
+const errBox: CSSProperties = { ...outBox, color: '#f87171', background: 'rgba(248,113,113,.05)', borderColor: 'rgba(248,113,113,.15)' };
+const deleteBtn: CSSProperties = { padding: '4px 8px', background: 'rgba(239,68,68,.1)', color: '#fca5a5', border: '1px solid rgba(239,68,68,.2)', borderRadius: 6, fontSize: 12, cursor: 'pointer' };
+const runAllBtn: CSSProperties = { width: '100%', marginTop: 16, padding: 14, borderRadius: 12, border: 0, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', fontWeight: 950, cursor: 'pointer', fontSize: 15 };
+const editorHeader: CSSProperties = { padding: 14, background: 'rgba(2,6,23,.65)', borderBottom: '1px solid rgba(148,163,184,.16)' };
+const selector: CSSProperties = { padding: '6px 10px', background: '#0f172a', border: '1px solid rgba(148,163,184,.2)', borderRadius: 8, color: '#fff', fontSize: 13, outline: 'none' };
+const editorCodeBox: CSSProperties = { width: '100%', boxSizing: 'border-box', flex: 1, padding: 20, border: 0, outline: 0, background: 'transparent', color: '#e2e8f0', fontSize: 14, lineHeight: 1.6, fontFamily: 'JetBrains Mono, Consolas, monospace', resize: 'none' };
+
+const overlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 50 };
+const overlayModal: CSSProperties = { padding: 30, backgroundColor: '#0f172a', border: '1px solid rgba(103,232,249,0.3)', borderRadius: 20, textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.5)' };
