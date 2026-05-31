@@ -219,14 +219,23 @@ export async function executeSubmission(
   if (!mappedLang) throw new Error(`Unsupported language: ${language}`);
 
   try {
-    const response = await axios.post(PISTON_URL, {
-      language: mappedLang,
-      version: '*',
-      files: [{ content: sourceCode }],
-      stdin: input || ''
+    // SWITCHED FROM AXIOS TO NATIVE FETCH
+    const response = await fetch(PISTON_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        language: mappedLang,
+        version: '*',
+        files: [{ content: sourceCode }],
+        stdin: input || ''
+      })
     });
 
-    const data = response.data;
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
 
     // 1. Compilation Error
     if (data.compile && data.compile.code !== 0) {
@@ -258,7 +267,8 @@ export async function executeSubmission(
       stderr: data.run?.stderr
     };
   } catch (error) {
-    console.error('Piston connection error:', error);
+    // IMPROVED ERROR LOGGING
+    console.error('Piston connection error details:', error);
     return { verdict: 'RUNTIME_ERROR', stderr: 'Could not connect to execution engine.' };
   }
 }
