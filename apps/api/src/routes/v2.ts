@@ -12,6 +12,7 @@ import { recommendationBand } from '../modules/ratings/recommendationMath';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
 // 👉 IMPORTS THE SUBMISSION ROUTER
 import { submissionRouter } from './submissionRoutes';
+import { syncUserRatings } from '../modules/external-sync/profileSyncService';
 
 type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<void>;
 
@@ -75,12 +76,41 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ ok: true, sourceOfTruth: 'postgres-prisma' });
   }));
 
+  // 👉 1. THE AUTOMATED POLLING ENDPOINT (CRON)
+  // This route will be pinged every 1 minute to auto-sync all LIVE matches.
+  router.post('/cron/sync-live-contests', asyncRoute(async (req, res) => {
+    // Basic security so people don't spam your background workers
+    if (req.headers['x-cron-secret'] !== (process.env.CRON_SECRET || 'dev-secret')) {
+      res.status(401).json({ error: 'Unauthorized CRON trigger' });
+      return;
+    }
+    
+    // Find every contest that is currently running
+    const liveContests = await prisma.contest.findMany({
+      where: { status: 'RUNNING' }
+    });
+
+    // Toss them all into the BullMQ worker queue to process silently in the background
+    for (const contest of liveContests) {
+      await enqueueCodeforcesContestSync(contest.id);
+    }
+
+    res.json({ ok: true, status: 'Polling Started', jobsQueued: liveContests.length });
+  }));
+
+  // 👉 2. THE RATING SYNC ENDPOINT
+  // Frontend calls this when a user links a new handle to calculate their new Global Rating
+  router.post('/users/:id/sync-ratings', asyncRoute(async (req, res) => {
+    const newRating = await syncUserRatings(req.params.id);
+    res.json({ ok: true, globalRating: newRating });
+  }));
+  
   router.post('/execute', asyncRoute(async (req, res) => {
     const { sourceCode, language, input, expectedOutput } = req.body;
     const result = await executeSubmission(sourceCode, language, input || '', expectedOutput);
     res.json(result);
   }));
-  
+
   router.post('/problems', asyncRoute(async (req, res) => {
     const problem = await createInternalProblem(req.body);
     res.status(201).json(problem);
