@@ -51,7 +51,6 @@ export default function ContestRoomPage() {
     const data = await res.json();
     if (!res.ok) { setError(data.error || 'Contest not found'); return; }
     
-    // 🔥 FIX: Much more robust viewer matching to ensure you are recognized as a player
     if (!data.viewerMember && session?.user && (data.participants || data.members)) {
       const arr = data.participants || data.members || [];
       data.viewerMember = arr.find((p: any) => 
@@ -159,7 +158,6 @@ export default function ContestRoomPage() {
     (contest?.members || contest?.participants || []).map((m: any) => [m.id, m])
   ), [contest]);
   
-  // 🔥 FIX: Track solved problems instantly from the live `submissions` array instead of waiting for standings
   const teamSolvedProblemIds = useMemo(() => {
     const solvedSet = new Set<string>();
     const myMemberInfo = contest?.viewerMember;
@@ -256,8 +254,13 @@ export default function ContestRoomPage() {
             <div style={{ display: 'grid', gap: 12 }}>
               {contest.problems.map((p: any, index: number) => {
                 const label = String.fromCharCode(65 + index);
-                const visibleTitle = canSeeProblemMeta ? p.title : `Problem ${label}`;
-                const safeProblemHref = canSeeProblemMeta ? p.url : `/contests/${contest.id}/problems/${p.id}`;
+                
+                // 👉 FIX: Extract the actual properties appropriately based on backend schema
+                const actualTitle = p.titleSnapshot || p.problem?.title || `Problem ${label}`;
+                const visibleTitle = canSeeProblemMeta ? actualTitle : `Problem ${label}`;
+                
+                // 👉 FIX: Always safely link them to the internal problem page so they don't lose the Submit button!
+                const safeProblemHref = `/contests/${contest.id}/problems/${p.id}`;
                 
                 const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
 
@@ -267,8 +270,12 @@ export default function ContestRoomPage() {
                 }}>
                   <strong style={{ color: '#67e8f9', fontSize: 22 }}>{label}</strong>
                   <div>
-                    <a href={safeProblemHref} target={canSeeProblemMeta ? '_blank' : undefined} rel={canSeeProblemMeta ? 'noreferrer' : undefined} style={{ color: '#eef2ff', fontWeight: 900 }}>{visibleTitle}</a>
-                    <p style={{ margin: '6px 0 0', color: '#94a3b8' }}>{canSeeProblemMeta ? `${p.platform} - Rating ${p.rating || p.difficulty || 'Practice'}` : `${p.platform} - rating hidden during contest`}</p>
+                    <a href={safeProblemHref} style={{ color: '#eef2ff', fontWeight: 900 }}>{visibleTitle}</a>
+                    <p style={{ margin: '6px 0 0', color: '#94a3b8' }}>
+                      {canSeeProblemMeta 
+                        ? `${p.platform} - Rating ${p.problem?.rating || p.rating || p.difficulty || 'Practice'}` 
+                        : `${p.platform} - rating hidden during contest`}
+                    </p>
                   </div>
                   
                   {isSolvedByTeam && (
@@ -280,9 +287,8 @@ export default function ContestRoomPage() {
                     </div>
                   )}
 
-                  {/* 🔥 FIX: 'Open Problem' button is now ALWAYS visible unless the contest is over, even if you are the owner or solved it */}
                   {!isFinal && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <a href={`/contests/${contest.id}/problems/${p.id}`} style={primaryLink}>
+                    <a href={safeProblemHref} style={primaryLink}>
                       {isSolvedByTeam ? 'Review problem' : 'Open problem'}
                     </a>
                     {isOwner && <><button onClick={() => replaceProblem(p.id)} style={ghostButton}>Replace</button><button onClick={() => removeProblem(p.id)} style={ghostButton}>Remove</button></>}
@@ -306,13 +312,13 @@ export default function ContestRoomPage() {
         <section style={{ ...panel, marginTop: 18 }}>
           <h2>{isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}</h2>
           {submissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
-          <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Time</th><th style={th}>User</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Source</th></tr></thead><tbody>{submissions.map((submission) => <tr key={submission.id} onClick={() => setSelectedSubmission(submission)} style={clickRow}><td style={td}>{new Date(submission.createdAt).toLocaleString()}</td><td style={td}>{submission.userId}</td><td style={td}>{problemById[submission.problemId]?.label || ''} {canSeeProblemMeta ? problemById[submission.problemId]?.title || submission.problemId : ''}</td><td style={td}>{submission.verdict}</td><td style={td}>{submission.source || submission.platform || 'DivineCode'}</td></tr>)}</tbody></table></div>
+          <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Time</th><th style={th}>User</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Source</th></tr></thead><tbody>{submissions.map((submission) => <tr key={submission.id} onClick={() => setSelectedSubmission(submission)} style={clickRow}><td style={td}>{new Date(submission.createdAt).toLocaleString()}</td><td style={td}>{submission.userId}</td><td style={td}>{problemById[submission.problemId]?.label || ''} {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot || problemById[submission.problemId]?.problem?.title || submission.problemId : ''}</td><td style={td}>{submission.verdict}</td><td style={td}>{submission.source || submission.platform || 'DivineCode'}</td></tr>)}</tbody></table></div>
         </section>
 
         {selectedMember && <section style={{ ...panel, marginTop: 18 }}>
           <h2>{selectedMember.name} submissions</h2>
           <button onClick={() => setSelectedMember(null)} style={ghostButton}>Close</button>
-          {memberSubmissions.length === 0 ? <p style={{ color: '#94a3b8' }}>No visible submissions for this member.</p> : memberSubmissions.map((submission) => <div key={submission.id} onClick={() => setSelectedSubmission(submission)} style={detailCard}><strong>{submission.verdict}</strong><span>{canSeeProblemMeta ? problemById[submission.problemId]?.title || submission.problemId : problemById[submission.problemId]?.label || submission.problemId}</span><small>{new Date(submission.createdAt).toLocaleString()} - {submission.source || submission.platform}</small></div>)}
+          {memberSubmissions.length === 0 ? <p style={{ color: '#94a3b8' }}>No visible submissions for this member.</p> : memberSubmissions.map((submission) => <div key={submission.id} onClick={() => setSelectedSubmission(submission)} style={detailCard}><strong>{submission.verdict}</strong><span>{canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot || submission.problemId : problemById[submission.problemId]?.label || submission.problemId}</span><small>{new Date(submission.createdAt).toLocaleString()} - {submission.source || submission.platform}</small></div>)}
         </section>}
 
         {selectedSubmission && <section style={{ ...panel, marginTop: 18 }}>
@@ -320,7 +326,7 @@ export default function ContestRoomPage() {
           <button onClick={() => setSelectedSubmission(null)} style={ghostButton}>Close</button>
           <div style={detailCard}>
             <p><b>User:</b> {selectedSubmission.userId}</p>
-            <p><b>Problem:</b> {canSeeProblemMeta ? problemById[selectedSubmission.problemId]?.title || selectedSubmission.problemId : problemById[selectedSubmission.problemId]?.label || selectedSubmission.problemId}</p>
+            <p><b>Problem:</b> {canSeeProblemMeta ? problemById[selectedSubmission.problemId]?.titleSnapshot || selectedSubmission.problemId : problemById[selectedSubmission.problemId]?.label || selectedSubmission.problemId}</p>
             <p><b>Verdict:</b> {selectedSubmission.verdict}</p>
             <p><b>Language:</b> {selectedSubmission.language || 'Unknown'}</p>
             <p><b>Source:</b> {selectedSubmission.source || selectedSubmission.platform || 'DivineCode'}</p>

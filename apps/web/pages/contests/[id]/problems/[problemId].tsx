@@ -8,7 +8,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
 function viewerQuery(session: any) {
-  const query = new URLSearchParams();// ✅ CORRECT
+  const query = new URLSearchParams();
   if (session?.user?.email) query.set('viewerEmail', session.user.email);
   if (session?.user?.name) query.set('viewerName', session.user.name);
   const value = query.toString();
@@ -39,7 +39,6 @@ export default function ContestProblemPage() {
   const canSeeMeta = Boolean(contest?.visibility?.canSeeProblemMeta);
   const isPlayer = Boolean(contest?.viewerMember);
 
-  // 👉 RECTIFIED LOGIC: Check if anyone in my team already solved this
   const isSolvedByTeam = useMemo(() => {
     if (!contest || !contest.standings || !contest.viewerMember || !problemId) return false;
     const myTeam = contest.viewerMember.team;
@@ -58,6 +57,12 @@ export default function ContestProblemPage() {
   if (error) return <main style={page}><section style={panel}><h1>{error}</h1><a href="/contests" style={primary}>Back</a></section></main>;
   if (!contest || !problem) return <main style={page}>Loading problem...</main>;
 
+  // 👉 FIX: Properly read the nested snapshot and URL fields for rendering!
+  const actualTitle = problem.titleSnapshot || problem.problem?.title || `Problem ${label}`;
+  const actualUrl = problem.externalUrl || problem.problem?.url;
+  const actualRating = problem.problem?.rating || problem.rating || 'Practice';
+  const tags = problem.problem?.tags || [];
+
   return (
     <main style={page}>
       <section style={{ maxWidth: 980, margin: '0 auto' }}>
@@ -68,10 +73,12 @@ export default function ContestProblemPage() {
         
         <section style={panel}>
           <p style={eyebrow}>Problem {label}</p>
-          <h1>{canSeeMeta ? problem.title : `Problem ${label}`}</h1>
-          <p style={{ color: '#94a3b8' }}>{problem.platform}{canSeeMeta ? ` - Rating ${problem.rating || problem.difficulty || 'Practice'} - ${(problem.tags || []).join(', ')}` : ' - rating hidden'}</p>
+          <h1>{canSeeMeta ? actualTitle : `Problem ${label}`}</h1>
+          <p style={{ color: '#94a3b8' }}>
+            {problem.platform}
+            {canSeeMeta ? ` - Rating ${actualRating}${tags.length ? ` - ${tags.join(', ')}` : ''}` : ' - rating hidden'}
+          </p>
           
-          {/* 👉 THE GREEN "ALREADY SOLVED" BANNER */}
           {isSolvedByTeam && (
             <div style={{ marginTop: 16, padding: 16, borderRadius: 12, background: 'rgba(74, 222, 128, 0.15)', border: '1px solid rgba(74, 222, 128, 0.3)', color: '#4ade80' }}>
               <strong>🎉 Awesome!</strong><br />
@@ -80,7 +87,8 @@ export default function ContestProblemPage() {
           )}
 
           <div style={actions}>
-            {problem.url && <a href={problem.url} target="_blank" rel="noreferrer" style={primary}>Open statement</a>}
+            {/* 👉 FIX: Use actualUrl derived from the database shape */}
+            {actualUrl && <a href={actualUrl} target="_blank" rel="noreferrer" style={primary}>Open statement</a>}
             {isPlayer && !isSolvedByTeam && <a href={`/submit?contestId=${id}&problemId=${problem.id}`} style={primary}>Submit</a>}
           </div>
         </section>
