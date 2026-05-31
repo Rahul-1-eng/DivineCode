@@ -64,10 +64,19 @@ export async function recomputeContestStandings(contestId: string) {
 
     // 2. Calculate Standings for each participant based on their TEAM's data
     const standingRows = contest.participants.map((participant) => {
-      if (!participant.teamId || !teamState.has(participant.teamId)) {
-        return { participantId: participant.id, rank: 0, solved: 0, penalty: 0, score: 0, solvedProblemIds: [] as string[] };
-      }
-
+     if (!participant.teamId || !teamState.has(participant.teamId)) {
+    return { 
+      participantId: participant.id, 
+      contestId: contestId, // <--- ADD THIS
+      rank: 0, 
+      solved: 0, 
+      penalty: 0, 
+      score: 0, 
+      solvedProblemIds: [] as string[],
+      lastAcceptedAt: null // <--- ADD THIS (Must be null, not undefined)
+    };
+  }
+      
       const problemMap = teamState.get(participant.teamId)!;
       const solvedEntries = [...problemMap.entries()].filter(([, state]) => state.acceptedAt);
       

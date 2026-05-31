@@ -120,6 +120,7 @@ model Submission {
   participantId        String?
   problemId            String?
   contestId            String?
+  teamId               String?
   contestProblemId     String?
   source               SubmissionSource       @default(INTERNAL_JUDGE)
   status               SubmissionStatus       @default(QUEUED)
