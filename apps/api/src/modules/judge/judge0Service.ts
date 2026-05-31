@@ -271,3 +271,51 @@ export async function executeSubmission(
     return { verdict: 'RUNTIME_ERROR', stderr: 'Could not connect to execution engine.' };
   }
 }
+// apps/api/src/modules/judge/judgeService.ts (or where your verdict handling lives)
+
+async function finalizeVerdict(submissionId: string, verdict: Verdict) {
+  const submission = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    include: { participant: true }
+  });
+
+  if (!submission) return;
+
+  // 1. Update the verdict
+  await prisma.submission.update({
+    where: { id: submissionId },
+    data: { verdict }
+  });
+
+  // 2. IF ACCEPTED, Apply Team Scoring Rules
+  if (verdict === Verdict.ACCEPTED) {
+    const teamId = submission.participant.teamId;
+    const problemId = submission.contestProblemId;
+
+    // Check if the team has ALREADY solved this
+    const teamAlreadySolved = await prisma.submission.findFirst({
+      where: {
+        contestProblemId: problemId,
+        teamId: teamId,
+        verdict: Verdict.ACCEPTED,
+        id: { not: submissionId } // Ensure we aren't counting the current submission
+      }
+    });
+
+    // AWARD TEAM POINTS ONLY IF FIRST SOLVE
+    if (!teamAlreadySolved) {
+      await prisma.contestParticipant.updateMany({
+        where: { teamId: teamId }, // Update all members of the team
+        data: {
+          score: { increment: 100 } // Or your specific point value
+        }
+      });
+    }
+
+    // ALWAYS AWARD INDIVIDUAL POINTS
+    await prisma.contestParticipant.update({
+      where: { id: submission.participantId },
+      data: { score: { increment: 100 } }
+    });
+  }
+}

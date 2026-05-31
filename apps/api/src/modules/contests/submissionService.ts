@@ -40,14 +40,15 @@ export async function createQueuedContestSubmission(input: {
     data: {
       userId: participant.userId,
       participantId: participant.id,
+      teamId: participant.teamId, // Store teamId here for privacy filtering
       problemId: contestProblem.problemId,
       contestId: contest.id,
       contestProblemId: contestProblem.id,
       source: SubmissionSource.INTERNAL_JUDGE,
       status: SubmissionStatus.QUEUED,
       verdict: Verdict.PENDING,
-      language: input.language,
-      code: input.code
+      language: input.language!,
+      code: input.code!
     }
   });
 }
