@@ -1,4 +1,4 @@
-import { SubmissionSource, SubmissionStatus, Verdict } from '@prisma/client';
+import { SubmissionSource, SubmissionStatus, Verdict, ContestStatus } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { findViewerParticipant, ViewerContext } from './contestRules';
 
@@ -38,7 +38,7 @@ export async function createQueuedContestSubmission(input: {
 
   return prisma.submission.create({
     data: {
-      userId: participant.userId,
+      userId: participant.userId!,
       participantId: participant.id,
       teamId: participant.teamId, // Store teamId here for privacy filtering
       problemId: contestProblem.problemId,
@@ -50,5 +50,54 @@ export async function createQueuedContestSubmission(input: {
       language: input.language!,
       code: input.code!
     }
+  });
+}
+
+export async function getContestSubmissions(input: {
+  contestId: string;
+  viewer: ViewerContext;
+}) {
+  const contest = await prisma.contest.findUnique({
+    where: { id: input.contestId },
+    include: { participants: true }
+  });
+
+  if (!contest) throw new Error('Contest not found');
+
+  const participant = findViewerParticipant(contest, input.viewer);
+  const isOwner = contest.createdById === input.viewer.userId;
+
+  let whereClause: any = { contestId: input.contestId };
+
+  // If the user is NOT the owner, enforce visibility rules
+  if (!isOwner) {
+    if (contest.status === ContestStatus.RUNNING) {
+      if (!participant) throw new Error('Only active participants can view submissions during the contest.');
+      
+      // Filter strictly to the user's team
+      if (participant.teamId) {
+        whereClause.teamId = participant.teamId;
+      } else {
+        // Fallback for Solo contests
+        whereClause.userId = participant.userId; 
+      }
+    } else if (contest.status === ContestStatus.ENDED) {
+      // Contest ended: Everyone sees everything (No extra filters added to whereClause)
+    } else {
+      // Draft, Scheduled, or Frozen: Hide submissions from non-owners
+      throw new Error('Submissions are not visible at this time.');
+    }
+  }
+
+  // Fetch submissions with the applied filters
+  return prisma.submission.findMany({
+    where: whereClause,
+    include: {
+      user: {
+        select: { username: true, avatarUrl: true }
+      },
+      reports: isOwner ? true : false, // Only owners need to see the reports array
+    },
+    orderBy: { createdAt: 'desc' }
   });
 }

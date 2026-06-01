@@ -35,8 +35,8 @@ export async function recomputeContestStandings(contestId: string) {
     if (!contest) throw new Error('Contest not found');
 
     // 1. Group submissions by teamId
-    // Map<teamId, Map<contestProblemId, { wrongAttempts: number, acceptedAt?: Date }>>
-    const teamState = new Map<string, Map<string, { wrongAttempts: number, acceptedAt?: Date }>>();
+    // Map<teamId, Map<contestProblemId, { wrongAttempts: number, acceptedAt?: Date, manualPoints?: number | null }>>
+    const teamState = new Map<string, Map<string, { wrongAttempts: number, acceptedAt?: Date, manualPoints: number | null }>>();
 
     for (const submission of contest.submissions) {
       if (!submission.teamId) continue;
@@ -48,10 +48,19 @@ export async function recomputeContestStandings(contestId: string) {
       
       const problemMap = teamState.get(submission.teamId)!;
       const problemId = String(submission.contestProblemId);
-      const state = problemMap.get(problemId) || { wrongAttempts: 0 };
+      const state = problemMap.get(problemId) || { wrongAttempts: 0, manualPoints: null };
 
-      // If already solved, ignore further submissions for this team/problem
-      if (state.acceptedAt) continue;
+      // If an owner applied manual points, it counts as solved and overrides everything
+      if (submission.manualPoints !== null) {
+         state.manualPoints = submission.manualPoints;
+         state.acceptedAt = state.acceptedAt || submission.createdAt;
+      }
+
+      // If already solved (and we haven't hit a manual point override), ignore further submissions
+      if (state.acceptedAt && submission.manualPoints === null) {
+         problemMap.set(problemId, state);
+         continue;
+      }
 
       if (submission.verdict === Verdict.ACCEPTED && submission.status === SubmissionStatus.FINISHED) {
         state.acceptedAt = submission.createdAt;
@@ -64,18 +73,18 @@ export async function recomputeContestStandings(contestId: string) {
 
     // 2. Calculate Standings for each participant based on their TEAM's data
     const standingRows = contest.participants.map((participant) => {
-     if (!participant.teamId || !teamState.has(participant.teamId)) {
-    return { 
-      participantId: participant.id, 
-      contestId: contestId, // <--- ADD THIS
-      rank: 0, 
-      solved: 0, 
-      penalty: 0, 
-      score: 0, 
-      solvedProblemIds: [] as string[],
-      lastAcceptedAt: null // <--- ADD THIS (Must be null, not undefined)
-    };
-  }
+      if (!participant.teamId || !teamState.has(participant.teamId)) {
+        return { 
+          participantId: participant.id, 
+          contestId: contestId, 
+          rank: 0, 
+          solved: 0, 
+          penalty: 0, 
+          score: 0, 
+          solvedProblemIds: [] as string[],
+          lastAcceptedAt: null
+        };
+      }
       
       const problemMap = teamState.get(participant.teamId)!;
       const solvedEntries = [...problemMap.entries()].filter(([, state]) => state.acceptedAt);
@@ -84,13 +93,19 @@ export async function recomputeContestStandings(contestId: string) {
         return sum + acceptedMinute(contest, state.acceptedAt!) + (state.wrongAttempts * PENALTY_PER_WRONG_ATTEMPT);
       }, 0);
 
+      // Score respects manual overrides, defaulting to 1000 if untouched
+      const totalScore = solvedEntries.reduce((sum, [, state]) => {
+        const problemPoints = state.manualPoints !== null ? state.manualPoints : 1000;
+        return sum + problemPoints;
+      }, 0) - penalty;
+
       return {
         participantId: participant.id,
         contestId,
         rank: 0,
         solved: solvedEntries.length,
         penalty,
-        score: solvedEntries.length * 1000 - penalty,
+        score: totalScore,
         solvedProblemIds: solvedEntries.map(([id]) => id),
         lastAcceptedAt: solvedEntries.map(([, state]) => state.acceptedAt!).sort((a, b) => b.getTime() - a.getTime())[0] || null
       };

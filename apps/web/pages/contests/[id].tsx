@@ -28,6 +28,7 @@ export default function ContestRoomPage() {
   const { id } = router.query;
   const isFinal = router.pathname.includes('/final');
   const { data: session, status } = useSession();
+  
   const [contest, setContest] = useState<any>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [selectedMember, setSelectedMember] = useState<any>(null);
@@ -37,8 +38,13 @@ export default function ContestRoomPage() {
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState('Not synced yet');
+  
+  // States for new features
   const [newProblemCode, setNewProblemCode] = useState('');
   const [newProblemPlatform, setNewProblemPlatform] = useState('Codeforces');
+  const [reportReason, setReportReason] = useState('');
+  const [overridePoints, setOverridePoints] = useState<number | ''>('');
+  
   const syncingRef = useRef(false);
 
   const isOwner = Boolean(contest?.canManage);
@@ -67,6 +73,7 @@ export default function ContestRoomPage() {
 
   async function loadSubmissions() {
     if (!id) return;
+    // Uses the updated getContestSubmissions logic from the backend
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions${viewerQuery(session)}`, { headers: viewerHeaders(session) });
     const data = await res.json();
     setSubmissions(Array.isArray(data) ? data : []);
@@ -144,6 +151,58 @@ export default function ContestRoomPage() {
       setContest(data);
     } catch (e: any) {
       alert(e.message || 'Could not replace problem');
+    }
+  }
+
+  // New Action: Submit Discrepancy Report
+  async function submitReport() {
+    if (!selectedSubmission || !reportReason.trim()) return;
+    const res = await fetch(`${API_BASE_URL}/api/submissions/${selectedSubmission.id}/report`, {
+      method: 'POST',
+      headers: viewerHeaders(session),
+      body: JSON.stringify({ reason: reportReason })
+    });
+    if (res.ok) {
+      alert('Report submitted successfully to the contest owner.');
+      setReportReason('');
+    } else {
+      const data = await res.json();
+      alert(data.error || 'Failed to report submission');
+    }
+  }
+  
+  async function finalizeContest() {
+    if (!id || !session || !confirm('End this contest immediately and calculate final ratings/coins? This cannot be undone.')) return;
+    
+    setSyncing(true); // Reuse syncing state for loading indication
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/finalize`, { 
+      method: 'POST', 
+      headers: viewerHeaders(session) 
+    });
+    const data = await res.json();
+    setSyncing(false);
+    
+    if (!res.ok) return alert(data.error || 'Could not finalize contest');
+    
+    alert(data.message);
+    router.push(`/contests/${id}/final`); // Redirect them to the final standings page
+  }
+  // New Action: Submit Manual Points Override
+  async function submitOverride() {
+    if (!selectedSubmission || overridePoints === '') return;
+    const res = await fetch(`${API_BASE_URL}/api/submissions/${selectedSubmission.id}/override`, {
+      method: 'POST',
+      headers: viewerHeaders(session),
+      body: JSON.stringify({ manualPoints: Number(overridePoints) })
+    });
+    if (res.ok) {
+      alert('Points overridden successfully. Standings will recalculate instantly.');
+      setSelectedSubmission(null);
+      await loadSubmissions();
+      await loadContest(); // Refresh standings
+    } else {
+      const data = await res.json();
+      alert(data.error || 'Failed to override points');
     }
   }
 
@@ -240,6 +299,9 @@ export default function ContestRoomPage() {
             <button onClick={() => syncCodeforces(false)} disabled={syncing} style={primaryButton}>{syncing ? 'Syncing...' : 'Sync Codeforces now'}</button>
             <button onClick={() => extendTime(15)} style={ghostButton}>+15 min</button>
             <button onClick={() => extendTime(30)} style={ghostButton}>+30 min</button>
+            <button onClick={finalizeContest} style={{...primaryButton, background: 'linear-gradient(135deg, #f59e0b, #fbbf24)', color: '#000'}}>
+              End Contest & Calculate Ratings
+            </button>
             <button onClick={deleteContest} style={dangerButton}>Delete mashup</button>
             <h3>Add live problem</h3>
             <select value={newProblemPlatform} onChange={(e) => setNewProblemPlatform(e.target.value)} style={smallInput}><option>Codeforces</option><option>LeetCode</option><option>AtCoder</option><option>CodeChef</option></select>
@@ -254,14 +316,9 @@ export default function ContestRoomPage() {
             <div style={{ display: 'grid', gap: 12 }}>
               {contest.problems.map((p: any, index: number) => {
                 const label = String.fromCharCode(65 + index);
-                
-                // 👉 FIX: Extract the actual properties appropriately based on backend schema
                 const actualTitle = p.titleSnapshot || p.problem?.title || `Problem ${label}`;
                 const visibleTitle = canSeeProblemMeta ? actualTitle : `Problem ${label}`;
-                
-                // 👉 FIX: Always safely link them to the internal problem page so they don't lose the Submit button!
                 const safeProblemHref = `/contests/${contest.id}/problems/${p.id}`;
-                
                 const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
 
                 return <div key={p.id} style={{
@@ -305,32 +362,57 @@ export default function ContestRoomPage() {
         </section>
 
         <section style={{ ...panel, marginTop: 18 }}>
-          <h2>Overall Player Standings</h2>
-          <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Rank</th><th style={th}>Member</th><th style={th}>Team</th><th style={th}>Solved</th><th style={th}>Penalty</th><th style={th}>Score</th></tr></thead><tbody>{contest.standings.map((standing: any, i: number) => <tr key={standing.memberId} onClick={() => canInspectMember(standing.memberId) && setSelectedMember({ ...standing, codeforcesHandle: memberById[standing.memberId]?.codeforcesHandle })} style={canInspectMember(standing.memberId) ? clickRow : mutedRow}><td style={td}>#{i + 1}</td><td style={td}>{standing.name}</td><td style={td}>{memberById[standing.memberId]?.team || 'Individuals'}</td><td style={td}>{standing.solved}</td><td style={td}>{standing.penalty}</td><td style={td}>{standing.score}</td></tr>)}</tbody></table></div>
-        </section>
-
-        <section style={{ ...panel, marginTop: 18 }}>
           <h2>{isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}</h2>
           {submissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
           <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Time</th><th style={th}>User</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Source</th></tr></thead><tbody>{submissions.map((submission) => <tr key={submission.id} onClick={() => setSelectedSubmission(submission)} style={clickRow}><td style={td}>{new Date(submission.createdAt).toLocaleString()}</td><td style={td}>{submission.userId}</td><td style={td}>{problemById[submission.problemId]?.label || ''} {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot || problemById[submission.problemId]?.problem?.title || submission.problemId : ''}</td><td style={td}>{submission.verdict}</td><td style={td}>{submission.source || submission.platform || 'DivineCode'}</td></tr>)}</tbody></table></div>
         </section>
 
-        {selectedMember && <section style={{ ...panel, marginTop: 18 }}>
-          <h2>{selectedMember.name} submissions</h2>
-          <button onClick={() => setSelectedMember(null)} style={ghostButton}>Close</button>
-          {memberSubmissions.length === 0 ? <p style={{ color: '#94a3b8' }}>No visible submissions for this member.</p> : memberSubmissions.map((submission) => <div key={submission.id} onClick={() => setSelectedSubmission(submission)} style={detailCard}><strong>{submission.verdict}</strong><span>{canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot || submission.problemId : problemById[submission.problemId]?.label || submission.problemId}</span><small>{new Date(submission.createdAt).toLocaleString()} - {submission.source || submission.platform}</small></div>)}
-        </section>}
-
         {selectedSubmission && <section style={{ ...panel, marginTop: 18 }}>
           <h2>Submission detail</h2>
-          <button onClick={() => setSelectedSubmission(null)} style={ghostButton}>Close</button>
+          <button onClick={() => setSelectedSubmission(null)} style={ghostButton}>Close Panel</button>
           <div style={detailCard}>
             <p><b>User:</b> {selectedSubmission.userId}</p>
             <p><b>Problem:</b> {canSeeProblemMeta ? problemById[selectedSubmission.problemId]?.titleSnapshot || selectedSubmission.problemId : problemById[selectedSubmission.problemId]?.label || selectedSubmission.problemId}</p>
             <p><b>Verdict:</b> {selectedSubmission.verdict}</p>
             <p><b>Language:</b> {selectedSubmission.language || 'Unknown'}</p>
             <p><b>Source:</b> {selectedSubmission.source || selectedSubmission.platform || 'DivineCode'}</p>
+            
+            {/* Display Manual Points if overridden */}
+            {selectedSubmission.manualPoints !== null && selectedSubmission.manualPoints !== undefined && (
+              <p style={{ color: '#fbbf24' }}><b>Manual Override Points:</b> {selectedSubmission.manualPoints}</p>
+            )}
+            
             {isOwner && selectedSubmission.externalSubmissionId && <a href={`https://codeforces.com/contest/${problemById[selectedSubmission.problemId]?.contestCode}/submission/${selectedSubmission.externalSubmissionId}`} target="_blank" rel="noreferrer" style={primaryLink}>Open Codeforces submission</a>}
+            
+            {/* Peer Reporting UI (Only when contest is over, and it is not the user's own submission) */}
+            {isFinal && !isOwner && selectedSubmission.userId !== (session?.user?.name || session?.user?.email) && (
+              <div style={{ marginTop: 16, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 16 }}>
+                <h4 style={{ margin: '0 0 8px 0', color: '#f87171' }}>Report Discrepancy</h4>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input style={{...smallInput, marginBottom: 0}} placeholder="Suspected AI, Hardcoded, etc." value={reportReason} onChange={e => setReportReason(e.target.value)} />
+                  <button style={{...ghostButton, borderColor: 'rgba(248,113,113,.4)', color: '#fecaca', marginBottom: 0}} onClick={submitReport}>Report</button>
+                </div>
+              </div>
+            )}
+
+            {/* Owner Actions UI */}
+            {isOwner && (
+              <div style={{ marginTop: 16, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 16 }}>
+                <h4 style={{ margin: '0 0 8px 0', color: '#fbbf24' }}>Owner Controls</h4>
+                
+                {selectedSubmission.reports?.length > 0 && (
+                  <div style={{ marginBottom: 12, padding: 12, background: 'rgba(248,113,113,.1)', borderRadius: 8, border: '1px solid rgba(248,113,113,.3)' }}>
+                    <strong style={{ color: '#f87171', display: 'block', marginBottom: 6 }}>Flagged by peers:</strong>
+                    {selectedSubmission.reports.map((r: any) => <p key={r.id} style={{ margin: '4px 0', fontSize: 13, color: '#fecaca' }}>- {r.reason}</p>)}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input style={{...smallInput, width: '120px', marginBottom: 0}} type="number" placeholder="New Points" value={overridePoints} onChange={e => setOverridePoints(e.target.value === '' ? '' : Number(e.target.value))} />
+                  <button style={{...primaryButton, marginBottom: 0, width: 'auto'}} onClick={submitOverride}>Override Points</button>
+                </div>
+              </div>
+            )}
           </div>
         </section>}
       </section>
@@ -338,6 +420,7 @@ export default function ContestRoomPage() {
   );
 }
 
+// ... Keep your existing styles down here (page, nav, userPill, gate, link, primaryLink, etc) ...
 const page: CSSProperties = { minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.32), transparent 34rem), #070a16' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 };
 const userPill: CSSProperties = { padding: '10px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)' };

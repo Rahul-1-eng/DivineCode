@@ -6,14 +6,17 @@ import { canManageContest, findViewerParticipant, sanitizeContestForViewer, sani
 import { addContestProblemV2, createContestV2, deleteContestV2, extendContestV2, listContestsV2, loadContestForViewer, removeContestProblemV2, replaceContestProblemV2, updateContestSettingsV2, getContestSubmissionsV2 } from '../modules/contests/contestService';
 import { createQueuedContestSubmission } from '../modules/contests/submissionService';
 import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncService';
-// Find your existing imports and add syncTestCasesFromCodeforces to the list
 import { createInternalProblem, syncTestCasesFromCodeforces } from '../modules/problems/problemService';
 import { recomputeContestStandings } from '../modules/standings/standingService';
 import { recommendationBand } from '../modules/ratings/recommendationMath';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
-// 👉 IMPORTS THE SUBMISSION ROUTER
 import { submissionRouter } from './submissionRoutes';
 import { syncUserRatings } from '../modules/external-sync/profileSyncService';
+import { ContestStatus } from '@prisma/client';
+import { rewardsQueue } from '../queues/queues';
+
+// 👉 IMPORT THE NEW INTERVIEW ROUTER
+import { interviewRouter } from './interviewRoutes'; 
 
 type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<void>;
 
@@ -77,30 +80,18 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ ok: true, sourceOfTruth: 'postgres-prisma' });
   }));
 
-  // 👉 1. THE AUTOMATED POLLING ENDPOINT (CRON)
-  // This route will be pinged every 1 minute to auto-sync all LIVE matches.
   router.post('/cron/sync-live-contests', asyncRoute(async (req, res) => {
-    // Basic security so people don't spam your background workers
     if (req.headers['x-cron-secret'] !== (process.env.CRON_SECRET || 'dev-secret')) {
       res.status(401).json({ error: 'Unauthorized CRON trigger' });
       return;
     }
-    
-    // Find every contest that is currently running
-    const liveContests = await prisma.contest.findMany({
-      where: { status: 'RUNNING' }
-    });
-
-    // Toss them all into the BullMQ worker queue to process silently in the background
+    const liveContests = await prisma.contest.findMany({ where: { status: 'RUNNING' } });
     for (const contest of liveContests) {
       await enqueueCodeforcesContestSync(contest.id);
     }
-
     res.json({ ok: true, status: 'Polling Started', jobsQueued: liveContests.length });
   }));
 
-  // 👉 2. THE RATING SYNC ENDPOINT
-  // Frontend calls this when a user links a new handle to calculate their new Global Rating
   router.post('/users/:id/sync-ratings', asyncRoute(async (req, res) => {
     const newRating = await syncUserRatings(req.params.id);
     res.json({ ok: true, globalRating: newRating });
@@ -116,23 +107,20 @@ export function mountV2Routes(app: Express, io: Server) {
     const problem = await createInternalProblem(req.body);
     res.status(201).json(problem);
   }));
-router.post('/problems/:id/sync-testcases', asyncRoute(async (req, res) => {
+
+  router.post('/problems/:id/sync-testcases', asyncRoute(async (req, res) => {
     const { id } = req.params;
-    const { url } = req.body; // Frontend sends this from problem.url
+    const { url } = req.body; 
     if (!url) throw new Error('Problem URL is required');
-    
-    // We assume you have permission logic or owner check here
     const result = await syncTestCasesFromCodeforces(id, url);
     res.json({ ok: true, problem: result });
   }));
+
   router.get('/problems/:id', asyncRoute(async (req, res) => {
     const problem = await prisma.problem.findUnique({
       where: { id: req.params.id },
       include: {
-        testcases: {
-          where: { isPublic: true },
-          orderBy: { order: 'asc' }
-        },
+        testcases: { where: { isPublic: true }, orderBy: { order: 'asc' } },
         editorial: true
       }
     });
@@ -206,12 +194,8 @@ router.post('/problems/:id/sync-testcases', asyncRoute(async (req, res) => {
     requireOwner(contest, req);
 
     await prisma.$transaction(async (tx) => {
-      await tx.contestParticipant.deleteMany({
-        where: { contestId: req.params.id, id: req.params.memberId }
-      });
-      await tx.submission.deleteMany({
-        where: { contestId: req.params.id, participantId: req.params.memberId }
-      });
+      await tx.contestParticipant.deleteMany({ where: { contestId: req.params.id, id: req.params.memberId } });
+      await tx.submission.deleteMany({ where: { contestId: req.params.id, participantId: req.params.memberId } });
     });
 
     const refreshedStandings = await recomputeContestStandings(req.params.id);
@@ -287,6 +271,46 @@ router.post('/problems/:id/sync-testcases', asyncRoute(async (req, res) => {
     res.json(recommendationBand(req.body));
   }));
 
+  router.post('/contests/:id/finalize', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const email = req.headers['x-user-email'] as string;
+
+      const contest = await prisma.contest.findUnique({
+        where: { id },
+        include: { createdBy: true }
+      });
+
+      if (!contest) return res.status(404).json({ error: 'Contest not found' });
+      
+      if (contest.createdBy?.email !== email) {
+        return res.status(403).json({ error: 'Only the contest owner can finalize it.' });
+      }
+
+      if (contest.status === ContestStatus.ENDED) {
+        return res.status(400).json({ error: 'Contest is already finalized.' });
+      }
+
+      await prisma.contest.update({
+        where: { id },
+        data: { status: ContestStatus.ENDED, endTime: new Date() }
+      });
+
+      if (contest.isRated) {
+        await rewardsQueue.add('process-rewards', { contestId: id });
+      }
+
+      return res.json({ 
+        success: true, 
+        message: contest.isRated ? 'Contest finalized. Ratings and coins are calculating in the background.' : 'Unrated contest finalized.' 
+      });
+
+    } catch (error: any) {
+      console.error('Finalize error:', error);
+      return res.status(500).json({ error: 'Failed to finalize contest.' });
+    }
+  });
+
   router.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
     res.status(statusFromError(error)).json({
       ok: false,
@@ -297,4 +321,5 @@ router.post('/problems/:id/sync-testcases', asyncRoute(async (req, res) => {
   // 👉 MOUNT BOTH ROUTERS SAFELY HERE
   app.use('/api/v2', router);
   app.use('/api/v2/submissions', submissionRouter); 
+  app.use('/api/v2/interview', interviewRouter); // <--- MOUNTED
 }

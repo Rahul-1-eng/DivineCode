@@ -117,6 +117,32 @@ export async function judgeQueuedSubmission(submissionId: string) {
 
   if (!submission) throw new Error('Submission not found');
   if (!submission.code) throw new Error('Submission has no code to judge');
+
+  // 👉 NEW: MCQ Bypass Logic
+  if (submission.language === 'mcq') {
+    const mcq = await prisma.interviewQuestion.findUnique({
+      where: { id: submission.contestProblem!.interviewQuestionId! }
+    });
+
+    const isCorrect = mcq?.correctIndex === parseInt(submission.code);
+    const verdict = isCorrect ? Verdict.ACCEPTED : Verdict.WRONG_ANSWER;
+    const judgeMessage = isCorrect ? 'Correct Answer' : 'Incorrect Answer';
+
+    const judged = await prisma.submission.update({
+      where: { id: submission.id },
+      data: {
+        status: SubmissionStatus.FINISHED,
+        verdict,
+        judgeMessage,
+        judgedAt: new Date()
+      }
+    });
+
+    const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
+    return { submission: judged, standings };
+  }
+
+  // STANDARD COMPILATION LOGIC BELOW
   if (!languageMap[submission.language as JudgeLanguage]) throw new Error(`Unsupported language: ${submission.language}`);
 
   if (!submission.problem) {

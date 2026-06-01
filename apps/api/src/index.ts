@@ -9,7 +9,7 @@ import { deleteContestDocument, loadContestDocuments, loadSubmissionDocuments, s
 import { mountV2Routes } from './routes/v2';
 import { startQueueWorkers } from './workers/runWorkers';
 import { enqueueCodeforcesContestSync } from './queues/queues';
-
+import { setupDuelSockets } from './modules/duel/duelSocketService';
 const app = express();
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '*';
 app.use(cors({ origin: CLIENT_ORIGIN === '*' ? '*' : CLIENT_ORIGIN.split(',').map((origin) => origin.trim()) }));
@@ -17,7 +17,8 @@ app.use(express.json({ limit: '1mb' }));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: CLIENT_ORIGIN === '*' ? '*' : CLIENT_ORIGIN.split(',').map((origin) => origin.trim()), methods: ['GET', 'POST'] } });
-
+startQueueWorkers(io);
+setupDuelSockets(io);
 type McqQuestion = { id: number; question: string; options: string[]; correctIndex: number; concept: string };
 type Player = { id: string; name: string; score: number };
 type DuelRoom = { id: string; players: Player[]; questionIndex: number; questions: McqQuestion[]; finished: boolean };
@@ -39,6 +40,7 @@ const problems = [
   { id: 2, title: 'Binary Search', difficulty: 900, tags: ['binary-search'], description: 'Find the target index in a sorted array.', stdin: '5 7\n1 3 5 7 9\n', expectedOutput: '3' },
   { id: 3, title: 'Reverse Linked List', difficulty: 1200, tags: ['linked-list'], description: 'Reverse a singly linked list.', stdin: '', expectedOutput: '' }
 ];
+
 
 // 👉 PHASE 3: INTELLIGENT DUEL QUESTION BANK (DSA, SQL, OOPS, MIPS)
 const intelligentQuestionsBank: Omit<McqQuestion, 'id'>[] = [

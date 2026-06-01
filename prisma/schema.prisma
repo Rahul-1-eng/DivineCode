@@ -18,6 +18,7 @@ model User {
   rating                  Int                      @default(1200)
   duelRating              Int                      @default(1200)
   globalRating            Int                      @default(1200)
+  coins                   Int                      @default(0)
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
   auditLogs               AuditLog[]
@@ -33,6 +34,8 @@ model User {
   recommendationSnapshots RecommendationSnapshot[]
   submissions             Submission[]
   topicMastery            TopicMastery[]
+  submissionReports       SubmissionReport[]
+  submittedInterviewQuestions InterviewQuestion[] // ADDED: Back-relation
 }
 
 model ExternalHandle {
@@ -140,10 +143,35 @@ model Submission {
   problem              Problem?               @relation(fields: [problemId], references: [id])
   user                 User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   testResults          SubmissionTestResult[]
+  isFlagged            Boolean                @default(false)
+  manualPoints         Int? // Owner can override the points here
+  reports              SubmissionReport[] // Link to new reports model
 
   @@unique([source, externalSubmissionId])
   @@index([userId])
   @@index([contestId])
+}
+
+model SubmissionReport {
+  id           String       @id @default(cuid())
+  submissionId String
+  reporterId   String
+  reason       String       @db.Text // e.g., "Suspected AI generation", "Hardcoded outputs"
+  status       ReportStatus @default(PENDING)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  reporter   User       @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, reporterId]) // A user can only report a specific submission once
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  DISMISSED
+  ACTION_TAKEN
 }
 
 model OfficialSolution {
@@ -222,7 +250,8 @@ model ContestParticipant {
   standing         ContestStanding?
   submissions      Submission[]
   teamId           String?
-  score            Int      @default(0)
+  score            Int                    @default(0)
+
   @@unique([contestId, userId])
   @@index([contestId, teamName])
   @@index([externalHandleId])
@@ -232,6 +261,7 @@ model ContestProblem {
   id            String       @id @default(cuid())
   contestId     String
   problemId     String?
+  interviewQuestionId String?
   titleSnapshot String
   platform      Platform     @default(DIVINECODE)
   externalId    String?
@@ -245,6 +275,7 @@ model ContestProblem {
   addedBy       User?        @relation(fields: [addedById], references: [id])
   contest       Contest      @relation(fields: [contestId], references: [id], onDelete: Cascade)
   problem       Problem?     @relation(fields: [problemId], references: [id])
+  interviewQuestion InterviewQuestion? @relation(fields: [interviewQuestionId], references: [id])
   submissions   Submission[]
 
   @@unique([contestId, index])
@@ -470,15 +501,20 @@ model InterviewQuestion {
   trackId         String
   title           String
   prompt          String
+  options         Json?               // ADDED: To store the MCQ array ["A", "B", "C", "D"]
+  correctIndex    Int?                // ADDED: To store the correct answer index
   difficultyLabel String?
   expectedAnswer  String?
   tags            String[]
   sourceCompany   String?
+  isApproved      Boolean             @default(true) // False if submitted by a user
+  submittedById   String?
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
   progress        InterviewProgress[]
   track           InterviewTrack      @relation(fields: [trackId], references: [id], onDelete: Cascade)
-
+  submittedBy     User?               @relation(fields: [submittedById], references: [id])
+  contestProblems ContestProblem[]    // ADDED: Relation for Mashups
   @@index([trackId])
 }
 

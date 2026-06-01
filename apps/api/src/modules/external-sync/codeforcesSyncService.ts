@@ -83,19 +83,16 @@ export async function syncCodeforcesContest(contestId: string) {
         }
       });
 
-    // 2. Loop through participants (Only 1 API call per participant total!)
+    // 2. Loop through participants (Only 1 API call per participant total)
     for (const participant of contest.participants) {
       const handle = participant.externalHandle?.platform === Platform.CODEFORCES ? participant.externalHandle.handle : null;
       if (!handle) continue;
 
       try {
-        // Fetch up to 100 recent submissions for this individual user (captures both OK and failed attempts)
         const submissions = await fetchCodeforcesUserStatus(handle, 100);
 
         for (const sub of submissions) {
           const subTime = new Date(sub.creationTimeSeconds * 1000);
-          // Ensure submission fell cleanly within the active mashup window
-          // if (subTime < contest.startTime || subTime > contest.endTime) continue;
 
           const cfContestId = sub.problem?.contestId;
           const cfIndex = sub.problem?.index;
@@ -104,14 +101,12 @@ export async function syncCodeforcesContest(contestId: string) {
           const matchKey = `${cfContestId}-${cfIndex}`.toUpperCase();
           const targetContestProblem = problemLookup.get(matchKey);
 
-          // If this external submission matches one of your mashup assignments, process it
           if (targetContestProblem) {
             const externalSubmissionId = String(sub.id);
             const targetVerdict = mapCfVerdictToPrisma(sub.verdict);
             const isAccepted = targetVerdict === Verdict.ACCEPTED;
 
             await prisma.$transaction(async (tx) => {
-              // Track sync logging event history
               await tx.externalSyncEvent.upsert({
                 where: {
                   platform_externalSubmissionId: {
@@ -135,7 +130,6 @@ export async function syncCodeforcesContest(contestId: string) {
                 }
               });
 
-              // 👉 CHANGED: findUnique to findFirst, and simplified the where clause
               const existingSubmission = await tx.submission.findFirst({
                 where: {
                   source: SubmissionSource.EXTERNAL_SYNC,
@@ -143,26 +137,23 @@ export async function syncCodeforcesContest(contestId: string) {
                 }
               });
 
-              // Write the submission records into storage whether they passed or failed!
-              // Write the submission records into storage whether they passed or failed!
               if (!existingSubmission) {
                 const created = await tx.submission.create({
                   data: {
-                    userId: participant.userId as string, // Cast to guarantee string
+                    userId: participant.userId as string,
                     participantId: participant.id,
+                    teamId: participant.teamId, // 👉 INJECTED: Ties CF solve to the user's specific DivineCode group
                     contestId,
                     contestProblemId: targetContestProblem.id,
                     problemId: targetContestProblem.problemId || null,
-                    
-                    // 👉 FIXED: 'code' is required by the database schema!
                     code: '// External submission synced from Codeforces', 
-                    
                     source: SubmissionSource.EXTERNAL_SYNC,
                     status: SubmissionStatus.FINISHED,
                     verdict: targetVerdict,
                     language: sub.programmingLanguage || 'external',
                     externalSubmissionId,
                     externalCreatedAt: subTime,
+                    createdAt: subTime, // 👉 INJECTED: Overrides database default(now()) for accurate penalty time math
                     judgedAt: new Date()
                   }
                 });
@@ -172,7 +163,7 @@ export async function syncCodeforcesContest(contestId: string) {
           }
         }
 
-        // Rate-limiting cushion: pause half a second between users to protect your server IP
+        // Rate-limiting cushion: pause half a second between users to protect server IP
         await new Promise((resolve) => setTimeout(resolve, 500));
 
       } catch (error) {

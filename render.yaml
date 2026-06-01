@@ -1,5 +1,14 @@
+envVarGroups:
+  - name: divinecode-shared-secrets
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JUDGE_WORKER_SECRET
+        generateValue: true
+      - key: CRON_SECRET
+        value: "my-secret-password-123" # Change this string to a secure token in your Render dashboard panel later
+
 services:
-  # --- EXISTING SERVICES ---
   - type: keyvalue
     name: divinecode-redis
     plan: starter
@@ -14,8 +23,7 @@ services:
     preDeployCommand: npm run prisma:deploy
     startCommand: npm run start --workspace apps/api
     envVars:
-      - key: NODE_ENV
-        value: production
+      - fromGroup: divinecode-shared-secrets
       - key: ENABLE_API_WORKERS
         value: "false"
       - key: DATABASE_URL
@@ -27,13 +35,10 @@ services:
           type: keyvalue
           name: divinecode-redis
           property: connectionString
-      # --- UPDATED: Connects to the completely FREE Public Piston API ---
       - key: JUDGE0_URL
         value: https://emkc.org/api/v2/piston/execute
       - key: PISTON_URL
         value: https://emkc.org/api/v2/piston/execute
-      - key: JUDGE_WORKER_SECRET
-        generateValue: true
 
   - type: worker
     name: divinecode-worker
@@ -42,8 +47,7 @@ services:
     buildCommand: npm install && npm run prisma:generate && npm run build --workspace apps/api
     startCommand: npm run worker:start --workspace apps/api
     envVars:
-      - key: NODE_ENV
-        value: production
+      - fromGroup: divinecode-shared-secrets
       - key: ENABLE_API_WORKERS
         value: "true"
       - key: DATABASE_URL
@@ -55,13 +59,10 @@ services:
           type: keyvalue
           name: divinecode-redis
           property: connectionString
-      # --- UPDATED: Connects to the completely FREE Public Piston API ---
       - key: JUDGE0_URL
         value: https://emkc.org/api/v2/piston/execute
       - key: PISTON_URL
         value: https://emkc.org/api/v2/piston/execute
-      - key: JUDGE_WORKER_SECRET
-        generateValue: true
 
 databases:
   - name: divinecode-postgres

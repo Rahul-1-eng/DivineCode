@@ -1,6 +1,6 @@
 import { Queue } from 'bullmq';
 import { CodeforcesContestSyncJob, JudgeSubmissionJob, QUEUE_NAMES } from './jobTypes';
-import { getSharedRedisConnection } from './redis';
+import { getSharedRedisConnection,createRedisConnection } from './redis';
 
 let judgeQueue: Queue<JudgeSubmissionJob> | null = null;
 let externalSyncQueue: Queue<CodeforcesContestSyncJob> | null = null;
@@ -58,3 +58,11 @@ export async function enqueueCodeforcesContestSync(contestId: string) {
     queue: QUEUE_NAMES.externalSync
   };
 }
+export const rewardsQueue = new Queue(QUEUE_NAMES.contestRewards, {
+  connection: createRedisConnection(),
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 2000 },
+    removeOnComplete: true,
+  }
+});
