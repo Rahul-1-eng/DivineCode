@@ -111,12 +111,23 @@ function externalUrl(problem: ProblemInput, platform: Platform) {
 }
 
 function normalizedMember(input: MemberInput) {
-  const displayName = String(input.displayName || input.name || input.email || input.codeforcesHandle || '').trim();
-  if (!displayName) throw new Error('Each participant needs a displayName, name, email, or Codeforces handle');
+  // 👉 UPDATED: Added input.username to the validation list
+  const displayName = String(
+    input.displayName || 
+    input.name || 
+    input.email || 
+    input.codeforcesHandle || 
+    input.username || // Added this line
+    ''
+  ).trim();
+
+  if (!displayName) {
+    throw new Error('Each participant needs a displayName, username, email, or Codeforces handle');
+  }
   
   return {
     ...input,
-    displayName,
+    displayName, // This ensures the rest of the backend sees the username as the display name
     teamName: String(input.teamName || 'Individuals').trim() || 'Individuals'
   };
 }
