@@ -1,15 +1,20 @@
 import { ExternalSyncStatus, Platform, SubmissionSource, SubmissionStatus, Verdict } from '@prisma/client';
+import crypto from 'crypto';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
 
-// Safely parses your problem configurations
+// 👉 FIXED: Added robust regex to parse Gym & Mashup URLs securely
 function parseCodeforcesProblem(problem: any) {
   const externalId = String(problem.externalId || '').trim().toUpperCase();
   const idMatch = externalId.match(/^(\d+)([A-Z][0-9]?)$/);
   if (idMatch) return { contestCode: idMatch[1], problemIndex: idMatch[2] };
 
-  const urlMatch = String(problem.externalUrl || '').match(/problem\/(\d+)\/([A-Z][0-9]?)/i);
+  const urlMatch = String(problem.externalUrl || '').match(/(?:problem|contest)\/(\d+)\/(?:problem\/)?([A-Z][0-9]?)/i);
   if (urlMatch) return { contestCode: urlMatch[1], problemIndex: urlMatch[2].toUpperCase() };
+
+  // Enables matching for: https://codeforces.com/gym/100000/problem/A
+  const gymMatch = String(problem.externalUrl || '').match(/gym\/(\d+)\/problem\/([A-Z][0-9]?)/i);
+  if (gymMatch) return { contestCode: gymMatch[1], problemIndex: gymMatch[2].toUpperCase() };
 
   return null;
 }
@@ -18,26 +23,33 @@ function parseCodeforcesProblem(problem: any) {
 function mapCfVerdictToPrisma(cfVerdict: string | undefined): Verdict {
   if (!cfVerdict) return Verdict.WRONG_ANSWER; 
   switch (cfVerdict.toUpperCase()) {
-    case 'OK':
-      return Verdict.ACCEPTED;
-    case 'WRONG_ANSWER':
-      return Verdict.WRONG_ANSWER;
-    case 'TIME_LIMIT_EXCEEDED':
-      return Verdict.TIME_LIMIT_EXCEEDED;
-    case 'MEMORY_LIMIT_EXCEEDED':
-      return Verdict.MEMORY_LIMIT_EXCEEDED;
-    case 'COMPILATION_ERROR':
-      return Verdict.COMPILATION_ERROR;
-    case 'RUNTIME_ERROR':
-      return Verdict.RUNTIME_ERROR;
-    default:
-      return Verdict.WRONG_ANSWER; // Default to wrong answer fallback for standings penalties
+    case 'OK': return Verdict.ACCEPTED;
+    case 'WRONG_ANSWER': return Verdict.WRONG_ANSWER;
+    case 'TIME_LIMIT_EXCEEDED': return Verdict.TIME_LIMIT_EXCEEDED;
+    case 'MEMORY_LIMIT_EXCEEDED': return Verdict.MEMORY_LIMIT_EXCEEDED;
+    case 'COMPILATION_ERROR': return Verdict.COMPILATION_ERROR;
+    case 'RUNTIME_ERROR': return Verdict.RUNTIME_ERROR;
+    default: return Verdict.WRONG_ANSWER; 
   }
 }
 
-// Fetches the entire submission page for a user at once
+// 👉 FIXED: Added SHA-512 API Key signing so you can fetch submissions from PRIVATE Mashups
 async function fetchCodeforcesUserStatus(handle: string, count = 100) {
-  const url = `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=${count}`;
+  const apiKey = process.env.CF_API_KEY;
+  const apiSecret = process.env.CF_API_SECRET;
+
+  let url = `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=${count}`;
+
+  // If environment variables are set, authorize the request to see private gym solves
+  if (apiKey && apiSecret) {
+    const time = Math.floor(Date.now() / 1000);
+    const rand = Math.random().toString(36).substring(2, 8);
+    const params = `apiKey=${apiKey}&count=${count}&from=1&handle=${handle}&time=${time}`;
+    
+    const hash = crypto.createHash('sha512').update(`${rand}/user.status?${params}#${apiSecret}`).digest('hex');
+    url = `https://codeforces.com/api/user.status?${params}&apiSig=${rand}${hash}`;
+  }
+
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Codeforces API status ${response.status}`);
   const payload = await response.json();
@@ -106,6 +118,20 @@ export async function syncCodeforcesContest(contestId: string) {
             const targetVerdict = mapCfVerdictToPrisma(sub.verdict);
             const isAccepted = targetVerdict === Verdict.ACCEPTED;
 
+            // 👉 FIXED: Codeforces separates standard contests (< 100000) from Gyms/Mashups (>= 100000)
+            // Using /contest/ for a Gym ID results in a "No such contest" error.
+            const isGym = Number(cfContestId) >= 100000;
+            const submissionUrl = isGym 
+              ? `https://codeforces.com/gym/${cfContestId}/submission/${externalSubmissionId}`
+              : `https://codeforces.com/contest/${cfContestId}/submission/${externalSubmissionId}`;
+
+            // Inject the exact URL directly into the code block so the UI has it ready
+            const codePayload = `// ----------------------------------------------------
+// External submission synced from Codeforces
+// 👉 View original submission here:
+// ${submissionUrl}
+// ----------------------------------------------------`;
+
             await prisma.$transaction(async (tx) => {
               await tx.externalSyncEvent.upsert({
                 where: {
@@ -142,18 +168,18 @@ export async function syncCodeforcesContest(contestId: string) {
                   data: {
                     userId: participant.userId as string,
                     participantId: participant.id,
-                    teamId: participant.teamId, // 👉 INJECTED: Ties CF solve to the user's specific DivineCode group
+                    teamId: participant.teamId,
                     contestId,
                     contestProblemId: targetContestProblem.id,
                     problemId: targetContestProblem.problemId || null,
-                    code: '// External submission synced from Codeforces', 
+                    code: codePayload, 
                     source: SubmissionSource.EXTERNAL_SYNC,
                     status: SubmissionStatus.FINISHED,
                     verdict: targetVerdict,
                     language: sub.programmingLanguage || 'external',
                     externalSubmissionId,
                     externalCreatedAt: subTime,
-                    createdAt: subTime, // 👉 INJECTED: Overrides database default(now()) for accurate penalty time math
+                    createdAt: subTime, 
                     judgedAt: new Date()
                   }
                 });
@@ -163,7 +189,7 @@ export async function syncCodeforcesContest(contestId: string) {
           }
         }
 
-        // Rate-limiting cushion: pause half a second between users to protect server IP
+        // Rate-limiting cushion
         await new Promise((resolve) => setTimeout(resolve, 500));
 
       } catch (error) {

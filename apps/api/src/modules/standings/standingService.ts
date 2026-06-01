@@ -1,4 +1,4 @@
-import { SubmissionStatus, Verdict } from '@prisma/client';
+import { SubmissionSource, SubmissionStatus, Verdict, ContestStatus } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 
 const PENALTY_PER_WRONG_ATTEMPT = 20;
@@ -34,12 +34,18 @@ export async function recomputeContestStandings(contestId: string) {
 
     if (!contest) throw new Error('Contest not found');
 
-    // 1. Group submissions by teamId
-    // Map<teamId, Map<contestProblemId, { wrongAttempts: number, acceptedAt?: Date, manualPoints?: number | null }>>
-    const teamState = new Map<string, Map<string, { wrongAttempts: number, acceptedAt?: Date, manualPoints: number | null }>>();
+    // 👉 NEW: Identify the freeze time boundary
+    const freezeTime = contest.freezeTime ? new Date(contest.freezeTime).getTime() : null;
+
+    const teamState = new Map<string, Map<string, { 
+      wrongAttempts: number, 
+      acceptedAt?: Date, 
+      manualPoints: number | null,
+      isFrozen: boolean // 👉 TRACK IF A SOLVE HAPPENED AFTER FREEZE
+    }>>();
 
     for (const submission of contest.submissions) {
-      if (!submission.teamId) continue;
+      if (!submission.teamId || !submission.contestProblemId) continue;
       if (!isCountableSubmission(contest, submission)) continue;
 
       if (!teamState.has(submission.teamId)) {
@@ -48,55 +54,50 @@ export async function recomputeContestStandings(contestId: string) {
       
       const problemMap = teamState.get(submission.teamId)!;
       const problemId = String(submission.contestProblemId);
-      const state = problemMap.get(problemId) || { wrongAttempts: 0, manualPoints: null };
+      const state = problemMap.get(problemId) || { wrongAttempts: 0, manualPoints: null, isFrozen: false };
 
-      // If an owner applied manual points, it counts as solved and overrides everything
-      if (submission.manualPoints !== null) {
-         state.manualPoints = submission.manualPoints;
-         state.acceptedAt = state.acceptedAt || submission.createdAt;
-      }
+      // 👉 NEW: Check if this submission is in the "Frozen" zone
+      const submissionTime = new Date(submission.createdAt).getTime();
+      const isSubmissionFrozen = freezeTime !== null && submissionTime > freezeTime;
 
-      // If already solved (and we haven't hit a manual point override), ignore further submissions
+      // Logic: If already solved, ignore further
       if (state.acceptedAt && submission.manualPoints === null) {
-         problemMap.set(problemId, state);
-         continue;
+        continue;
       }
 
       if (submission.verdict === Verdict.ACCEPTED && submission.status === SubmissionStatus.FINISHED) {
         state.acceptedAt = submission.createdAt;
+        state.isFrozen = isSubmissionFrozen; // Flag if this specific solve was frozen
       } else if (isWrongAttempt(submission)) {
-        state.wrongAttempts += 1;
+        // Only count wrong attempts before freeze time for penalty
+        if (!isSubmissionFrozen) {
+          state.wrongAttempts += 1;
+        }
+      }
+
+      if (submission.manualPoints !== null) {
+         state.manualPoints = submission.manualPoints;
       }
 
       problemMap.set(problemId, state);
     }
 
-    // 2. Calculate Standings for each participant based on their TEAM's data
     const standingRows = contest.participants.map((participant) => {
       if (!participant.teamId || !teamState.has(participant.teamId)) {
-        return { 
-          participantId: participant.id, 
-          contestId: contestId, 
-          rank: 0, 
-          solved: 0, 
-          penalty: 0, 
-          score: 0, 
-          solvedProblemIds: [] as string[],
-          lastAcceptedAt: null
-        };
+        return { participantId: participant.id, contestId, rank: 0, solved: 0, penalty: 0, score: 0, solvedProblemIds: [], lastAcceptedAt: null };
       }
       
       const problemMap = teamState.get(participant.teamId)!;
-      const solvedEntries = [...problemMap.entries()].filter(([, state]) => state.acceptedAt);
+      
+      // 👉 Logic: If the solve is frozen, it doesn't count towards the public 'solved' count or rank
+      const solvedEntries = [...problemMap.entries()].filter(([, state]) => state.acceptedAt && !state.isFrozen);
       
       const penalty = solvedEntries.reduce((sum, [, state]) => {
         return sum + acceptedMinute(contest, state.acceptedAt!) + (state.wrongAttempts * PENALTY_PER_WRONG_ATTEMPT);
       }, 0);
 
-      // Score respects manual overrides, defaulting to 1000 if untouched
       const totalScore = solvedEntries.reduce((sum, [, state]) => {
-        const problemPoints = state.manualPoints !== null ? state.manualPoints : 1000;
-        return sum + problemPoints;
+        return sum + (state.manualPoints !== null ? state.manualPoints : 1000);
       }, 0) - penalty;
 
       return {
@@ -107,11 +108,12 @@ export async function recomputeContestStandings(contestId: string) {
         penalty,
         score: totalScore,
         solvedProblemIds: solvedEntries.map(([id]) => id),
-        lastAcceptedAt: solvedEntries.map(([, state]) => state.acceptedAt!).sort((a, b) => b.getTime() - a.getTime())[0] || null
+        lastAcceptedAt: solvedEntries.length > 0 
+          ? solvedEntries.map(([, state]) => state.acceptedAt!).sort((a, b) => b.getTime() - a.getTime())[0] 
+          : null
       };
     });
 
-    // 3. Sort and Rank (Grouping by team stats)
     standingRows.sort((a, b) => b.solved - a.solved || a.penalty - b.penalty || a.participantId.localeCompare(b.participantId));
 
     let currentRank = 0;
@@ -123,19 +125,11 @@ export async function recomputeContestStandings(contestId: string) {
       lastScoreKey = scoreKey;
     });
 
-    // 4. Upsert
     for (const row of standingRows) {
       await tx.contestStanding.upsert({
         where: { participantId: row.participantId },
         create: row,
-        update: {
-          rank: row.rank,
-          solved: row.solved,
-          penalty: row.penalty,
-          score: row.score,
-          solvedProblemIds: row.solvedProblemIds,
-          lastAcceptedAt: row.lastAcceptedAt
-        }
+        update: { rank: row.rank, solved: row.solved, penalty: row.penalty, score: row.score, solvedProblemIds: row.solvedProblemIds, lastAcceptedAt: row.lastAcceptedAt }
       });
     }
 

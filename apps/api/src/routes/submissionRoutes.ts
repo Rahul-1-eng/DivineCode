@@ -2,8 +2,28 @@ import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { executeSubmission } from '../modules/judge/judge0Service';
 import { recomputeContestStandings } from '../modules/standings/standingService';
+import { getContestSubmissions } from '../modules/contests/submissionService';
 
 export const submissionRouter = Router();
+
+// 👉 ADDED: Endpoint to fetch submissions securely based on privacy rules
+submissionRouter.get('/contest/:contestId', async (req, res) => {
+  try {
+    const { contestId } = req.params;
+    const email = req.headers['x-user-email'] as string;
+    const userId = req.headers['x-user-id'] as string;
+
+    const submissions = await getContestSubmissions({
+      contestId,
+      viewer: { userId, email }
+    });
+
+    return res.json(submissions);
+  } catch (err: any) {
+    // Return 403 Forbidden for privacy violations
+    return res.status(403).json({ error: err.message });
+  }
+});
 
 // Endpoint for LeetCode style "Run Code" (Runs against only sample test cases)
 submissionRouter.post('/run-samples', async (req, res) => {

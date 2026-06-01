@@ -12,7 +12,8 @@ type DuelState = {
 
 export function setupDuelSockets(io: Server) {
   let waitingPlayer: Player | null = null;
-  const customWaitingRooms = new Map<string, Player>(); // Stores custom private match hosts
+  // 👉 UPDATED: Store the host's custom question IDs alongside their player object
+  const customWaitingRooms = new Map<string, { host: Player, customQuestionIds?: string[] }>(); 
   const activeRooms = new Map<string, DuelState>();
 
   const emitState = (roomId: string) => {
@@ -37,21 +38,38 @@ export function setupDuelSockets(io: Server) {
     });
   };
 
-  // Helper to start the match directly from the DB
-  async function initializeMatch(p1: Player, p2: Player) {
+  // 👉 UPDATED: Accepts an optional array of custom question IDs
+  async function initializeMatch(p1: Player, p2: Player, customQuestionIds?: string[]) {
     const roomId = `duel_${Date.now()}`;
     p1.socket.join(roomId);
     p2.socket.join(roomId);
 
     try {
-      const dbQuestions = await prisma.interviewQuestion.findMany({
-        where: { isApproved: true },
-        include: { track: true }
-      });
+      let selectedQuestions: any[] = [];
 
-      const selectedQuestions = dbQuestions
-        .sort(() => 0.5 - Math.random())
-        .slice(0, 5);
+      // If the host provided custom questions, fetch those exact ones
+      if (customQuestionIds && customQuestionIds.length > 0) {
+        const dbQuestions = await prisma.interviewQuestion.findMany({
+          where: { id: { in: customQuestionIds } },
+          include: { track: true }
+        });
+        
+        // Preserve the order the host selected them in
+        selectedQuestions = customQuestionIds
+          .map(id => dbQuestions.find(q => q.id === id))
+          .filter(Boolean);
+      } 
+      // Otherwise, pull 7 random questions
+      else {
+        const dbQuestions = await prisma.interviewQuestion.findMany({
+          where: { isApproved: true },
+          include: { track: true }
+        });
+
+        selectedQuestions = dbQuestions
+          .sort(() => 0.5 - Math.random())
+          .slice(0, 7); // 👉 REQUIREMENT MET: At least 7 questions
+      }
 
       if (selectedQuestions.length === 0) {
         selectedQuestions.push({
@@ -107,28 +125,31 @@ export function setupDuelSockets(io: Server) {
     });
 
     // 👉 2. CUSTOM ROOM: Create
-    socket.on('duel:createCustom', ({ name }) => {
-      // Generate a 6-character alphanumeric code
+    socket.on('duel:createCustom', ({ name, questionIds }) => {
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
       const player = { id: socket.id, name: name || `Player-${socket.id.slice(0, 4)}`, socket, score: 0 };
-      customWaitingRooms.set(code, player);
+      
+      // 👉 Store the host AND their chosen questions
+      customWaitingRooms.set(code, { host: player, customQuestionIds: questionIds });
       socket.emit('duel:customCreated', { roomCode: code });
     });
 
     // 👉 3. CUSTOM ROOM: Join
     socket.on('duel:joinCustom', async ({ name, roomCode }) => {
       const code = roomCode.trim().toUpperCase();
-      const host = customWaitingRooms.get(code);
+      const room = customWaitingRooms.get(code);
       
-      if (!host) {
+      if (!room) {
         socket.emit('duel:error', { message: 'Invalid or expired room code.' });
         return;
       }
-      if (host.id === socket.id) return; // Prevent joining own room twice
+      if (room.host.id === socket.id) return; 
       
       const p2 = { id: socket.id, name: name || `Player-${socket.id.slice(0, 4)}`, socket, score: 0 };
-      customWaitingRooms.delete(code); // Room consumed
-      await initializeMatch(host, p2);
+      customWaitingRooms.delete(code); 
+      
+      // 👉 Pass the host's selected questions to the match initializer
+      await initializeMatch(room.host, p2, room.customQuestionIds);
     });
 
     // 👉 4. GAME LOOP (Handling Answers)
@@ -172,12 +193,10 @@ export function setupDuelSockets(io: Server) {
         waitingPlayer = null; 
       }
       
-      // Clean up custom rooms if host drops
-      for (const [code, host] of customWaitingRooms.entries()) {
-        if (host.id === socket.id) customWaitingRooms.delete(code);
+      for (const [code, room] of customWaitingRooms.entries()) {
+        if (room.host.id === socket.id) customWaitingRooms.delete(code);
       }
 
-      // Conclude active games
       for (const [roomId, state] of activeRooms.entries()) {
         if (state.players.some(p => p.id === socket.id)) {
           state.finished = true;

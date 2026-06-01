@@ -40,7 +40,7 @@ export async function createQueuedContestSubmission(input: {
     data: {
       userId: participant.userId!,
       participantId: participant.id,
-      teamId: participant.teamId, // Store teamId here for privacy filtering
+      teamId: participant.teamId, 
       problemId: contestProblem.problemId,
       contestId: contest.id,
       contestProblemId: contestProblem.id,
@@ -69,34 +69,41 @@ export async function getContestSubmissions(input: {
 
   let whereClause: any = { contestId: input.contestId };
 
-  // If the user is NOT the owner, enforce visibility rules
+  // 👉 ENFORCING PRIVACY BOUNDARIES
   if (!isOwner) {
     if (contest.status === ContestStatus.RUNNING) {
       if (!participant) throw new Error('Only active participants can view submissions during the contest.');
       
-      // Filter strictly to the user's team
-      if (participant.teamId) {
-        whereClause.teamId = participant.teamId;
+      const isRealTeam = participant.teamName && participant.teamName !== 'Solo' && participant.teamName !== 'Individuals';
+
+      // Only allow group viewing if the creator enabled it AND they are actually in a group
+      if (contest.allowTeamSubmissionView && isRealTeam) {
+        const teamMemberIds = contest.participants
+          .filter(p => p.teamName === participant.teamName)
+          .map(p => p.id);
+        
+        whereClause.participantId = { in: teamMemberIds };
       } else {
-        // Fallback for Solo contests
-        whereClause.userId = participant.userId; 
+        // Strict isolation: User can only see their own submissions
+        whereClause.participantId = participant.id; 
       }
     } else if (contest.status === ContestStatus.ENDED) {
-      // Contest ended: Everyone sees everything (No extra filters added to whereClause)
+      // Contest ended: Everyone sees everything, no extra filters added.
     } else {
-      // Draft, Scheduled, or Frozen: Hide submissions from non-owners
-      throw new Error('Submissions are not visible at this time.');
+      throw new Error('Submissions are not visible at this time. Contest is not active.');
     }
   }
 
-  // Fetch submissions with the applied filters
   return prisma.submission.findMany({
     where: whereClause,
     include: {
       user: {
-        select: { username: true, avatarUrl: true }
+        select: { username: true, avatarUrl: true, name: true }
       },
-      reports: isOwner ? true : false, // Only owners need to see the reports array
+      participant: {
+        select: { displayName: true, teamName: true }
+      },
+      reports: isOwner ? true : false, 
     },
     orderBy: { createdAt: 'desc' }
   });

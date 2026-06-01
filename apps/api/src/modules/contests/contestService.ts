@@ -11,6 +11,7 @@ import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
 
 type MemberInput = {
+  username?: string;
   userId?: string;
   email?: string;
   name?: string;
@@ -39,6 +40,7 @@ type CreateContestInput = {
   type?: ContestType;
   startTime?: string;
   durationMinutes?: number;
+  freezeMinutes?: number
   isRated?: boolean;
   allowLateJoin?: boolean;
   allowTeamSubmissionView?: boolean;
@@ -306,6 +308,9 @@ export async function createContestV2(input: CreateContestInput) {
   const startTime = input.startTime ? new Date(input.startTime) : new Date();
   const durationMinutes = Math.max(1, Number(input.durationMinutes || 120));
   const endTime = new Date(startTime.getTime() + durationMinutes * 60000);
+  
+  // 👉 ADDED: Calculate the exact DateTime when the standings should freeze
+  const freezeTime = input.freezeMinutes ? new Date(endTime.getTime() - input.freezeMinutes * 60000) : null;
 
   if (!input.ownerUserId && !input.ownerEmail) {
     throw new Error('V2 contests require ownerUserId or ownerEmail so edit/delete permissions are deterministic.');
@@ -331,6 +336,7 @@ export async function createContestV2(input: CreateContestInput) {
         status: startTime.getTime() <= Date.now() ? ContestStatus.RUNNING : ContestStatus.SCHEDULED,
         startTime,
         endTime,
+        freezeTime, // 👉 ADDED: Save freeze time to DB
         durationMinutes,
         isRated: Boolean(input.isRated),
         allowLateJoin: Boolean(input.allowLateJoin),

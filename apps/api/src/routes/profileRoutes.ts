@@ -47,6 +47,7 @@ profileRouter.post('/claim-username', async (req, res) => {
 });
 
 // Save External Handles (Codeforces, LeetCode)
+// Replace the save-handles route in apps/api/src/routes/profileRoutes.ts
 profileRouter.post('/save-handles', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;
@@ -56,8 +57,15 @@ profileRouter.post('/save-handles', async (req, res) => {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // Upsert Codeforces
+    // 👉 FIX: Check if another user has already claimed this Codeforces handle
     if (codeforcesHandle) {
+      const existing = await prisma.externalHandle.findFirst({
+        where: { platform: Platform.CODEFORCES, handle: { equals: codeforcesHandle, mode: 'insensitive' } }
+      });
+      if (existing && existing.userId !== user.id) {
+        return res.status(400).json({ error: `The Codeforces handle "${codeforcesHandle}" is already linked to another DivineCode account.` });
+      }
+
       await prisma.externalHandle.upsert({
         where: { userId_platform: { userId: user.id, platform: Platform.CODEFORCES } },
         create: { userId: user.id, platform: Platform.CODEFORCES, handle: codeforcesHandle },
@@ -65,7 +73,6 @@ profileRouter.post('/save-handles', async (req, res) => {
       });
     }
 
-    // Upsert LeetCode
     if (leetcodeHandle) {
       await prisma.externalHandle.upsert({
         where: { userId_platform: { userId: user.id, platform: Platform.LEETCODE } },

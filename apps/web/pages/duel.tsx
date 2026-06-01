@@ -3,7 +3,8 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/router';
 import { io, Socket } from 'socket.io-client';
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || API_BASE_URL;
 
 type DuelMode = 'menu' | 'custom_menu' | 'random_waiting' | 'custom_host_waiting' | 'playing';
 
@@ -27,8 +28,19 @@ export default function DuelPage() {
   const [customRoomCode, setCustomRoomCode] = useState<string>('');
   const [joinInputCode, setJoinInputCode] = useState<string>('');
 
+  // 👉 NEW: States for Custom Question Selection
+  const [availableQuestions, setAvailableQuestions] = useState<any[]>([]);
+  const [useCustomQuestions, setUseCustomQuestions] = useState(false);
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>(Array(7).fill(''));
+
   useEffect(() => {
     if (router.query.mode === 'custom') setDuelMode('custom_menu');
+    
+    // Fetch available questions from the database for custom selection
+    fetch(`${API_BASE_URL}/api/v2/interview/questions`)
+      .then(res => res.json())
+      .then(data => { if (Array.isArray(data)) setAvailableQuestions(data); })
+      .catch(console.error);
   }, [router.query]);
 
   useEffect(() => {
@@ -40,7 +52,6 @@ export default function DuelPage() {
     
     socket.on('duel:waiting', (data) => setStatus(data.message || 'Waiting for opponent...'));
     
-    // 👉 NEW: Custom Room Created Successfully
     socket.on('duel:customCreated', (data) => {
       setCustomRoomCode(data.roomCode);
       setDuelMode('custom_host_waiting');
@@ -95,8 +106,20 @@ export default function DuelPage() {
 
   function createCustom() {
     if (!socketRef.current || joined) return;
+    
+    // 👉 Validate that all 7 slots are filled if custom questions are toggled
+    const filteredIds = selectedQuestionIds.filter(id => id !== '');
+    if (useCustomQuestions && filteredIds.length < 7) {
+      return alert("Please select exactly 7 questions for your custom loadout.");
+    }
+
     const name = session?.user?.name || session?.user?.email || `Player-${Math.floor(Math.random() * 1000)}`; 
-    socketRef.current.emit('duel:createCustom', { name });
+    
+    // 👉 Pass the question IDs to the backend
+    socketRef.current.emit('duel:createCustom', { 
+      name, 
+      questionIds: useCustomQuestions ? filteredIds : undefined 
+    });
     setJoined(true);
   }
 
@@ -170,7 +193,6 @@ export default function DuelPage() {
           )}
         </div>
 
-        {/* 👉 DYNAMIC UI: Controls Menu */}
         <div style={controlsContainer}>
           {!joined && duelMode === 'menu' && (
             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', width: '100%', maxWidth: 500, margin: '0 auto' }}>
@@ -180,7 +202,44 @@ export default function DuelPage() {
           )}
 
           {!joined && duelMode === 'custom_menu' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', maxWidth: 500, margin: '0 auto' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', maxWidth: 600, margin: '0 auto' }}>
+              
+              {/* 👉 NEW: Custom Question Builder UI */}
+              <div style={configCard}>
+                <h3 style={{ margin: '0 0 10px', color: '#67e8f9' }}>Room Settings</h3>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 'bold', marginBottom: 16 }}>
+                  <input type="checkbox" checked={useCustomQuestions} onChange={(e) => setUseCustomQuestions(e.target.checked)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
+                  Build Custom Question Loadout
+                </label>
+
+                {useCustomQuestions ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>Select exactly 7 questions for the duel:</p>
+                    {selectedQuestionIds.map((val, idx) => (
+                      <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ color: '#fbbf24', fontWeight: 'bold', width: 20 }}>{idx + 1}.</span>
+                        <select 
+                          value={val} 
+                          onChange={(e) => {
+                            const newIds = [...selectedQuestionIds];
+                            newIds[idx] = e.target.value;
+                            setSelectedQuestionIds(newIds);
+                          }}
+                          style={selectInput}
+                        >
+                          <option value="" disabled>-- Select a Question --</option>
+                          {availableQuestions.map(q => (
+                            <option key={q.id} value={q.id}>[{q.track?.title || 'General'}] {q.title || q.prompt.substring(0, 40)}...</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>The system will draw 7 random questions from the database.</p>
+                )}
+              </div>
+
               <button onClick={createCustom} disabled={!connected} style={joinBtn}>Create Private Room</button>
               
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '10px 0' }}>
@@ -263,6 +322,8 @@ const leaderCard: CSSProperties = { ...playerCard, border: '1px solid rgba(34,21
 const vsBadgeContainer: CSSProperties = { display: 'flex', justifyContent: 'center', flex: '0 0 auto', padding: '10px 0' };
 const vsBadge: CSSProperties = { width: 64, height: 64, borderRadius: 999, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'linear-gradient(135deg,#f97316,#22d3ee)', color: '#020617', fontWeight: 950, boxShadow: '0 15px 50px rgba(0,0,0,.4)', fontSize: 20 };
 const controlsContainer: CSSProperties = { marginTop: 20 };
+const configCard: CSSProperties = { padding: 20, borderRadius: 20, background: 'rgba(15,23,42,.6)', border: '1px solid rgba(148,163,184,.2)' };
+const selectInput: CSSProperties = { flex: 1, padding: 12, borderRadius: 12, border: '1px solid rgba(148,163,184,.2)', background: 'rgba(2,6,23,.8)', color: '#fff', fontSize: 14, outline: 'none' };
 const joinBtn: CSSProperties = { width: '100%', padding: 16, borderRadius: 18, border: 0, background: 'linear-gradient(135deg,#f97316,#22d3ee)', color: '#020617', fontWeight: 950, cursor: 'pointer', fontSize: 18, transition: 'transform 0.1s' };
 const ghostBtn: CSSProperties = { border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', fontWeight: 900, borderRadius: 18, cursor: 'pointer', padding: 16, transition: 'background 0.2s' };
 const codeInput: CSSProperties = { flex: 1, padding: '16px 20px', borderRadius: 18, border: '1px solid rgba(148,163,184,.3)', background: 'rgba(2,6,23,.7)', color: '#fff', fontSize: 18, letterSpacing: 2, fontWeight: 'bold', outline: 'none' };

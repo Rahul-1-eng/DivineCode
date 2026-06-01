@@ -7,7 +7,6 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
 type Mode = 'single' | 'group';
-// 👉 CHANGED: We ONLY ask for the DivineCode Username now!
 type MemberRow = { username: string }; 
 type TeamRow = { name: string; players: MemberRow[] };
 type ProblemRow = { platform: string; code: string; contestCode: string; problemIndex: string; title: string; url: string; tags: string; rating?: number; difficulty?: string; interviewQuestionId?: string };
@@ -22,7 +21,13 @@ export default function CreateContestPage() {
   const ownerName = session?.user?.name || session?.user?.email || '';
   const [mode, setMode] = useState<Mode>('group');
   const [title, setTitle] = useState('DivineCode Team Mashup Round');
+  
+  // 👉 ADDED: New state variables for advanced features
   const [duration, setDuration] = useState(120);
+  const [startTimeStr, setStartTimeStr] = useState(''); 
+  const [freezeMinutes, setFreezeMinutes] = useState(0);
+  const [allowTeamSubmissionView, setAllowTeamSubmissionView] = useState(true);
+  const [hideProblemMetaDuringContest, setHideProblemMetaDuringContest] = useState(true);
   
   const [soloPlayer, setSoloPlayer] = useState<MemberRow>(emptyMember());
   const [teams, setTeams] = useState<TeamRow[]>([
@@ -79,9 +84,7 @@ export default function CreateContestPage() {
   async function createContest() {
     if (!session?.user?.email) return alert('Sign in first.');
     
-    // 👉 CLEANUP: Map players to the new backend format
     const cleanMember = (username: string, team: string) => ({ username: username.trim(), teamName: team });
-    
     const soloMembers = soloPlayer.username.trim() ? [cleanMember(soloPlayer.username, 'Solo')] : [];
     const teamMembers = teams.flatMap((team) => team.players.filter((m) => m.username.trim()).map((m) => cleanMember(m.username, team.name.trim() || 'Group')));
     const cleanedMembers = mode === 'single' ? soloMembers : teamMembers;
@@ -95,16 +98,19 @@ export default function CreateContestPage() {
     setIsCreating(true);
 
     try {
-      // The backend will now look up these usernames in the database, grab their Codeforces handles, and map them to groups automatically.
       const res = await fetch(`${API_V2_BASE_URL}/contests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-email': session.user.email },
         body: JSON.stringify({ 
           title, 
           description: `${mode === 'single' ? 'Solo' : 'Team'} mashup`, 
-          durationMinutes: duration, 
+          startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined, // 👉 ADDED: Sends scheduled start time
+          durationMinutes: duration,
+          freezeMinutes: freezeMinutes > 0 ? freezeMinutes : undefined, // 👉 ADDED: Sends freeze time requirement
+          allowTeamSubmissionView, // 👉 ADDED: Respects group permissions checkbox
+          hideProblemMetaDuringContest,
           ownerEmail: session.user.email, 
-          members: cleanedMembers, // Send the cleaned usernames
+          members: cleanedMembers,
           problems: contestProblems 
         })
       });
@@ -158,8 +164,34 @@ export default function CreateContestPage() {
           <label style={{ fontWeight: 'bold' }}>Contest Title</label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
           
-          <label style={{ fontWeight: 'bold' }}>Duration in minutes</label>
-          <input type="number" value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={{ ...inputStyle, maxWidth: 180 }} />
+          <div style={memberRow}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontWeight: 'bold' }}>Duration in minutes</label>
+              <input type="number" value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={inputStyle} />
+            </div>
+            {/* 👉 ADDED: Freeze Minutes Input */}
+            <div style={{ flex: 1 }}>
+              <label style={{ fontWeight: 'bold' }}>Freeze Standings (Last X mins)</label>
+              <input type="number" min="0" value={freezeMinutes} onChange={(e) => setFreezeMinutes(Number(e.target.value))} placeholder="e.g. 30" style={inputStyle} />
+            </div>
+            {/* 👉 ADDED: Start Time Scheduler */}
+            <div style={{ flex: 1 }}>
+              <label style={{ fontWeight: 'bold' }}>Schedule Start Time (Leave blank for now)</label>
+              <input type="datetime-local" value={startTimeStr} onChange={(e) => setStartTimeStr(e.target.value)} style={inputStyle} />
+            </div>
+          </div>
+
+          {/* 👉 ADDED: The group access tick signs */}
+          <div style={{ marginBottom: 24, display: 'flex', gap: 24, flexWrap: 'wrap', padding: '16px', background: 'rgba(2,6,23,.45)', borderRadius: '12px', border: '1px solid rgba(148,163,184,.18)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 'bold', color: '#eef2ff' }}>
+              <input type="checkbox" checked={allowTeamSubmissionView} onChange={e => setAllowTeamSubmissionView(e.target.checked)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
+              Allow members to see group submissions
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 'bold', color: '#eef2ff' }}>
+              <input type="checkbox" checked={hideProblemMetaDuringContest} onChange={e => setHideProblemMetaDuringContest(e.target.checked)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
+              Hide Problem Tags/Difficulty during contest
+            </label>
+          </div>
           
           <h2 style={{ marginTop: 24, marginBottom: 12 }}>Players <span style={{ color: '#67e8f9' }}>({cleanMemberCount})</span></h2>
           
@@ -167,8 +199,7 @@ export default function CreateContestPage() {
             <section style={teamCard}>
               <h2 style={{ margin: '0 0 16px 0', fontSize: 18 }}>Solo player</h2>
               <div style={memberRow}>
-                {/* JUST THE USERNAME NOW */}
-                <input value={soloPlayer.username} onChange={(e) => setSoloPlayer({ username: e.target.value })} placeholder="DivineCode Username (e.g. RKS_Rider)" style={smallInput} />
+                <input value={soloPlayer.username} onChange={(e) => setSoloPlayer({ username: e.target.value })} placeholder="DivineCode Username" style={smallInput} />
               </div>
             </section>
           )}
@@ -191,7 +222,6 @@ export default function CreateContestPage() {
             </>
           )}
           
-          {/* Problems Section Remains Exactly the Same */}
           <h2 style={{ marginTop: 40, marginBottom: 16 }}>Problems</h2>
           <div style={{ display: 'grid', gap: 14 }}>
             {problems.map((p, i) => (
@@ -243,7 +273,7 @@ export default function CreateContestPage() {
   );
 }
 
-// RESTORED CSS
+// STYLES
 const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.35), transparent 36rem), radial-gradient(circle at bottom right, rgba(34,211,238,.18), transparent 30rem), #070a16', boxSizing: 'border-box' };
 const gate: CSSProperties = { maxWidth: 620, margin: '15vh auto', padding: 34, borderRadius: 28, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', textAlign: 'center' };
 const topLink: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900 };
