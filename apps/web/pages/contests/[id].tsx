@@ -227,13 +227,22 @@ export default function ContestRoomPage() {
       const member = memberById[standing.memberId] || {};
       const team = member.teamName || member.team || 'Individuals';
       if (!grouped[team]) grouped[team] = { team, solved: 0, penalty: 0, score: 0, players: [] };
-
+   
       // Ensure score calculates if backend falls back to 0
       let safeScore = standing.score || 0;
       if (safeScore === 0 && standing.solvedProblems) {
         safeScore = standing.solvedProblems.reduce((sum: number, pId: string) => sum + (problemById[pId]?.points || 1000), 0);
       }
-
+      // Add this below your existing teamStandings useMemo
+const individualStandings = useMemo(() => {
+  return (contest?.standings || [])
+    .sort((a: any, b: any) => a.rank - b.rank)
+    .map((s: any) => ({
+      ...s,
+      name: memberById[s.memberId]?.name || 'Unknown',
+      team: memberById[s.memberId]?.teamName || 'Individuals'
+    }));
+}, [contest, memberById]);
       grouped[team].solved += standing.solved || 0;
       grouped[team].penalty += standing.penalty || 0;
       grouped[team].score += safeScore;
@@ -385,12 +394,41 @@ export default function ContestRoomPage() {
         <section style={{ ...panel, marginTop: 18 }}>
           <h2>Team Standings</h2>
           <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Rank</th><th style={th}>Group</th><th style={th}>Solved</th><th style={th}>Penalty</th><th style={th}>Score</th></tr></thead><tbody>{teamStandings.map((team: any, i: number) => <Fragment key={team.team}><tr onClick={() => setOpenTeam(openTeam === team.team ? null : team.team)} style={clickRow}><td style={td}>#{i + 1}</td><td style={td}>{team.team}</td><td style={td}>{team.solved}</td><td style={td}>{team.penalty}</td><td style={{...td, color: '#fbbf24', fontWeight: 'bold'}}>{team.score}</td></tr>{openTeam === team.team && team.players.map((player: any, pi: number) => <tr key={player.memberId} onClick={() => canInspectMember(player.memberId) && setSelectedMember(player)} style={canInspectMember(player.memberId) ? subRow : mutedRow}><td style={td}>#{pi + 1}</td><td style={td}>{player.name}</td><td style={td}>{player.solved}</td><td style={td}>{player.penalty}</td><td style={td}>{player.score}</td></tr>)}</Fragment>)}</tbody></table></div>
+       
+       
         </section>
-
+        
         <section style={{ ...panel, marginTop: 18 }}>
           <h2>{isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}</h2>
           {submissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
-          <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Time</th><th style={th}>User</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Source</th></tr></thead><tbody>{submissions.map((submission) => <tr key={submission.id} onClick={() => setSelectedSubmission(submission)} style={clickRow}><td style={td}>{new Date(submission.createdAt).toLocaleString()}</td><td style={td}>{submission.userId}</td><td style={td}>{problemById[submission.problemId]?.label || ''} {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot || problemById[submission.problemId]?.problem?.title || submission.problemId : ''}</td><td style={{...td, color: submission.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>{submission.verdict}</td><td style={td}>{submission.source || submission.platform || 'DivineCode'}</td></tr>)}</tbody></table></div>
+          <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Time</th><th style={th}>User</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Source</th></tr></thead>// Find this table in apps/web/pages/contests/[id].tsx
+<tbody>
+  {submissions.map((submission) => (
+    <tr key={submission.id} style={clickRow}>
+      <td style={td}>{new Date(submission.createdAt).toLocaleString()}</td>
+      <td style={td}>{submission.userId}</td>
+      <td style={td}>
+        {problemById[submission.problemId]?.label || ''} 
+        {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot : ''}
+      </td>
+      <td style={{...td, color: submission.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>
+        {submission.verdict}
+      </td>
+      <td style={td}>
+        {/* 👉 ADD THIS BUTTON WRAPPER TO FIX MODAL CLICK */}
+        <button 
+          onClick={(e) => { 
+            e.stopPropagation(); 
+            setSelectedSubmission(submission); 
+          }} 
+          style={ghostButton}
+        >
+          View Details
+        </button>
+      </td>
+    </tr>
+  ))}
+</tbody></table></div>
         </section>
 
         {selectedSubmission && <section style={{ ...panel, marginTop: 18 }}>

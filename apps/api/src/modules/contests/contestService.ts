@@ -138,6 +138,11 @@ async function ensureParticipantUser(tx: Prisma.TransactionClient, input: Member
     if (user) return user;
   }
 
+  if (input.username) {
+    const user = await tx.user.findUnique({ where: { username: input.username } });
+    if (user) return user;
+  }
+
   if (input.email) {
     const email = input.email.trim().toLowerCase();
     const user = await tx.user.findUnique({ where: { email } });
@@ -237,7 +242,11 @@ async function assertUnsolvedByAll(members: MemberInput[], problems: ProblemInpu
     if (!parsed.contestCode || !parsed.problemIndex) continue;
 
     for (const member of members) {
-      if (!member.codeforcesHandle) continue;
+      if (!member.codeforcesHandle) {
+        // Log this to console so you can see who is failing
+        console.log(`Validation failed: Member ${member.displayName} is missing CF handle`);
+        throw new Error(`CF MISSING: Participant ${member.displayName || 'Unnamed'} needs a Codeforces handle for Codeforces problems.`);
+      }
       const accepted = await fetchCodeforcesAccepted(member.codeforcesHandle, parsed.contestCode, parsed.problemIndex);
       if (accepted) {
         throw new Error(
@@ -359,8 +368,15 @@ export async function createContestV2(input: CreateContestInput) {
 
     for (const member of members) {
       const user = await ensureParticipantUser(tx, member);
-      const externalHandle = await ensureCodeforcesHandle(tx, user.id, member.codeforcesHandle);
-
+      let externalHandle = null;
+      if (member.codeforcesHandle) {
+        externalHandle = await ensureCodeforcesHandle(tx, user.id, member.codeforcesHandle);
+      } else {
+        // Automatically find the existing CF handle linked to this user
+        externalHandle = await tx.externalHandle.findFirst({
+          where: { userId: user.id, platform: Platform.CODEFORCES }
+        });
+      }
       await tx.contestParticipant.create({
         data: {
           contestId: created.id,

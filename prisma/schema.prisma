@@ -148,8 +148,8 @@ model Submission {
   reports              SubmissionReport[] // Link to new reports model
 
   @@unique([source, externalSubmissionId])
+  @@index([contestId, createdAt]) 
   @@index([userId])
-  @@index([contestId])
 }
 
 model SubmissionReport {
