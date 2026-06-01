@@ -62,6 +62,19 @@ export default function ProfilePage() {
     else alert(data.error || "Failed to claim username");
   }
 
+  async function unlinkHandle(platform: string, handle: string) {
+    if (!confirm(`Are you sure you want to unlink ${handle}?`)) return;
+    const res = await fetch(`${API_BASE_URL}/api/v2/profile/handles/${platform}/${handle}`, {
+      method: 'DELETE',
+      headers: { 'x-user-email': session?.user?.email || '' }
+    });
+    if (res.ok) {
+      alert('Handle unlinked!');
+      window.location.reload();
+    } else {
+      alert('Failed to unlink.');
+    }
+  }
   async function handleSaveLinks() {
     setSavingHandles(true);
     const res = await fetch(`${API_BASE_URL}/api/v2/profile/save-handles`, {
@@ -141,7 +154,25 @@ export default function ProfilePage() {
           </section>
 
           <section style={card}>
-            <h2 style={{ margin: '0 0 10px 0' }}>Linked External Handles</h2>
+            <h2 style={{ margin: '0 0 10px 0' }}><section style={card}>
+    <h2 style={{ margin: '0 0 10px 0' }}>Linked External Handles</h2>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+      {userData?.externalHandles?.map((h: any) => (
+        <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(2,6,23,.5)', padding: 10, borderRadius: 8 }}>
+          <span>{h.platform}: <b>{h.handle}</b></span>
+          <button onClick={() => unlinkHandle(h.platform, h.handle)} style={{ color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Unlink</button>
+        </div>
+      ))}
+    </div>
+    
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <input value={cfHandle} onChange={(e) => setCfHandle(e.target.value)} placeholder="Codeforces Handle" style={input} />
+      <input value={lcHandle} onChange={(e) => setLcHandle(e.target.value)} placeholder="LeetCode Handle" style={input} />
+    </div>
+    <button onClick={handleSaveLinks} disabled={savingHandles} style={{...ghost, marginTop: 12, padding: '8px 16px', fontSize: 14}}>
+      {savingHandles ? 'Saving...' : 'Save/Link Handles'}
+    </button>
+  </section></h2>
             <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 16 }}>Link your competitive programming accounts for automated syncing.</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <input value={cfHandle} onChange={(e) => setCfHandle(e.target.value)} placeholder="Codeforces Handle" style={input} />

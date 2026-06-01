@@ -266,12 +266,30 @@ export default function ContestRoomPage() {
                    <thead><tr><th style={th}>Time</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Language</th></tr></thead>
                    <tbody>
                      {memberSubmissions.map(sub => (
-                       <tr key={sub.id} onClick={() => setSelectedSubmission(sub)} style={clickRow}>
-                         <td style={td}>{new Date(sub.createdAt).toLocaleTimeString()}</td>
-                         <td style={td}>{problemById[sub.problemId]?.label} {canSeeProblemMeta ? problemById[sub.problemId]?.titleSnapshot : ''}</td>
-                         <td style={{...td, color: sub.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>{sub.verdict}</td>
-                         <td style={td}>{sub.language}</td>
-                       </tr>
+                       // Inside your submissions table (in apps/web/pages/contests/[id].tsx)
+// Replace the onClick on the <tr> with a button wrapper inside the <td>:
+
+<tr key={sub.id} style={clickRow}>
+  <td style={td}>{new Date(sub.createdAt).toLocaleString()}</td>
+  <td style={td}>{sub.userId}</td>
+  <td style={td}>
+    {problemById[sub.problemId]?.label || ''} 
+    {canSeeProblemMeta ? problemById[sub.problemId]?.titleSnapshot : ''}
+  </td>
+  <td style={{...td, color: sub.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>{sub.verdict}</td>
+  <td style={td}>
+    {/* 👉 FIX: Use an explicit button for the modal trigger */}
+    <button 
+      onClick={(e) => { 
+        e.stopPropagation(); 
+        setSelectedSubmission(sub); 
+      }} 
+      style={ghostButton}
+    >
+      View Details
+    </button>
+  </td>
+</tr>
                      ))}
                    </tbody>
                  </table>

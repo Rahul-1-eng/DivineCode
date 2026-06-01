@@ -22,14 +22,36 @@ profileRouter.get('/me', async (req, res) => {
   }
 });
 
-// Claim DivineCode Username
+// 👉 ADDED: Unlink route to clear handles
+profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
+  try {
+    const email = req.headers['x-user-email'] as string;
+    const { platform, handle } = req.params;
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    await prisma.externalHandle.deleteMany({
+      where: {
+        userId: user.id,
+        platform: platform.toUpperCase() as Platform,
+        handle: handle
+      }
+    });
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 profileRouter.post('/claim-username', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;
     const { username } = req.body;
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
-    // Check if username is taken
     const existing = await prisma.user.findUnique({ where: { username } });
     if (existing && existing.email !== email) {
       return res.status(400).json({ error: 'Username is already taken!' });
@@ -46,8 +68,6 @@ profileRouter.post('/claim-username', async (req, res) => {
   }
 });
 
-// Save External Handles (Codeforces, LeetCode)
-// Replace the save-handles route in apps/api/src/routes/profileRoutes.ts
 profileRouter.post('/save-handles', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;
@@ -57,13 +77,12 @@ profileRouter.post('/save-handles', async (req, res) => {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // 👉 FIX: Check if another user has already claimed this Codeforces handle
     if (codeforcesHandle) {
       const existing = await prisma.externalHandle.findFirst({
         where: { platform: Platform.CODEFORCES, handle: { equals: codeforcesHandle, mode: 'insensitive' } }
       });
       if (existing && existing.userId !== user.id) {
-        return res.status(400).json({ error: `The Codeforces handle "${codeforcesHandle}" is already linked to another DivineCode account.` });
+        return res.status(400).json({ error: `The Codeforces handle "${codeforcesHandle}" is already linked to another account.` });
       }
 
       await prisma.externalHandle.upsert({
