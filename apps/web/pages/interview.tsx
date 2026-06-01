@@ -6,7 +6,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4
 function shuffle<T>(items: T[]) { return [...items].sort(() => Math.random() - 0.5); }
 
 export default function InterviewPage() {
-  const { data: session, status } = useSession();
+  const { data: session } = useSession();
   const [tracks, setTracks] = useState<any[]>([]);
   const [questions, setQuestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,10 +75,18 @@ export default function InterviewPage() {
     }
   }
 
-  if (loading) return <main style={page}><h1 style={{textAlign: 'center', marginTop: '20vh'}}>Loading Arena...</h1></main>;
-
   return (
     <main style={page}>
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: .4; }
+        }
+        .skeleton-pulse {
+          animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+      `}</style>
+
       <section style={{ maxWidth: 1160, margin: '0 auto' }}>
         
         <nav style={nav}>
@@ -109,48 +117,65 @@ export default function InterviewPage() {
         </div>
 
         <div style={{ display: 'grid', gap: 16 }}>
-          {filtered.length === 0 && <p style={{ textAlign: 'center', color: '#94a3b8', padding: 40 }}>No approved questions in this track yet.</p>}
-          
-          {filtered.map((q) => {
-            const opts = q.options || [];
-            const isAnswered = answers[q.id] !== undefined;
-            const isCorrect = answers[q.id] === q.correctIndex;
-
-            return (
-              <section key={`${attempt}-${q.id}`} style={card}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <span style={tag}>{q.track?.title || 'General'}</span>
-                  <span style={rating}>{q.difficultyLabel || 'Medium'}</span>
-                </div>
-                
-                <h2 style={{ fontSize: 20, margin: '0 0 16px 0', lineHeight: 1.5 }}>{q.prompt}</h2>
-                
-                <div style={optionGrid}>
-                  {opts.map((opt: string, i: number) => (
-                    <button 
-                      key={i} 
-                      disabled={isAnswered}
-                      onClick={() => answer(q.id, i)} 
-                      style={answers[q.id] === i ? selected : option}
-                    >
-                      <span style={{ fontWeight: 'bold', marginRight: 8, color: '#67e8f9' }}>{String.fromCharCode(65 + i)}.</span> {opt}
-                    </button>
-                  ))}
-                </div>
-
-                {isAnswered && (
-                  <div style={{ marginTop: 16, padding: 16, borderRadius: 12, background: isCorrect ? 'rgba(34,197,94,.1)' : 'rgba(248,113,113,.1)', border: `1px solid ${isCorrect ? 'rgba(34,197,94,.3)' : 'rgba(248,113,113,.3)'}` }}>
-                    <strong style={{ color: isCorrect ? '#4ade80' : '#f87171' }}>
-                      {isCorrect ? '✅ Correct!' : `❌ Incorrect. The correct answer was ${String.fromCharCode(65 + q.correctIndex)}.`}
-                    </strong>
-                    {q.expectedAnswer && (
-                      <p style={{ marginTop: 8, color: '#eef2ff', fontSize: 14 }}><b>Explanation:</b> {q.expectedAnswer}</p>
-                    )}
+          {loading ? (
+            // 👉 NEW: Skeleton Loader while waiting for DB
+            <>
+              {[1, 2, 3].map((i) => (
+                <section key={i} className="skeleton-pulse" style={{...card, minHeight: 200}}>
+                  <div style={{ height: 24, width: '60%', background: 'rgba(255,255,255,0.05)', borderRadius: 8, marginBottom: 20 }} />
+                  <div style={optionGrid}>
+                    <div style={{ height: 50, background: 'rgba(255,255,255,0.03)', borderRadius: 12 }} />
+                    <div style={{ height: 50, background: 'rgba(255,255,255,0.03)', borderRadius: 12 }} />
+                    <div style={{ height: 50, background: 'rgba(255,255,255,0.03)', borderRadius: 12 }} />
+                    <div style={{ height: 50, background: 'rgba(255,255,255,0.03)', borderRadius: 12 }} />
                   </div>
-                )}
-              </section>
-            );
-          })}
+                </section>
+              ))}
+            </>
+          ) : filtered.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#94a3b8', padding: 40 }}>No approved questions in this track yet.</p>
+          ) : (
+            filtered.map((q) => {
+              const opts = q.options || [];
+              const isAnswered = answers[q.id] !== undefined;
+              const isCorrect = answers[q.id] === q.correctIndex;
+
+              return (
+                <section key={`${attempt}-${q.id}`} style={card}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <span style={tag}>{q.track?.title || 'General'}</span>
+                    <span style={rating}>{q.difficultyLabel || 'Medium'}</span>
+                  </div>
+                  
+                  <h2 style={{ fontSize: 20, margin: '0 0 16px 0', lineHeight: 1.5 }}>{q.prompt}</h2>
+                  
+                  <div style={optionGrid}>
+                    {opts.map((opt: string, i: number) => (
+                      <button 
+                        key={i} 
+                        disabled={isAnswered}
+                        onClick={() => answer(q.id, i)} 
+                        style={answers[q.id] === i ? selected : option}
+                      >
+                        <span style={{ fontWeight: 'bold', marginRight: 8, color: '#67e8f9' }}>{String.fromCharCode(65 + i)}.</span> {opt}
+                      </button>
+                    ))}
+                  </div>
+
+                  {isAnswered && (
+                    <div style={{ marginTop: 16, padding: 16, borderRadius: 12, background: isCorrect ? 'rgba(34,197,94,.1)' : 'rgba(248,113,113,.1)', border: `1px solid ${isCorrect ? 'rgba(34,197,94,.3)' : 'rgba(248,113,113,.3)'}` }}>
+                      <strong style={{ color: isCorrect ? '#4ade80' : '#f87171' }}>
+                        {isCorrect ? '✅ Correct!' : `❌ Incorrect. The correct answer was ${String.fromCharCode(65 + q.correctIndex)}.`}
+                      </strong>
+                      {q.expectedAnswer && (
+                        <p style={{ marginTop: 8, color: '#eef2ff', fontSize: 14 }}><b>Explanation:</b> {q.expectedAnswer}</p>
+                      )}
+                    </div>
+                  )}
+                </section>
+              );
+            })
+          )}
         </div>
       </section>
 

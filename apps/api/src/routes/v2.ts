@@ -14,7 +14,7 @@ import { submissionRouter } from './submissionRoutes';
 import { syncUserRatings } from '../modules/external-sync/profileSyncService';
 import { ContestStatus } from '@prisma/client';
 import { rewardsQueue } from '../queues/queues';
-
+import { profileRouter } from './profileRoutes';
 // 👉 IMPORT THE NEW INTERVIEW ROUTER
 import { interviewRouter } from './interviewRoutes'; 
 
@@ -322,4 +322,5 @@ export function mountV2Routes(app: Express, io: Server) {
   app.use('/api/v2', router);
   app.use('/api/v2/submissions', submissionRouter); 
   app.use('/api/v2/interview', interviewRouter); // <--- MOUNTED
+  app.use('/api/v2/profile', profileRouter);
 }

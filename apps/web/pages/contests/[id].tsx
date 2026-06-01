@@ -39,7 +39,6 @@ export default function ContestRoomPage() {
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState('Not synced yet');
   
-  // States for new features
   const [newProblemCode, setNewProblemCode] = useState('');
   const [newProblemPlatform, setNewProblemPlatform] = useState('Codeforces');
   const [reportReason, setReportReason] = useState('');
@@ -73,7 +72,6 @@ export default function ContestRoomPage() {
 
   async function loadSubmissions() {
     if (!id) return;
-    // Uses the updated getContestSubmissions logic from the backend
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions${viewerQuery(session)}`, { headers: viewerHeaders(session) });
     const data = await res.json();
     setSubmissions(Array.isArray(data) ? data : []);
@@ -126,13 +124,11 @@ export default function ContestRoomPage() {
       if (!res.ok) return alert(data.error || 'Could not add problem');
       setContest(data);
       setNewProblemCode('');
-    } catch (e: any) {
-      alert(e.message || 'Could not add problem');
-    }
+    } catch (e: any) { alert(e.message || 'Could not add problem'); }
   }
 
   async function removeProblem(problemId: string) {
-    if (!id || !session || !confirm('Remove this problem from the live contest? Solves for it will be excluded.')) return;
+    if (!id || !session || !confirm('Remove this problem from the live contest?')) return;
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, { method: 'DELETE', headers: viewerHeaders(session) });
     const data = await res.json();
     if (!res.ok) return alert(data.error || 'Could not remove problem');
@@ -149,60 +145,41 @@ export default function ContestRoomPage() {
       const data = await res.json();
       if (!res.ok) return alert(data.error || 'Could not replace problem');
       setContest(data);
-    } catch (e: any) {
-      alert(e.message || 'Could not replace problem');
-    }
+    } catch (e: any) { alert(e.message || 'Could not replace problem'); }
   }
 
-  // New Action: Submit Discrepancy Report
   async function submitReport() {
     if (!selectedSubmission || !reportReason.trim()) return;
     const res = await fetch(`${API_BASE_URL}/api/submissions/${selectedSubmission.id}/report`, {
-      method: 'POST',
-      headers: viewerHeaders(session),
-      body: JSON.stringify({ reason: reportReason })
+      method: 'POST', headers: viewerHeaders(session), body: JSON.stringify({ reason: reportReason })
     });
-    if (res.ok) {
-      alert('Report submitted successfully to the contest owner.');
-      setReportReason('');
-    } else {
-      const data = await res.json();
-      alert(data.error || 'Failed to report submission');
-    }
+    if (res.ok) { alert('Report submitted successfully to the contest owner.'); setReportReason(''); } 
+    else { const data = await res.json(); alert(data.error || 'Failed to report submission'); }
   }
   
   async function finalizeContest() {
     if (!id || !session || !confirm('End this contest immediately and calculate final ratings/coins? This cannot be undone.')) return;
-    
-    setSyncing(true); // Reuse syncing state for loading indication
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/finalize`, { 
-      method: 'POST', 
-      headers: viewerHeaders(session) 
-    });
+    setSyncing(true); 
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/finalize`, { method: 'POST', headers: viewerHeaders(session) });
     const data = await res.json();
     setSyncing(false);
-    
     if (!res.ok) return alert(data.error || 'Could not finalize contest');
-    
     alert(data.message);
-    router.push(`/contests/${id}/final`); // Redirect them to the final standings page
+    router.push(`/contests/${id}/final`);
   }
-  // New Action: Submit Manual Points Override
+
   async function submitOverride() {
     if (!selectedSubmission || overridePoints === '') return;
     const res = await fetch(`${API_BASE_URL}/api/submissions/${selectedSubmission.id}/override`, {
-      method: 'POST',
-      headers: viewerHeaders(session),
-      body: JSON.stringify({ manualPoints: Number(overridePoints) })
+      method: 'POST', headers: viewerHeaders(session), body: JSON.stringify({ manualPoints: Number(overridePoints) })
     });
     if (res.ok) {
       alert('Points overridden successfully. Standings will recalculate instantly.');
       setSelectedSubmission(null);
       await loadSubmissions();
-      await loadContest(); // Refresh standings
+      await loadContest(); 
     } else {
-      const data = await res.json();
-      alert(data.error || 'Failed to override points');
+      const data = await res.json(); alert(data.error || 'Failed to override points');
     }
   }
 
@@ -220,9 +197,7 @@ export default function ContestRoomPage() {
   const teamSolvedProblemIds = useMemo(() => {
     const solvedSet = new Set<string>();
     const myMemberInfo = contest?.viewerMember;
-    
     if (!myMemberInfo) return solvedSet;
-
     const myTeam = myMemberInfo.team || myMemberInfo.teamName || 'Individuals';
 
     submissions.forEach((sub) => {
@@ -231,16 +206,11 @@ export default function ContestRoomPage() {
         const rowMemberId = sub.memberId || sub.participantId;
         const member = memberById[rowMemberId] || {};
         const subTeam = member.team || member.teamName || 'Individuals';
-        
-        const isMe = rowMemberId === myMemberInfo.id;
-        const isMyTeam = myTeam !== 'Individuals' && subTeam === myTeam;
-        
-        if (isMe || isMyTeam) {
+        if (rowMemberId === myMemberInfo.id || (myTeam !== 'Individuals' && subTeam === myTeam)) {
           solvedSet.add(sub.problemId);
         }
       }
     });
-
     return solvedSet;
   }, [contest, submissions, memberById]);
 
@@ -250,21 +220,29 @@ export default function ContestRoomPage() {
     return Boolean(viewerMember && (viewerMember.id === memberId || (viewerMember.team && viewerMember.team !== 'Individuals' && member?.team === viewerMember.team)));
   };
 
+  // 👉 FIXED: Standings now securely calculate total scores dynamically from the problem points
   const teamStandings = useMemo(() => {
     const grouped: Record<string, any> = {};
     (contest?.standings || []).forEach((standing: any) => {
       const member = memberById[standing.memberId] || {};
       const team = member.teamName || member.team || 'Individuals';
       if (!grouped[team]) grouped[team] = { team, solved: 0, penalty: 0, score: 0, players: [] };
+
+      // Ensure score calculates if backend falls back to 0
+      let safeScore = standing.score || 0;
+      if (safeScore === 0 && standing.solvedProblems) {
+        safeScore = standing.solvedProblems.reduce((sum: number, pId: string) => sum + (problemById[pId]?.points || 1000), 0);
+      }
+
       grouped[team].solved += standing.solved || 0;
       grouped[team].penalty += standing.penalty || 0;
-      grouped[team].score += standing.score || 0;
-      grouped[team].players.push({ ...standing, codeforcesHandle: member.codeforcesHandle, team });
+      grouped[team].score += safeScore;
+      grouped[team].players.push({ ...standing, codeforcesHandle: member.codeforcesHandle, team, score: safeScore });
     });
     return Object.values(grouped).map((team: any) => ({ ...team, players: team.players.sort((a: any, b: any) => b.solved - a.solved || a.penalty - b.penalty) })).sort((a: any, b: any) => b.solved - a.solved || a.penalty - b.penalty || a.team.localeCompare(b.team));
-  }, [contest, memberById]);
+  }, [contest, memberById, problemById]);
 
-  const memberSubmissions = selectedMember ? submissions.filter((submission) => submission.memberId === selectedMember.memberId || submission.userId === selectedMember.name || submission.userId === selectedMember.codeforcesHandle) : [];
+  const memberSubmissions = selectedMember ? submissions.filter((submission) => submission.memberId === selectedMember.memberId || submission.participantId === selectedMember.memberId) : [];
 
   if (status === 'loading') return <main style={page}><h1>Checking account...</h1></main>;
   if (!session) return <main style={page}><section style={gate}><h1>Sign in required</h1><p style={{ color: '#a8b3c7' }}>Sign in first.</p><a href="/signin" style={primaryLink}>Sign in with Google</a></section></main>;
@@ -273,6 +251,36 @@ export default function ContestRoomPage() {
 
   return (
     <main style={page}>
+      
+      {/* 👉 NEW: Pop-Up Modal to view specific Player Submissions */}
+      {selectedMember && (
+        <div style={overlay}>
+          <div style={{...overlayModal, width: '90%', maxWidth: 900, maxHeight: '85vh', display: 'flex', flexDirection: 'column'}}>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
+              <h2 style={{margin: 0, color: '#fff'}}>{selectedMember.name}'s Submissions</h2>
+              <button onClick={() => setSelectedMember(null)} style={{background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 24, fontWeight: 'bold'}}>✖</button>
+            </div>
+            <div style={{overflowY: 'auto', flex: 1}}>
+               {memberSubmissions.length === 0 ? <p style={{color: '#94a3b8'}}>No visible submissions found.</p> : (
+                 <table style={table}>
+                   <thead><tr><th style={th}>Time</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Language</th></tr></thead>
+                   <tbody>
+                     {memberSubmissions.map(sub => (
+                       <tr key={sub.id} onClick={() => setSelectedSubmission(sub)} style={clickRow}>
+                         <td style={td}>{new Date(sub.createdAt).toLocaleTimeString()}</td>
+                         <td style={td}>{problemById[sub.problemId]?.label} {canSeeProblemMeta ? problemById[sub.problemId]?.titleSnapshot : ''}</td>
+                         <td style={{...td, color: sub.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>{sub.verdict}</td>
+                         <td style={td}>{sub.language}</td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <section style={{ maxWidth: 1240, margin: '0 auto' }}>
         <nav style={nav}>
           <a href="/" style={link}>DivineCode</a>
@@ -318,7 +326,7 @@ export default function ContestRoomPage() {
                 const label = String.fromCharCode(65 + index);
                 const actualTitle = p.titleSnapshot || p.problem?.title || `Problem ${label}`;
                 const visibleTitle = canSeeProblemMeta ? actualTitle : `Problem ${label}`;
-                const safeProblemHref = `/contests/${contest.id}/problems/${p.id}`;
+                const safeProblemHref = `/submit?contestId=${contest.id}&problemId=${p.id}`; // DIRECTS TO SUBMIT PAGE
                 const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
 
                 return <div key={p.id} style={{
@@ -327,10 +335,10 @@ export default function ContestRoomPage() {
                 }}>
                   <strong style={{ color: '#67e8f9', fontSize: 22 }}>{label}</strong>
                   <div>
-                    <a href={safeProblemHref} style={{ color: '#eef2ff', fontWeight: 900 }}>{visibleTitle}</a>
+                    <a href={safeProblemHref} style={{ color: '#eef2ff', fontWeight: 900, textDecoration: 'none' }}>{visibleTitle}</a>
                     <p style={{ margin: '6px 0 0', color: '#94a3b8' }}>
                       {canSeeProblemMeta 
-                        ? `${p.platform} - Rating ${p.problem?.rating || p.rating || p.difficulty || 'Practice'}` 
+                        ? `${p.platform} - Rating ${p.problem?.rating || p.rating || p.difficulty || 'Practice'} · ${p.points || 1000} pts` 
                         : `${p.platform} - rating hidden during contest`}
                     </p>
                   </div>
@@ -358,13 +366,13 @@ export default function ContestRoomPage() {
 
         <section style={{ ...panel, marginTop: 18 }}>
           <h2>Team Standings</h2>
-          <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Rank</th><th style={th}>Group</th><th style={th}>Solved</th><th style={th}>Penalty</th><th style={th}>Score</th></tr></thead><tbody>{teamStandings.map((team: any, i: number) => <Fragment key={team.team}><tr onClick={() => setOpenTeam(openTeam === team.team ? null : team.team)} style={clickRow}><td style={td}>#{i + 1}</td><td style={td}>{team.team}</td><td style={td}>{team.solved}</td><td style={td}>{team.penalty}</td><td style={td}>{team.score}</td></tr>{openTeam === team.team && team.players.map((player: any, pi: number) => <tr key={player.memberId} onClick={() => canInspectMember(player.memberId) && setSelectedMember(player)} style={canInspectMember(player.memberId) ? subRow : mutedRow}><td style={td}>#{pi + 1}</td><td style={td}>{player.name}</td><td style={td}>{player.solved}</td><td style={td}>{player.penalty}</td><td style={td}>{player.score}</td></tr>)}</Fragment>)}</tbody></table></div>
+          <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Rank</th><th style={th}>Group</th><th style={th}>Solved</th><th style={th}>Penalty</th><th style={th}>Score</th></tr></thead><tbody>{teamStandings.map((team: any, i: number) => <Fragment key={team.team}><tr onClick={() => setOpenTeam(openTeam === team.team ? null : team.team)} style={clickRow}><td style={td}>#{i + 1}</td><td style={td}>{team.team}</td><td style={td}>{team.solved}</td><td style={td}>{team.penalty}</td><td style={{...td, color: '#fbbf24', fontWeight: 'bold'}}>{team.score}</td></tr>{openTeam === team.team && team.players.map((player: any, pi: number) => <tr key={player.memberId} onClick={() => canInspectMember(player.memberId) && setSelectedMember(player)} style={canInspectMember(player.memberId) ? subRow : mutedRow}><td style={td}>#{pi + 1}</td><td style={td}>{player.name}</td><td style={td}>{player.solved}</td><td style={td}>{player.penalty}</td><td style={td}>{player.score}</td></tr>)}</Fragment>)}</tbody></table></div>
         </section>
 
         <section style={{ ...panel, marginTop: 18 }}>
           <h2>{isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}</h2>
           {submissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
-          <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Time</th><th style={th}>User</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Source</th></tr></thead><tbody>{submissions.map((submission) => <tr key={submission.id} onClick={() => setSelectedSubmission(submission)} style={clickRow}><td style={td}>{new Date(submission.createdAt).toLocaleString()}</td><td style={td}>{submission.userId}</td><td style={td}>{problemById[submission.problemId]?.label || ''} {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot || problemById[submission.problemId]?.problem?.title || submission.problemId : ''}</td><td style={td}>{submission.verdict}</td><td style={td}>{submission.source || submission.platform || 'DivineCode'}</td></tr>)}</tbody></table></div>
+          <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Time</th><th style={th}>User</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Source</th></tr></thead><tbody>{submissions.map((submission) => <tr key={submission.id} onClick={() => setSelectedSubmission(submission)} style={clickRow}><td style={td}>{new Date(submission.createdAt).toLocaleString()}</td><td style={td}>{submission.userId}</td><td style={td}>{problemById[submission.problemId]?.label || ''} {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot || problemById[submission.problemId]?.problem?.title || submission.problemId : ''}</td><td style={{...td, color: submission.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>{submission.verdict}</td><td style={td}>{submission.source || submission.platform || 'DivineCode'}</td></tr>)}</tbody></table></div>
         </section>
 
         {selectedSubmission && <section style={{ ...panel, marginTop: 18 }}>
@@ -375,16 +383,23 @@ export default function ContestRoomPage() {
             <p><b>Problem:</b> {canSeeProblemMeta ? problemById[selectedSubmission.problemId]?.titleSnapshot || selectedSubmission.problemId : problemById[selectedSubmission.problemId]?.label || selectedSubmission.problemId}</p>
             <p><b>Verdict:</b> {selectedSubmission.verdict}</p>
             <p><b>Language:</b> {selectedSubmission.language || 'Unknown'}</p>
-            <p><b>Source:</b> {selectedSubmission.source || selectedSubmission.platform || 'DivineCode'}</p>
             
-            {/* Display Manual Points if overridden */}
-            {selectedSubmission.manualPoints !== null && selectedSubmission.manualPoints !== undefined && (
-              <p style={{ color: '#fbbf24' }}><b>Manual Override Points:</b> {selectedSubmission.manualPoints}</p>
+            {/* 👉 NEW: Show the Code if the backend returned it! */}
+            {selectedSubmission.code && (
+              <div style={{marginTop: 12}}>
+                <strong style={{color: '#cbd5e1'}}>Source Code:</strong>
+                <pre style={{background: '#020617', padding: 12, borderRadius: 8, maxHeight: 300, overflow: 'auto', marginTop: 8, color: '#e2e8f0', fontFamily: 'monospace'}}>
+                  {selectedSubmission.code}
+                </pre>
+              </div>
             )}
             
-            {isOwner && selectedSubmission.externalSubmissionId && <a href={`https://codeforces.com/contest/${problemById[selectedSubmission.problemId]?.contestCode}/submission/${selectedSubmission.externalSubmissionId}`} target="_blank" rel="noreferrer" style={primaryLink}>Open Codeforces submission</a>}
+            {selectedSubmission.manualPoints !== null && selectedSubmission.manualPoints !== undefined && (
+              <p style={{ color: '#fbbf24', marginTop: 10 }}><b>Manual Override Points:</b> {selectedSubmission.manualPoints}</p>
+            )}
             
-            {/* Peer Reporting UI (Only when contest is over, and it is not the user's own submission) */}
+            {isOwner && selectedSubmission.externalSubmissionId && <a href={`https://codeforces.com/contest/${problemById[selectedSubmission.problemId]?.contestCode}/submission/${selectedSubmission.externalSubmissionId}`} target="_blank" rel="noreferrer" style={{...primaryLink, marginTop: 10}}>Open Codeforces submission</a>}
+            
             {isFinal && !isOwner && selectedSubmission.userId !== (session?.user?.name || session?.user?.email) && (
               <div style={{ marginTop: 16, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 16 }}>
                 <h4 style={{ margin: '0 0 8px 0', color: '#f87171' }}>Report Discrepancy</h4>
@@ -395,7 +410,6 @@ export default function ContestRoomPage() {
               </div>
             )}
 
-            {/* Owner Actions UI */}
             {isOwner && (
               <div style={{ marginTop: 16, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 16 }}>
                 <h4 style={{ margin: '0 0 8px 0', color: '#fbbf24' }}>Owner Controls</h4>
@@ -420,7 +434,7 @@ export default function ContestRoomPage() {
   );
 }
 
-// ... Keep your existing styles down here (page, nav, userPill, gate, link, primaryLink, etc) ...
+// RESTORED STYLES
 const page: CSSProperties = { minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.32), transparent 34rem), #070a16' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 };
 const userPill: CSSProperties = { padding: '10px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)' };
@@ -445,3 +459,5 @@ const clickRow: CSSProperties = { cursor: 'pointer' };
 const subRow: CSSProperties = { cursor: 'pointer', background: 'rgba(34,211,238,.05)' };
 const mutedRow: CSSProperties = { opacity: .58, cursor: 'not-allowed' };
 const detailCard: CSSProperties = { marginTop: 10, padding: 16, borderRadius: 18, background: 'rgba(2,6,23,.55)', border: '1px solid rgba(148,163,184,.16)', display: 'grid', gap: 6 };
+const overlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 50 };
+const overlayModal: CSSProperties = { padding: 30, backgroundColor: '#0f172a', border: '1px solid rgba(103,232,249,0.3)', borderRadius: 20, textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.5)' };

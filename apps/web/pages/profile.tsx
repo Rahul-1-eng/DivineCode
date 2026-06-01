@@ -3,23 +3,89 @@ import { signOut, useSession } from 'next-auth/react';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
+function viewerHeaders(session: any) {
+  return {
+    'Content-Type': 'application/json',
+    'x-user-email': session?.user?.email || '',
+    'x-user-name': session?.user?.name || ''
+  };
+}
+
 export default function ProfilePage() {
   const { data: session, status } = useSession();
   const [contests, setContests] = useState<any[]>([]);
+  const [userData, setUserData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   
-  // State for identities
+  // States for the inputs
   const [divineCodeUsername, setDivineCodeUsername] = useState('');
   const [cfHandle, setCfHandle] = useState('');
   const [lcHandle, setLcHandle] = useState('');
 
-  useEffect(() => { 
-    fetch(`${API_BASE_URL}/api/contests`)
-      .then((r) => r.json())
-      .then((d) => setContests(Array.isArray(d) ? d : []))
-      .catch(() => setContests([])); 
-  }, []);
+  const [savingUser, setSavingUser] = useState(false);
+  const [savingHandles, setSavingHandles] = useState(false);
 
-  if (status === 'loading') return <main style={page}><div style={centerText}><h1 style={{color:'#67e8f9'}}>Loading profile...</h1></div></main>;
+  useEffect(() => { 
+    if (status !== 'authenticated' || !session?.user?.email) return;
+
+    // Fetch user profile and existing handles
+    fetch(`${API_BASE_URL}/api/v2/profile/me`, { headers: viewerHeaders(session) })
+      .then(r => r.json())
+      .then(data => {
+        setUserData(data);
+        if (data.username) setDivineCodeUsername(data.username);
+        
+        const cf = data.externalHandles?.find((h: any) => h.platform === 'CODEFORCES');
+        const lc = data.externalHandles?.find((h: any) => h.platform === 'LEETCODE');
+        if (cf) setCfHandle(cf.handle);
+        if (lc) setLcHandle(lc.handle);
+        setLoading(false);
+      });
+
+    // Fetch user's contests
+    fetch(`${API_BASE_URL}/api/v2/contests`)
+      .then((r) => r.json())
+      .then((d) => setContests(Array.isArray(d) ? d : [])); 
+  }, [status, session]);
+
+  async function handleClaimUsername() {
+    if (!divineCodeUsername.trim()) return alert("Username cannot be empty");
+    setSavingUser(true);
+    const res = await fetch(`${API_BASE_URL}/api/v2/profile/claim-username`, {
+      method: 'POST',
+      headers: viewerHeaders(session),
+      body: JSON.stringify({ username: divineCodeUsername })
+    });
+    const data = await res.json();
+    setSavingUser(false);
+    if (res.ok) alert("Username claimed successfully!");
+    else alert(data.error || "Failed to claim username");
+  }
+
+  async function handleSaveLinks() {
+    setSavingHandles(true);
+    const res = await fetch(`${API_BASE_URL}/api/v2/profile/save-handles`, {
+      method: 'POST',
+      headers: viewerHeaders(session),
+      body: JSON.stringify({ codeforcesHandle: cfHandle, leetcodeHandle: lcHandle })
+    });
+    const data = await res.json();
+    setSavingHandles(false);
+    if (res.ok) alert("Handles saved successfully!");
+    else alert(data.error || "Failed to save handles");
+  }
+
+  if (status === 'loading' || loading) return (
+    <main style={page}>
+      <div style={{ maxWidth: 1120, margin: '10vh auto' }}>
+        <div style={{ ...card, animation: 'pulse 1.5s infinite' }}>
+          <div style={{ height: 40, width: '40%', background: 'rgba(255,255,255,0.05)', borderRadius: 8, marginBottom: 15 }} />
+          <div style={{ height: 20, width: '70%', background: 'rgba(255,255,255,0.05)', borderRadius: 8 }} />
+        </div>
+      </div>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
+    </main>
+  );
   
   if (!session) return (
     <main style={page}>
@@ -47,6 +113,12 @@ export default function ProfilePage() {
             <p style={eyebrow}>Global Profile</p>
             <h1 style={{ fontSize: 'clamp(36px, 6vw, 54px)', margin: '10px 0', wordBreak: 'break-word' }}>{name}</h1>
             <p style={{ color: '#a8b3c7', margin: 0, wordBreak: 'break-all' }}>{session.user?.email}</p>
+            {userData?.rating && (
+              <div style={{ marginTop: 12, display: 'flex', gap: 10 }}>
+                <span style={badge}>🏆 Rating: {userData.rating}</span>
+                <span style={badge}>🪙 Coins: {userData.coins || 0}</span>
+              </div>
+            )}
           </div>
           {session.user?.image && <img src={session.user.image} alt="Profile" style={avatar} />}
         </section>
@@ -63,7 +135,9 @@ export default function ProfilePage() {
               placeholder="e.g., RKS_Rider" 
               style={input} 
             />
-            <button style={{...primary, marginTop: 12, padding: '8px 16px', fontSize: 14}}>Claim Username</button>
+            <button onClick={handleClaimUsername} disabled={savingUser} style={{...primary, marginTop: 12, padding: '8px 16px', fontSize: 14, border: 'none', cursor: 'pointer'}}>
+              {savingUser ? 'Saving...' : 'Claim Username'}
+            </button>
           </section>
 
           <section style={card}>
@@ -73,19 +147,20 @@ export default function ProfilePage() {
               <input value={cfHandle} onChange={(e) => setCfHandle(e.target.value)} placeholder="Codeforces Handle" style={input} />
               <input value={lcHandle} onChange={(e) => setLcHandle(e.target.value)} placeholder="LeetCode Handle" style={input} />
             </div>
-            <button style={{...ghost, marginTop: 12, padding: '8px 16px', fontSize: 14}}>Save Links</button>
+            <button onClick={handleSaveLinks} disabled={savingHandles} style={{...ghost, marginTop: 12, padding: '8px 16px', fontSize: 14}}>
+              {savingHandles ? 'Saving...' : 'Save Links'}
+            </button>
           </section>
         </div>
         
         <section style={{ ...card, marginTop: 18 }}>
           <h2 style={{ margin: '0 0 16px 0' }}>Your contest rooms</h2>
           {contests.length === 0 && <p style={{ color: '#94a3b8' }}>No contests visible yet.</p>}
-          
           <div style={{ display: 'grid', gap: 12 }}>
             {contests.map((c) => (
               <a key={c.id} href={`/contests/${c.id}`} style={contestRow}>
                 <strong style={{ fontSize: 16 }}>{c.title}</strong>
-                <span style={{ fontSize: 13, color: '#94a3b8' }}>{c.membersCount} members · {c.problemsCount} problems · {c.durationMinutes}m</span>
+                <span style={{ fontSize: 13, color: '#94a3b8' }}>{c.membersCount} members · {c.problemsCount} problems</span>
               </a>
             ))}
           </div>
@@ -96,8 +171,8 @@ export default function ProfilePage() {
   );
 }
 
+// RESTORED CSS
 const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.32), transparent 34rem), #070a16', boxSizing: 'border-box' };
-const centerText: CSSProperties = { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 };
 const brand: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900, fontSize: 18 };
 const ghost: CSSProperties = { padding: '11px 16px', borderRadius: 999, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', cursor: 'pointer', fontWeight: 'bold' };
@@ -109,3 +184,4 @@ const grid: CSSProperties = { marginTop: 18, display: 'flex', flexWrap: 'wrap', 
 const card: CSSProperties = { flex: '1 1 300px', padding: 'clamp(16px, 3vw, 24px)', borderRadius: 26, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)', boxShadow: '0 24px 70px rgba(0,0,0,.28)', boxSizing: 'border-box' };
 const input: CSSProperties = { width: '100%', padding: 14, borderRadius: 14, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', outline: 'none', boxSizing: 'border-box' };
 const contestRow: CSSProperties = { color: '#eef2ff', textDecoration: 'none', padding: 18, borderRadius: 18, background: 'rgba(2,6,23,.55)', border: '1px solid rgba(148,163,184,.16)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', transition: 'background 0.2s' };
+const badge: CSSProperties = { padding: '6px 12px', background: 'rgba(34,211,238,.1)', color: '#67e8f9', borderRadius: 12, fontSize: 14, fontWeight: 'bold' };

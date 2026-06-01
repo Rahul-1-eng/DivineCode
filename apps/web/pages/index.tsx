@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
 const features = [
   { title: 'Login', href: '/signin', icon: '🔐', text: 'Google account access with contest identity.' },
@@ -11,6 +14,7 @@ const features = [
 
 export default function Home() {
   const { data: session, status } = useSession();
+  const [profile, setProfile] = useState<any>(null);
 
   const navLinks = [
     ['Duel', '/duel'],
@@ -19,10 +23,23 @@ export default function Home() {
     ['Group', '/contests/create']
   ];
 
+  // Fetch the user's global economy stats (Rating & Coins)
+  useEffect(() => {
+    if (session?.user?.email) {
+      fetch(`${API_BASE_URL}/api/v2/profile/me`, {
+        headers: { 'x-user-email': session.user.email }
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (!data.error) setProfile(data);
+      })
+      .catch(() => null);
+    }
+  }, [session]);
+
   return (
     <main style={{ minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.35), transparent 36rem), radial-gradient(circle at top right, rgba(34,211,238,.22), transparent 30rem), #070a16' }}>
       
-      {/* Global Style for Skeleton Animation */}
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; }
@@ -46,13 +63,27 @@ export default function Home() {
             </a>
           ))}
 
-          {/* Dynamic Authentication State */}
+          {/* Dynamic Authentication State & Economy Stats */}
           {status === 'loading' ? (
-            <div className="skeleton-pulse" style={{ width: 90, height: 42, borderRadius: 999, background: 'rgba(148,163,184,.2)' }} />
+            <div className="skeleton-pulse" style={{ width: 140, height: 42, borderRadius: 999, background: 'rgba(148,163,184,.2)' }} />
           ) : session ? (
-            <a href="/profile" style={{ color: '#020617', textDecoration: 'none', padding: '11px 18px', borderRadius: 999, fontWeight: 900, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)' }}>
-              {session.user?.name?.split(' ')[0] || 'Profile'}
-            </a>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginLeft: 10 }}>
+              {profile ? (
+                <>
+                  <span style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(251,191,36,.15)', color: '#fbbf24', fontWeight: 'bold', fontSize: 14 }}>
+                    🏆 {profile.rating || 1200}
+                  </span>
+                  <span style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(34,211,238,.15)', color: '#67e8f9', fontWeight: 'bold', fontSize: 14 }}>
+                    🪙 {profile.coins || 0}
+                  </span>
+                </>
+              ) : (
+                <div className="skeleton-pulse" style={{ width: 120, height: 36, borderRadius: 999, background: 'rgba(148,163,184,.2)' }} />
+              )}
+              <a href="/profile" style={{ color: '#020617', textDecoration: 'none', padding: '11px 18px', borderRadius: 999, fontWeight: 900, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)' }}>
+                {profile?.username || session.user?.name?.split(' ')[0] || 'Profile'}
+              </a>
+            </div>
           ) : (
             <a href="/signin" style={{ color: '#dbeafe', textDecoration: 'none', padding: '11px 16px', borderRadius: 999, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(15,23,42,.72)' }}>
               Login

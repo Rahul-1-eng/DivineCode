@@ -22,6 +22,7 @@ type MemberInput = {
 
 type ProblemInput = {
   problemId?: string;
+  interviewQuestionId?: string;
   title?: string;
   platform?: string;
   code?: string;
@@ -234,6 +235,7 @@ async function assertUnsolvedByAll(members: MemberInput[], problems: ProblemInpu
   }
 }
 
+// Add this to apps/api/src/modules/contests/contestService.ts
 async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
   contestId: string;
   problem: ProblemInput;
@@ -242,20 +244,15 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
 }) {
   const platform = toPlatform(input.problem.platform);
   const label = displayLabel(input.index);
-  const parsedCodeforces = platform === Platform.CODEFORCES ? parseCodeforcesCode(input.problem) : null;
-  const externalId =
-    input.problem.externalId ||
-    input.problem.code ||
-    (parsedCodeforces ? `${parsedCodeforces.contestCode}${parsedCodeforces.problemIndex}` : null);
-
+  
   return tx.contestProblem.create({
     data: {
       contestId: input.contestId,
       problemId: input.problem.problemId || null,
-      titleSnapshot: String(input.problem.title || externalId || `Problem ${label}`).trim(),
+      interviewQuestionId: input.problem.interviewQuestionId || null,
+      titleSnapshot: String(input.problem.title || `Problem ${label}`).trim(),
       platform,
-      externalId,
-      externalUrl: externalUrl(input.problem, platform),
+      externalUrl: input.problem.url || '',
       index: input.index,
       label,
       points: Math.max(1, Number(input.problem.points || 1000)),
@@ -263,7 +260,6 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
     }
   });
 }
-
 export async function loadContestForViewer(contestId: string) {
   return prisma.contest.findUnique({
     where: { id: contestId },
@@ -678,6 +674,7 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
     take: 250
   });
 
+ // At the bottom of contestService.ts
   return submissions.map(sub => ({
     id: sub.id,
     contestId: sub.contestId,
@@ -689,6 +686,7 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
     source: sub.source,
     externalSubmissionId: sub.externalSubmissionId,
     createdAt: sub.externalCreatedAt || sub.judgedAt,
-    platform: sub.contestProblem?.platform || 'Codeforces'
+    platform: sub.contestProblem?.platform || 'Codeforces',
+    code: sub.code // 👉 ADD THIS LINE SO THE UI CAN RENDER IT!
   }));
 }

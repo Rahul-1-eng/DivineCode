@@ -7,12 +7,12 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
 type Mode = 'single' | 'group';
-type MemberRow = { name: string; email: string; codeforcesHandle: string };
+// 👉 CHANGED: We ONLY ask for the DivineCode Username now!
+type MemberRow = { username: string }; 
 type TeamRow = { name: string; players: MemberRow[] };
-type ProblemRow = { platform: string; code: string; contestCode: string; problemIndex: string; title: string; url: string; tags: string; rating?: number; difficulty?: string };
+type ProblemRow = { platform: string; code: string; contestCode: string; problemIndex: string; title: string; url: string; tags: string; rating?: number; difficulty?: string; interviewQuestionId?: string };
 
-const emptyMember = (): MemberRow => ({ name: '', email: '', codeforcesHandle: '' });
-function cleanHandle(value: string) { return value.trim().replace(/^@/, ''); }
+const emptyMember = (): MemberRow => ({ username: '' });
 
 export default function CreateContestPage() {
   const { data: session, status } = useSession();
@@ -20,34 +20,42 @@ export default function CreateContestPage() {
   const [isCreating, setIsCreating] = useState(false);
 
   const ownerName = session?.user?.name || session?.user?.email || '';
-  const [ownerCfHandle, setOwnerCfHandle] = useState('');
   const [mode, setMode] = useState<Mode>('group');
   const [title, setTitle] = useState('DivineCode Team Mashup Round');
   const [duration, setDuration] = useState(120);
+  
   const [soloPlayer, setSoloPlayer] = useState<MemberRow>(emptyMember());
   const [teams, setTeams] = useState<TeamRow[]>([
     { name: 'Group A', players: [emptyMember(), emptyMember(), emptyMember()] },
     { name: 'Group B', players: [emptyMember(), emptyMember(), emptyMember()] }
   ]);
+  
   const [problems, setProblems] = useState<ProblemRow[]>([{ platform: 'Codeforces', code: '', contestCode: '', problemIndex: '', title: '', url: '', tags: 'implementation' }]);
   const [lookupState, setLookupState] = useState<Record<number, string>>({});
+  const [availableMcqs, setAvailableMcqs] = useState<any[]>([]);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => { 
+    setMounted(true); 
+    fetch(`${API_V2_BASE_URL}/interview/questions`).then(r => r.json()).then(data => {
+        if (Array.isArray(data)) setAvailableMcqs(data);
+    }).catch(console.error);
+  }, []);
 
   const cleanMemberCount = useMemo(() => {
-    if (mode === 'single') return soloPlayer.name.trim() || soloPlayer.email.trim() || soloPlayer.codeforcesHandle.trim() ? 1 : 0;
-    return teams.flatMap((team) => team.players).filter((member) => member.name.trim() || member.email.trim() || member.codeforcesHandle.trim()).length;
+    if (mode === 'single') return soloPlayer.username.trim() ? 1 : 0;
+    return teams.flatMap((team) => team.players).filter((member) => member.username.trim()).length;
   }, [mode, soloPlayer, teams]);
 
   function addTeam() { setTeams([...teams, { name: `Group ${String.fromCharCode(65 + teams.length)}`, players: [emptyMember(), emptyMember(), emptyMember()] }]); }
   function updateTeam(index: number, name: string) { const next = [...teams]; next[index] = { ...next[index], name }; setTeams(next); }
   function addPlayer(teamIndex: number) { const next = [...teams]; next[teamIndex].players.push(emptyMember()); setTeams(next); }
-  function updatePlayer(teamIndex: number, playerIndex: number, field: keyof MemberRow, value: string) { const next = [...teams]; next[teamIndex].players[playerIndex] = { ...next[teamIndex].players[playerIndex], [field]: value }; setTeams(next); }
+  function updatePlayer(teamIndex: number, playerIndex: number, value: string) { const next = [...teams]; next[teamIndex].players[playerIndex] = { username: value }; setTeams(next); }
   function addProblem() { setProblems([...problems, { platform: 'Codeforces', code: '', contestCode: '', problemIndex: '', title: '', url: '', tags: 'implementation' }]); }
   function updateProblem(index: number, field: keyof ProblemRow, value: string) { const next = [...problems]; next[index] = { ...next[index], [field]: value }; setProblems(next); }
 
   async function lookupProblem(index: number) {
     const p = problems[index];
+    if (p.platform === 'Interview MCQ') return; 
     if (!p.code.trim()) return alert('Enter problem code like 1805A or two-sum');
     setLookupState({ ...lookupState, [index]: 'Loading...' });
 
@@ -64,42 +72,41 @@ export default function CreateContestPage() {
       setProblems(next);
       setLookupState({ ...lookupState, [index]: `Loaded ${data.title}` });
     } catch (error) {
-      setLookupState({ ...lookupState, [index]: 'Network Error: API unreachable' });
+      setLookupState({ ...lookupState, [index]: 'Network Error' });
     }
   }
 
   async function createContest() {
-    if (!ownerName) return alert('Sign in first.');
-    if (!session?.user?.email) return alert('Your signed-in account needs an email before creating a V2 contest.');
+    if (!session?.user?.email) return alert('Sign in first.');
     
-    const ownerHandle = cleanHandle(ownerCfHandle);
-    const hasCfProblems = problems.some((p) => p.platform.toLowerCase().includes('codeforces'));
+    // 👉 CLEANUP: Map players to the new backend format
+    const cleanMember = (username: string, team: string) => ({ username: username.trim(), teamName: team });
     
-    const cleanMember = (member: MemberRow, team: string) => ({
-      name: member.name.trim() || cleanHandle(member.codeforcesHandle) || member.email.trim(),
-      email: member.email.trim(),
-      codeforcesHandle: cleanHandle(member.codeforcesHandle) || member.name.trim(),
-      teamName: team
-    });
-    
-    const soloMembers = soloPlayer.name.trim() || soloPlayer.email.trim() || soloPlayer.codeforcesHandle.trim() ? [cleanMember(soloPlayer, 'Solo')] : [];
-    const teamMembers = teams.flatMap((team) => team.players.filter((member) => member.name.trim() || member.email.trim() || member.codeforcesHandle.trim()).map((member) => cleanMember(member, team.name.trim() || 'Group')));
+    const soloMembers = soloPlayer.username.trim() ? [cleanMember(soloPlayer.username, 'Solo')] : [];
+    const teamMembers = teams.flatMap((team) => team.players.filter((m) => m.username.trim()).map((m) => cleanMember(m.username, team.name.trim() || 'Group')));
     const cleanedMembers = mode === 'single' ? soloMembers : teamMembers;
     
     if (cleanedMembers.length === 0) return alert('Add at least one player.');
     
-    const invalid = hasCfProblems ? cleanedMembers.find((member) => !member.codeforcesHandle || member.codeforcesHandle.includes(' ')) : null;
-    if (invalid) return alert(`Invalid Codeforces handle for ${invalid.name}. Use the exact CF handle, without spaces.`);
-    
-    const contestProblems = problems.map((p) => ({ title: p.title, platform: p.platform, code: p.code || `${p.contestCode}${p.problemIndex}`, contestCode: p.contestCode, problemIndex: p.problemIndex, url: p.url, rating: p.rating, difficulty: p.difficulty, tags: p.tags })).filter((p) => p.url);
+    const contestProblems = problems.map((p) => ({ 
+      title: p.title, platform: p.platform, code: p.code || `${p.contestCode}${p.problemIndex}`, contestCode: p.contestCode, problemIndex: p.problemIndex, url: p.url, rating: p.rating, difficulty: p.difficulty, tags: p.tags, interviewQuestionId: p.interviewQuestionId 
+    })).filter((p) => p.url);
     
     setIsCreating(true);
 
     try {
+      // The backend will now look up these usernames in the database, grab their Codeforces handles, and map them to groups automatically.
       const res = await fetch(`${API_V2_BASE_URL}/contests`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description: `${mode === 'single' ? 'Solo' : 'Team'} mashup created by ${ownerName}`, durationMinutes: duration, ownerName, ownerEmail: session.user.email, ownerHandle, members: cleanedMembers, problems: contestProblems })
+        headers: { 'Content-Type': 'application/json', 'x-user-email': session.user.email },
+        body: JSON.stringify({ 
+          title, 
+          description: `${mode === 'single' ? 'Solo' : 'Team'} mashup`, 
+          durationMinutes: duration, 
+          ownerEmail: session.user.email, 
+          members: cleanedMembers, // Send the cleaned usernames
+          problems: contestProblems 
+        })
       });
       
       if (!res.ok) {
@@ -111,24 +118,22 @@ export default function CreateContestPage() {
       const data = await res.json();
       window.location.href = `/contests/${data.id}`;
     } catch (error) {
-      alert('Network Error: Could not connect to the backend API.');
+      alert('Network Error');
       setIsCreating(false);
     }
   }
 
   if (!mounted) return null;
   if (status === 'loading') return <main style={page}><div style={{textAlign:'center', marginTop:'20vh'}}><h1 style={{color: '#67e8f9'}}>Checking account...</h1></div></main>;
-  if (!session) return <main style={page}><section style={gate}><h1>Sign in required</h1><p style={{ color: '#a8b3c7' }}>Create mashups from your account.</p><a href="/signin" style={primaryLink}>Sign in with Google</a></section></main>;
+  if (!session) return <main style={page}><section style={gate}><h1>Sign in required</h1><a href="/signin" style={primaryLink}>Sign in with Google</a></section></main>;
 
   return (
     <main style={page}>
-      
-      {/* 👉 THE LOADING OVERLAY */}
       {isCreating && (
         <div style={overlay}>
           <div style={overlayModal}>
             <h2 style={{ color: '#fff', margin: '0 0 10px 0' }}>Forging Mashup...</h2>
-            <p style={{ color: '#67e8f9', margin: 0, fontSize: 14 }}>Syncing Codeforces data & validating handles</p>
+            <p style={{ color: '#67e8f9', margin: 0, fontSize: 14 }}>Mapping DivineCode Usernames to Database & Codeforces</p>
           </div>
         </div>
       )}
@@ -140,19 +145,14 @@ export default function CreateContestPage() {
           <div style={{ flex: '1 1 400px' }}>
             <p style={eyebrow}>Team mashup builder</p>
             <h1 style={{ fontSize: 'clamp(32px, 5vw, 52px)', margin: '10px 0' }}>Create controlled contests.</h1>
-            <p style={{ color: '#a8b3c7' }}>The owner manages the room. Players are added separately so standings never count the creator by accident.</p>
-          </div>
-          <div style={ownerCard}>
-            <span style={{ fontSize: 13, color: '#67e8f9', textTransform: 'uppercase' }}>Creator/admin</span>
-            <strong style={{ fontSize: 20 }}>{ownerName}</strong>
-            <small style={{ color: '#94a3b8' }}>Not a player unless added below.</small>
+            <p style={{ color: '#a8b3c7' }}>Use DivineCode Usernames to add players. The system automatically fetches their linked Codeforces handles.</p>
           </div>
         </div>
         
         <div style={shell}>
           <div style={modeGrid}>
-            <button onClick={() => setMode('single')} style={mode === 'single' ? activeMode : modeBtn}><strong>Solo Contest</strong><span style={{ fontSize: 13, color: '#94a3b8' }}>One selected player participates.</span></button>
-            <button onClick={() => setMode('group')} style={mode === 'group' ? activeMode : modeBtn}><strong>Team Mashup</strong><span style={{ fontSize: 13, color: '#94a3b8' }}>Group vs group with player handles.</span></button>
+            <button onClick={() => setMode('single')} style={mode === 'single' ? activeMode : modeBtn}><strong>Solo Contest</strong></button>
+            <button onClick={() => setMode('group')} style={mode === 'group' ? activeMode : modeBtn}><strong>Team Mashup</strong></button>
           </div>
           
           <label style={{ fontWeight: 'bold' }}>Contest Title</label>
@@ -162,18 +162,13 @@ export default function CreateContestPage() {
           <input type="number" value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={{ ...inputStyle, maxWidth: 180 }} />
           
           <h2 style={{ marginTop: 24, marginBottom: 12 }}>Players <span style={{ color: '#67e8f9' }}>({cleanMemberCount})</span></h2>
-          <div style={lockedOwner}>
-            <strong style={{ color: '#67e8f9' }}>Owner display:</strong> {ownerName}
-            <input value={ownerCfHandle} onChange={(e) => setOwnerCfHandle(e.target.value)} placeholder="Owner Codeforces handle, optional" style={{ ...smallInput, marginTop: 10 }} />
-          </div>
           
           {mode === 'single' && (
             <section style={teamCard}>
               <h2 style={{ margin: '0 0 16px 0', fontSize: 18 }}>Solo player</h2>
               <div style={memberRow}>
-                <input value={soloPlayer.name} onChange={(e) => setSoloPlayer({ ...soloPlayer, name: e.target.value })} placeholder="Player name" style={smallInput} />
-                <input value={soloPlayer.email} onChange={(e) => setSoloPlayer({ ...soloPlayer, email: e.target.value })} placeholder="Player account email, optional" style={smallInput} />
-                <input value={soloPlayer.codeforcesHandle} onChange={(e) => setSoloPlayer({ ...soloPlayer, codeforcesHandle: e.target.value })} placeholder="Exact Codeforces handle" style={smallInput} />
+                {/* JUST THE USERNAME NOW */}
+                <input value={soloPlayer.username} onChange={(e) => setSoloPlayer({ username: e.target.value })} placeholder="DivineCode Username (e.g. RKS_Rider)" style={smallInput} />
               </div>
             </section>
           )}
@@ -184,13 +179,11 @@ export default function CreateContestPage() {
               {teams.map((team, ti) => (
                 <section key={ti} style={teamCard}>
                   <input value={team.name} onChange={(e) => updateTeam(ti, e.target.value)} placeholder="Group name" style={{ ...inputStyle, fontWeight: 'bold' }} />
-                  {team.players.map((member, pi) => (
-                    <div key={pi} style={memberRow}>
-                      <input value={member.name} onChange={(e) => updatePlayer(ti, pi, 'name', e.target.value)} placeholder="Player name" style={smallInput} />
-                      <input value={member.email} onChange={(e) => updatePlayer(ti, pi, 'email', e.target.value)} placeholder="Player account email, optional" style={smallInput} />
-                      <input value={member.codeforcesHandle} onChange={(e) => updatePlayer(ti, pi, 'codeforcesHandle', e.target.value)} placeholder="Exact Codeforces handle" style={smallInput} />
-                    </div>
-                  ))}
+                  <div style={memberRow}>
+                    {team.players.map((member, pi) => (
+                      <input key={pi} value={member.username} onChange={(e) => updatePlayer(ti, pi, e.target.value)} placeholder="DivineCode Username" style={smallInput} />
+                    ))}
+                  </div>
                   <button onClick={() => addPlayer(ti)} style={ghostBtn}>+ Add player to {team.name}</button>
                 </section>
               ))}
@@ -198,24 +191,45 @@ export default function CreateContestPage() {
             </>
           )}
           
+          {/* Problems Section Remains Exactly the Same */}
           <h2 style={{ marginTop: 40, marginBottom: 16 }}>Problems</h2>
           <div style={{ display: 'grid', gap: 14 }}>
             {problems.map((p, i) => (
               <div key={i} style={problemCard}>
                 <strong style={{ color: '#67e8f9', width: 40 }}>#{String.fromCharCode(65 + i)}</strong>
                 <select value={p.platform} onChange={(e) => updateProblem(i, 'platform', e.target.value)} style={{ ...smallInput, flex: '1 1 120px' }}>
-                  <option>Codeforces</option><option>LeetCode</option><option>AtCoder</option><option>CodeChef</option>
+                  <option>Codeforces</option><option>LeetCode</option><option>AtCoder</option><option>Interview MCQ</option> 
                 </select>
-                <input value={p.code} onChange={(e) => updateProblem(i, 'code', e.target.value)} placeholder="Code (e.g. 1805A)" style={{ ...smallInput, flex: '1 1 120px' }} />
-                <button onClick={() => lookupProblem(i)} style={{ ...ghostBtn, flex: '1 1 100px' }}>Lookup</button>
+
+                {p.platform === 'Interview MCQ' ? (
+                  <select 
+                    value={p.interviewQuestionId || ''} 
+                    onChange={(e) => {
+                      const q = availableMcqs.find(m => m.id === e.target.value);
+                      if (q) {
+                        updateProblem(i, 'interviewQuestionId', q.id);
+                        updateProblem(i, 'code', q.id); 
+                        updateProblem(i, 'title', q.title || q.prompt.substring(0, 50));
+                        updateProblem(i, 'url', `/interview`);
+                        updateProblem(i, 'tags', 'mcq, theory');
+                        setLookupState({ ...lookupState, [i]: 'MCQ loaded.' });
+                      }
+                    }}
+                    style={{ ...smallInput, flex: '1 1 120px' }}
+                  >
+                    <option value="" disabled>Select an MCQ...</option>
+                    {availableMcqs.map(m => <option key={m.id} value={m.id}>{m.title || m.prompt.substring(0, 40)}...</option>)}
+                  </select>
+                ) : (
+                  <input value={p.code} onChange={(e) => updateProblem(i, 'code', e.target.value)} placeholder="Code" style={{ ...smallInput, flex: '1 1 120px' }} />
+                )}
+
+                <button onClick={() => lookupProblem(i)} disabled={p.platform === 'Interview MCQ'} style={{ ...ghostBtn, flex: '1 1 100px', opacity: p.platform === 'Interview MCQ' ? 0.5 : 1 }}>Lookup</button>
                 <input value={p.title} onChange={(e) => updateProblem(i, 'title', e.target.value)} placeholder="Title" style={{ ...smallInput, flex: '2 1 200px' }} />
-                <input value={p.rating || ''} readOnly placeholder="Rating" style={{ ...smallInput, flex: '1 1 80px' }} />
                 <input value={p.url} onChange={(e) => updateProblem(i, 'url', e.target.value)} placeholder="URL" style={{ ...smallInput, width: '100%', flex: '1 1 100%' }} />
-                <small style={{ color: '#94a3b8', width: '100%', marginTop: 4 }}>{lookupState[i] || 'Lookup fills title, URL, rating, contest/index. Codeforces additions are rejected if any player already solved them.'}</small>
               </div>
             ))}
           </div>
-          
           <button onClick={addProblem} style={{ ...ghostBtn, marginTop: 14 }}>+ Add problem</button>
           
           <div style={{ marginTop: 40, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 24, textAlign: 'right' }}>
@@ -229,29 +243,23 @@ export default function CreateContestPage() {
   );
 }
 
-// RESTORED STYLES (Mobile Responsive)
+// RESTORED CSS
 const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.35), transparent 36rem), radial-gradient(circle at bottom right, rgba(34,211,238,.18), transparent 30rem), #070a16', boxSizing: 'border-box' };
-const gate: CSSProperties = { maxWidth: 620, margin: '15vh auto', padding: 34, borderRadius: 28, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', boxShadow: '0 24px 70px rgba(0,0,0,.3)', textAlign: 'center' };
+const gate: CSSProperties = { maxWidth: 620, margin: '15vh auto', padding: 34, borderRadius: 28, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', textAlign: 'center' };
 const topLink: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900 };
 const primaryLink: CSSProperties = { display: 'inline-block', padding: '12px 17px', borderRadius: 999, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', textDecoration: 'none', fontWeight: 900 };
 const hero: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24, flexWrap: 'wrap', margin: '24px 0 32px 0' };
 const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 900, letterSpacing: '.14em', textTransform: 'uppercase', margin: 0 };
-const ownerCard: CSSProperties = { padding: 18, borderRadius: 22, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)', display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 250px', maxWidth: 400 };
-const shell: CSSProperties = { padding: 'clamp(20px, 4vw, 32px)', borderRadius: 30, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', boxShadow: '0 28px 90px rgba(0,0,0,.34)', boxSizing: 'border-box' };
+const shell: CSSProperties = { padding: 'clamp(20px, 4vw, 32px)', borderRadius: 30, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', boxSizing: 'border-box' };
 const modeGrid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 14, marginBottom: 26 };
 const modeBtn: CSSProperties = { padding: 20, borderRadius: 22, border: '1px solid rgba(148,163,184,.24)', background: 'rgba(2,6,23,.45)', color: '#e2e8f0', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 8, cursor: 'pointer' };
 const activeMode: CSSProperties = { ...modeBtn, border: '1px solid rgba(34,211,238,.75)', background: 'rgba(34,211,238,.12)' };
-const lockedOwner: CSSProperties = { padding: 18, borderRadius: 16, background: 'rgba(34,211,238,.08)', border: '1px solid rgba(34,211,238,.25)', marginBottom: 20 };
 const inputStyle: CSSProperties = { width: '100%', padding: 14, margin: '8px 0 16px', border: '1px solid rgba(148,163,184,.25)', borderRadius: 14, background: 'rgba(2,6,23,.55)', color: '#eef2ff', outline: 'none', boxSizing: 'border-box' };
 const smallInput: CSSProperties = { width: '100%', padding: 12, border: '1px solid rgba(148,163,184,.25)', borderRadius: 12, background: 'rgba(15,23,42,.8)', color: '#eef2ff', outline: 'none', boxSizing: 'border-box' };
-const memberRow: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12, marginBottom: 12 };
+const memberRow: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 12 };
 const teamCard: CSSProperties = { padding: 'clamp(16px, 3vw, 24px)', borderRadius: 20, background: 'rgba(2,6,23,.45)', border: '1px solid rgba(148,163,184,.18)', marginBottom: 16, boxSizing: 'border-box' };
-
-// 👉 MOBILE FIX: Converted problem card to a flex-wrap container so inputs stack on phones
 const problemCard: CSSProperties = { padding: 16, borderRadius: 20, background: 'rgba(2,6,23,.5)', border: '1px solid rgba(148,163,184,.16)', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', boxSizing: 'border-box' };
-
 const ghostBtn: CSSProperties = { padding: '11px 18px', borderRadius: 999, border: '1px solid rgba(148,163,184,.28)', background: 'rgba(15,23,42,.72)', color: '#dbeafe', cursor: 'pointer', fontWeight: 'bold' };
 const primaryBtn: CSSProperties = { padding: '16px 28px', borderRadius: 999, border: 0, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', fontWeight: 900, cursor: 'pointer', fontSize: 16 };
-
 const overlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 50 };
 const overlayModal: CSSProperties = { padding: 30, backgroundColor: '#0f172a', border: '1px solid rgba(103,232,249,0.3)', borderRadius: 20, textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.5)' };
