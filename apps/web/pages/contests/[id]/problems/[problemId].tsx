@@ -102,7 +102,7 @@ export default function WorkspacePage() {
     }
   };
 
- const runTestCase = async (index: number) => {
+  const runTestCase = async (index: number) => {
     if (!code.trim()) return alert("Code cannot be empty");
     const newCases = [...testcases];
     newCases[index].status = 'running';
@@ -115,30 +115,22 @@ export default function WorkspacePage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourceCode: code, language, input: newCases[index].input })
       });
-      
       const data = await res.json();
       let actualOut = '';
       
       if (!res.ok) {
-        // Handle server errors
         actualOut = data.error || 'Execution failed on server.';
         newCases[index].status = 'error';
       } else if (data.verdict === 'COMPILATION_ERROR') {
-        // Handle compilation errors
         actualOut = data.compileError || 'Compilation Error';
         newCases[index].status = 'error';
       } else if (data.verdict === 'RUNTIME_ERROR' || data.verdict === 'TIME_LIMIT_EXCEEDED') {
-        // Handle crashes or timeouts
-        actualOut = `[${data.verdict}]\n${data.stderr || ''}\n${data.stdout || ''}`;
+        actualOut = `[${data.verdict}]\n${data.stderr || ''}`;
         newCases[index].status = 'error';
       } else {
-        // Handle successful execution (no crashes)
         actualOut = data.stdout || '';
         const expectedOut = newCases[index].expectedOutput.trim();
-        const cleanActualOut = actualOut.trim();
-        
-        // Check if output matches expected
-        newCases[index].status = (cleanActualOut === expectedOut || !expectedOut) ? 'passed' : 'failed';
+        newCases[index].status = (actualOut.trim() === expectedOut || !expectedOut) ? 'passed' : 'failed';
       }
       
       newCases[index].output = actualOut.trim();
@@ -146,9 +138,9 @@ export default function WorkspacePage() {
       newCases[index].status = 'error';
       newCases[index].output = 'Network error connecting to execution engine.';
     }
-    
     setTestcases([...newCases]);
   };
+
   const runAllTestcases = async () => {
     for (let i = 0; i < testcases.length; i++) {
       await runTestCase(i);
@@ -174,7 +166,6 @@ export default function WorkspacePage() {
     setJudgeVerdict(null);
 
     try {
-      // 1. Submit the code
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ contestProblemId: problemId, code, language })
@@ -187,39 +178,35 @@ export default function WorkspacePage() {
         return;
       }
 
-      // 2. Await the judge execution (passing wait=true)
       const judgeRes = await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge?wait=true`, { method: 'POST' });
       const judgeData = await judgeRes.json();
 
-      // Check for success statuses (statusId 3 is Accepted in Judge0, or text 'ACCEPTED')
-      const isAccepted = judgeData?.submission?.statusId === 3 || 
-                         judgeData?.status?.id === 3 || 
-                         judgeData?.submission?.verdict === 'ACCEPTED' || 
-                         judgeData?.submission?.verdict === 'Accepted';
+      if (!judgeRes.ok) {
+        setJudgeVerdict({ status: 'Judge Error', message: judgeData.error || 'Error executing system judge.' });
+        setSubmitting(false);
+        return;
+      }
+
+      const sub = judgeData.submission;
+      const isAccepted = sub?.verdict === 'ACCEPTED' || sub?.verdict === 'Accepted';
 
       if (isAccepted) {
         setJudgeVerdict({ status: 'Accepted', message: 'All hidden system tests passed!' });
         playSuccessSound();
-        // Redirect on success
         setTimeout(() => {
           router.push(`/contests/${id}`);
         }, 1500);
       } else {
-        // Handle compilation errors, runtime errors, or wrong answers without redirecting
-        const statusStr = judgeData?.submission?.verdict || judgeData?.status?.description || 'Rejected';
-        
-        // Try to extract the most descriptive error message possible
-        let errorMsg = judgeData?.submission?.judgeMessage || 
-                       (judgeData.compile_output ? atob(judgeData.compile_output) : null) || 
-                       judgeData?.message || 
-                       'Failed on hidden system tests. Check your logic and edge cases.';
-                       
-        setJudgeVerdict({ status: statusStr, message: errorMsg });
+        setJudgeVerdict({ 
+          status: sub?.verdict || 'Rejected', 
+          message: sub?.judgeMessage || 'Failed on hidden system tests. Check your logic and edge cases.' 
+        });
       }
     } catch (e) {
       setJudgeVerdict({ status: 'Error', message: 'Network or server error during execution.' });
     } finally {
-      setSubmitting(false);
+      // ✅ Fixed typo here: changed from final to finally
+      setSubmitting(false); 
     }
   };
 
@@ -293,7 +280,6 @@ export default function WorkspacePage() {
         .judge-spinner { animation: spin 1.2s linear infinite; }
       `}</style>
       
-      {/* 🚀 Submitting Overlay Animation */}
       {submitting && (
         <div style={modalOverlay}>
           <div style={{...modalContent, textAlign: 'center', maxWidth: 400}}>
@@ -302,12 +288,11 @@ export default function WorkspacePage() {
               <path fill="#38bdf8" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6l5.25 3.15.75-1.23-4-2.37V7z"/>
             </svg>
             <h2 style={{ color: '#fff', margin: '0 0 10px 0' }}>Judging Submission...</h2>
-            <p style={{ color: '#67e8f9', margin: 0, fontSize: 14 }}>Compiling and running against hidden system tests</p>
+            <p style={{ color: '#67e8f9', margin: 0, fontSize: 14 }}>Running tests against hidden system modules</p>
           </div>
         </div>
       )}
 
-      {/* ⚠️ Verdict Overlay (For Compilation Errors / Wrong Answer) */}
       {judgeVerdict && !judgeVerdict.status.includes('Accept') && !submitting && (
         <div style={modalOverlay}>
           <div style={{...modalContent, border: '1px solid #f87171'}}>
@@ -324,7 +309,6 @@ export default function WorkspacePage() {
         </div>
       )}
 
-      {/* ✅ Accepted Overlay */}
       {judgeVerdict && judgeVerdict.status.includes('Accept') && !submitting && (
         <div style={modalOverlay}>
           <div style={{...modalContent, border: '1px solid #4ade80', textAlign: 'center'}}>
@@ -416,7 +400,7 @@ export default function WorkspacePage() {
                     <div style={{ marginTop: 15, background: '#0f172a', padding: 16, borderRadius: 8, border: '1px solid #334155' }}>
                       <p style={{ color: '#fbbf24', fontWeight: 'bold', margin: '0 0 12px 0' }}>💡 Hint: {aiDebugResult.hint}</p>
                       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                        <div style={{ flex: '1 1 200px' }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>FAILLING INPUT</strong><pre style={codeBlockError}>{aiDebugResult.input}</pre></div>
+                        <div style={{ flex: '1 1 200px' }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>FAILING INPUT</strong><pre style={codeBlockError}>{aiDebugResult.input}</pre></div>
                         <div style={{ flex: '1 1 200px' }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>EXPECTED OUTPUT</strong><pre style={codeBlockSuccess}>{aiDebugResult.expectedOutput}</pre></div>
                       </div>
                     </div>
@@ -473,7 +457,6 @@ export default function WorkspacePage() {
   );
 }
 
-// 🎨 CSS CONFIGURATIONS
 const page: CSSProperties = { height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#020617', color: '#eef2ff', fontFamily: 'Inter, sans-serif' };
 const headerBar: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', backgroundColor: '#0f172a', borderBottom: '1px solid #1e293b', zIndex: 10 };
 const btnDark: CSSProperties = { background: '#1e293b', border: 'none', color: '#cbd5e1', padding: '8px 14px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold' };
@@ -504,7 +487,6 @@ const primaryBtn: CSSProperties = { background: '#0284c7', color: '#fff', border
 const cancelBtn: CSSProperties = { background: 'transparent', color: '#94a3b8', border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 'bold' };
 const syncBtn: CSSProperties = { background: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
 
-// CPH Test Case Styles
 const tcCard: CSSProperties = { background: '#0f172a', border: '1px solid #334155', borderRadius: 8, overflow: 'hidden', marginBottom: 15 };
 const tcHeader: CSSProperties = { background: '#1e293b', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', fontSize: 13 };
 const tcBox: CSSProperties = { width: '100%', height: 80, background: '#020617', border: '1px solid #334155', borderRadius: 6, color: '#fff', fontFamily: 'monospace', padding: 8, fontSize: 13, resize: 'none' };

@@ -13,8 +13,7 @@ function viewerQuery(session: any) {
   const query = new URLSearchParams();
   if (session?.user?.email) query.set('viewerEmail', session.user.email);
   if (session?.user?.name) query.set('viewerName', session.user.name);
-  const value = query.toString();
-  return value ? `?${value}` : '';
+  return query.toString() ? `?${query.toString()}` : '';
 }
 
 function viewerHeaders(session: any) {
@@ -33,11 +32,9 @@ export default function SubmitPage() {
   const [contest, setContest] = useState<any>(null);
   const [problem, setProblem] = useState<any>(null);
   
-  // Coding State
   const [language, setLanguage] = useState('cpp');
   const [code, setCode] = useState(starter);
   
-  // MCQ State
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [mcqData, setMcqData] = useState<any>(null);
 
@@ -85,11 +82,10 @@ export default function SubmitPage() {
   const playSuccessSound = () => {
     if (soundEnabled && audioRef.current) {
       audioRef.current.currentTime = 0;
-      audioRef.current.play().catch(e => console.log("Audio autoplay blocked by browser"));
+      audioRef.current.play().catch(() => null);
     }
   };
 
-  // 👉 UPDATED: Route execution through your own backend instead of direct external API
   async function runCustomTest() {
     setExecuting(true);
     setActiveTab('output');
@@ -136,31 +132,44 @@ export default function SubmitPage() {
     const finalLanguage = isMCQ ? 'mcq' : language;
     const finalCode = isMCQ ? String(selectedOption) : code;
 
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${contestId}/submissions`, {
-      method: 'POST',
-      headers: viewerHeaders(session),
-      body: JSON.stringify({ code: finalCode, language: finalLanguage, contestProblemId: problemId })
-    });
-    const submissionData = await res.json();
-    
-    if (!res.ok) {
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${contestId}/submissions`, {
+        method: 'POST',
+        headers: viewerHeaders(session),
+        body: JSON.stringify({ code: finalCode, language: finalLanguage, contestProblemId: problemId })
+      });
+      const submissionData = await res.json();
+      
+      if (!res.ok) {
+        setSubmitting(false);
+        setVerdict({ verdict: 'Rejected', message: submissionData.error || 'Could not create submission' });
+        return;
+      }
+      
+      const judgeRes = await fetch(`${API_V2_BASE_URL}/submissions/${submissionData.id}/judge?wait=true`, {
+        method: 'POST',
+        headers: viewerHeaders(session)
+      });
+      const data = await judgeRes.json();
       setSubmitting(false);
-      setVerdict({ verdict: 'Rejected', message: submissionData.error || 'Could not create submission' });
-      return;
-    }
-    
-    const judgeRes = await fetch(`${API_V2_BASE_URL}/submissions/${submissionData.id}/judge?wait=true`, {
-      method: 'POST',
-      headers: viewerHeaders(session)
-    });
-    const data = await judgeRes.json();
-    setSubmitting(false);
-    
-    const finalVerdict = data.submission?.verdict || 'Finished';
-    setVerdict(judgeRes.ok ? { verdict: finalVerdict, message: data.submission?.judgeMessage || 'Judged' } : { verdict: 'Judge Error', message: data.error || 'Could not judge submission' });
+      
+      if (!judgeRes.ok) {
+        setVerdict({ verdict: 'Judge Error', message: data.error || 'Could not judge submission' });
+        return;
+      }
 
-    if (finalVerdict === 'ACCEPTED' || finalVerdict === 'Accepted') {
-      playSuccessSound();
+      const sub = data.submission;
+      const finalVerdict = sub?.verdict || 'Finished';
+      const detailedMsg = sub?.judgeMessage || 'Judged';
+      
+      setVerdict({ verdict: finalVerdict, message: detailedMsg });
+
+      if (finalVerdict === 'ACCEPTED' || finalVerdict === 'Accepted') {
+        playSuccessSound();
+      }
+    } catch (err) {
+      setSubmitting(false);
+      setVerdict({ verdict: 'Error', message: 'Failed to connect to judge.' });
     }
   }
 
@@ -171,9 +180,18 @@ export default function SubmitPage() {
     <main style={page}>
       <audio ref={audioRef} src="/accepted.mp3" preload="auto" />
 
+      <style>{`
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .judge-spinner { animation: spin 1.2s linear infinite; }
+      `}</style>
+
       {submitting && (
         <div style={overlay}>
           <div style={overlayModal}>
+            <svg className="judge-spinner" width="50" height="50" viewBox="0 0 24 24" fill="none" style={{ margin: '0 auto 15px', display: 'block' }}>
+              <circle cx="12" cy="12" r="10" stroke="rgba(103,232,249, 0.2)" strokeWidth="3" />
+              <path fill="#67e8f9" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6l5.25 3.15.75-1.23-4-2.37V7z"/>
+            </svg>
             <h2 style={{ color: '#fff', margin: '0 0 10px 0' }}>{isMCQ ? 'Grading Answer...' : 'Judging Submission...'}</h2>
             <p style={{ color: '#67e8f9', margin: 0, fontSize: 14 }}>Evaluating against hidden system logic</p>
           </div>
@@ -221,7 +239,9 @@ export default function SubmitPage() {
           {verdict && (
             <div style={{ ...verdictBox, borderColor: verdict.verdict.includes('Accept') ? 'rgba(74,222,128,.4)' : 'rgba(239,68,68,.4)', backgroundColor: verdict.verdict.includes('Accept') ? 'rgba(74,222,128,.1)' : 'rgba(239,68,68,.1)' }}>
               <h2 style={{ margin: '0 0 6px 0', color: verdict.verdict.includes('Accept') ? '#4ade80' : '#f87171' }}>{verdict.verdict}</h2>
-              <p style={{ margin: 0, color: '#e2e8f0' }}>{verdict.message}</p>
+              <pre style={{ margin: 0, color: '#e2e8f0', whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 13, maxHeight: '35vh', overflowY: 'auto' }}>
+                {verdict.message}
+              </pre>
             </div>
           )}
         </aside>
@@ -286,18 +306,15 @@ export default function SubmitPage() {
   );
 }
 
-// RESTORED STYLES
 const page: CSSProperties = { minHeight: '100vh', padding: 24, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.35), transparent 34rem), #070a16', boxSizing: 'border-box' };
 const nav: CSSProperties = { maxWidth: 1320, margin: '0 auto 24px', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 };
 const brand: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900 };
 const userPill: CSSProperties = { padding: '8px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)', fontSize: 14 };
 const soundBtn: CSSProperties = { padding: '8px 14px', borderRadius: 999, background: '#0f172a', border: '1px solid rgba(148,163,184,.22)', color: '#fff', fontSize: 14, cursor: 'pointer' };
-
 const layout: CSSProperties = { maxWidth: 1320, margin: '0 auto', display: 'flex', flexWrap: 'wrap', gap: 18 };
 const panel: CSSProperties = { padding: 24, borderRadius: 26, background: 'rgba(15,23,42,.86)', border: '1px solid rgba(148,163,184,.22)', boxShadow: '0 24px 70px rgba(0,0,0,.3)' };
 const asideStyle: CSSProperties = { ...panel, flex: '1 1 320px', maxWidth: '100%', boxSizing: 'border-box' };
 const editorPanelStyle: CSSProperties = { ...panel, flex: '2 1 500px', padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: '70vh', boxSizing: 'border-box' };
-
 const editorTop: CSSProperties = { padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#cbd5e1', background: 'rgba(2,6,23,.65)', borderBottom: '1px solid rgba(148,163,184,.16)' };
 const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 900, letterSpacing: '.12em', textTransform: 'uppercase', margin: '0 0 8px 0' };
 const input: CSSProperties = { width: '100%', padding: 12, marginTop: 8, borderRadius: 14, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', boxSizing: 'border-box' };
@@ -305,7 +322,6 @@ const submitBtn: CSSProperties = { width: '100%', marginTop: 18, padding: 14, bo
 const primaryLink: CSSProperties = { display: 'inline-block', padding: '11px 15px', borderRadius: 999, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', textDecoration: 'none', fontWeight: 900, textAlign: 'center' };
 const verdictBox: CSSProperties = { marginTop: 18, padding: 16, borderRadius: 18, border: '1px solid' };
 const warning: CSSProperties = { margin: '16px 0', padding: 16, borderRadius: 18, background: 'rgba(251,191,36,.1)', border: '1px solid rgba(251,191,36,.28)', color: '#fde68a' };
-
 const editor: CSSProperties = { width: '100%', flex: 1, minHeight: '30vh', padding: 20, border: 0, outline: 0, resize: 'none', background: '#020617', color: '#e2e8f0', fontSize: 15, lineHeight: 1.65, fontFamily: 'JetBrains Mono, Consolas, monospace', boxSizing: 'border-box' };
 const runBtn: CSSProperties = { background: '#22c55e', color: 'white', border: 0, borderRadius: 8, padding: '6px 16px', fontWeight: 'bold', cursor: 'pointer' };
 const terminal: CSSProperties = { height: '32vh', background: '#0f172a', borderTop: '1px solid rgba(148,163,184,.16)', display: 'flex', flexDirection: 'column' };
@@ -316,10 +332,7 @@ const terminalBody: CSSProperties = { flex: 1, padding: 12, overflow: 'auto' };
 const terminalInput: CSSProperties = { width: '100%', height: '100%', background: 'transparent', border: 0, outline: 0, color: '#e2e8f0', fontFamily: 'monospace', resize: 'none' };
 const terminalOutput: CSSProperties = { margin: 0, color: '#e2e8f0', fontFamily: 'monospace', whiteSpace: 'pre-wrap' };
 const terminalError: CSSProperties = { ...terminalOutput, color: '#ef4444' };
-
 const overlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 50 };
 const overlayModal: CSSProperties = { padding: 30, backgroundColor: '#0f172a', border: '1px solid rgba(103,232,249,0.3)', borderRadius: 20, textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.5)' };
-
-// MCQ Specific Styles
 const optionStyle: CSSProperties = { padding: 20, borderRadius: 16, background: 'rgba(2,6,23,.55)', color: '#eef2ff', border: '1px solid rgba(148,163,184,.24)', cursor: 'pointer', textAlign: 'left', fontSize: 16, transition: 'all 0.2s' };
 const selectedOptionStyle: CSSProperties = { ...optionStyle, border: '1px solid rgba(34,211,238,.8)', background: 'rgba(34,211,238,.12)' };
