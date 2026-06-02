@@ -1,8 +1,9 @@
-// apps/api/src/modules/ai/aiService.ts
-const AI_API_KEY = process.env.AI_API_KEY;
+import axios from 'axios';
 
 export async function generateTestCasesWithAI(problemDescription: string, masterSolution: string) {
-  if (!AI_API_KEY) throw new Error("AI_API_KEY is not configured.");
+  // 👉 FIX 1: Read the key INSIDE the function so it never gets stuck as undefined
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
 
   const prompt = `
     You are an expert competitive programming judge.
@@ -15,26 +16,26 @@ export async function generateTestCasesWithAI(problemDescription: string, master
     Format: [{"input": "...", "expectedOutput": "...", "explanation": "..."}]
   `;
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${AI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  // 👉 FIX 2: Use Axios instead of native fetch to prevent Node version crashes
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const { data } = await axios.post(url, {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { responseMimeType: "application/json" }
-    })
-  });
+    });
 
-  const data = await response.json();
-  try {
     const jsonString = data.candidates[0].content.parts[0].text;
     return JSON.parse(jsonString);
-  } catch (error) {
+  } catch (error: any) {
+    // 👉 FIX 3: Print the exact reason Google rejected the request to your terminal
+    console.error("AI Generation Error from Google:", error.response?.data || error.message);
     throw new Error("Failed to parse AI test cases.");
   }
 }
 
 export async function findFailingTestCaseWithAI(problemDescription: string, userCode: string) {
-  if (!AI_API_KEY) throw new Error("AI_API_KEY is not configured.");
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
 
   const prompt = `
     You are an expert competitive programming tutor.
@@ -52,20 +53,17 @@ export async function findFailingTestCaseWithAI(problemDescription: string, user
     Format: {"input": "...", "expectedOutput": "...", "hint": "..."}
   `;
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${AI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const { data } = await axios.post(url, {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { responseMimeType: "application/json" }
-    })
-  });
+    });
 
-  const data = await response.json();
-  try {
     const jsonString = data.candidates[0].content.parts[0].text;
     return JSON.parse(jsonString);
-  } catch (error) {
+  } catch (error: any) {
+    console.error("AI Debug Error from Google:", error.response?.data || error.message);
     throw new Error("Failed to parse AI debug response.");
   }
 }

@@ -1,7 +1,7 @@
 import { Express, NextFunction, Request, Response, Router } from 'express';
 import { Server } from 'socket.io';
 import { prisma } from '../prisma/client';
-import { enqueueCodeforcesContestSync, enqueueJudgeSubmission } from '../queues/queues';
+import { enqueueCodeforcesContestSync, enqueueJudgeSubmission, getRewardsQueue } from '../queues/queues';
 import { canManageContest, findViewerParticipant, sanitizeContestForViewer, sanitizeSubmissionForViewer, viewerFromRequest } from '../modules/contests/contestRules';
 import { 
   addContestProblemV2, createContestV2, deleteContestV2, extendContestV2, 
@@ -11,23 +11,20 @@ import {
 } from '../modules/contests/contestService';
 import { createQueuedContestSubmission } from '../modules/contests/submissionService';
 import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncService';
-import { createInternalProblem, syncTestCasesFromCodeforces } from '../modules/problems/problemService';
+import { createInternalProblem, syncTestCasesFromCodeforces, generateAndAppendAITestcases } from '../modules/problems/problemService';
 import { recomputeContestStandings } from '../modules/standings/standingService';
 import { recommendationBand } from '../modules/ratings/recommendationMath';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
-import { submissionRouter } from './submissionRoutes';
 import { syncUserRatings } from '../modules/external-sync/profileSyncService';
+import { findFailingTestCaseWithAI } from '../modules/ai/aiService';
 import { ContestStatus } from '@prisma/client';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-// 👉 FIX 1: Import getRewardsQueue instead of rewardsQueue
-import { getRewardsQueue } from '../queues/queues';
 
+// Routers
+import { submissionRouter } from './submissionRoutes';
 import { profileRouter } from './profileRoutes';
 import { interviewRouter } from './interviewRoutes'; 
-import { generateAndAppendAITestcases } from '../modules/problems/problemService';
-import { findFailingTestCaseWithAI } from '../modules/ai/aiService';
-
 
 type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<any>;
 
@@ -63,19 +60,7 @@ async function requireJudgeAccess(submissionId: string, req: Request) {
 
   const submission = await prisma.submission.findUnique({
     where: { id: submissionId },
-    include: {
-      contest: {
-        include: {
-          createdBy: true,
-          participants: {
-            include: {
-              user: true,
-              externalHandle: true
-            }
-          }
-        }
-      }
-    }
+    include: { contest: { include: { createdBy: true, participants: { include: { user: true, externalHandle: true } } } } }
   });
 
   if (!submission) throw new Error('Submission not found');
@@ -91,24 +76,10 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ ok: true, sourceOfTruth: 'postgres-prisma' });
   }));
 
-  // Endpoint 1: For the Problem Setter to Auto-Generate Test Cases
-router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
-    const { masterSolution } = req.body;
-    
-    if (!masterSolution) {
-      res.status(400).json({ error: "Master solution is required for AI generation." });
-      return;
-    }
-    
-    // Now passing BOTH arguments: the problem ID and the master solution
-    const testcases = await generateAndAppendAITestcases(req.params.id, masterSolution);
-    res.json({ success: true, generatedCount: testcases.length, testcases });
-  }));
-
-
-  // 👉 FIX 1: The Problem Proxy (Bypasses Codeforces Iframe Block)
-// 👉 UPDATED FIX: The Problem Proxy (Bypasses Codeforces Iframe & Bot Blocks)
-  router.get('/proxy/problem', asyncRoute(async (req, res, next) => {
+  // ==========================================
+  // 1. THE CODEFORCES PROXY ROUTE (Must be before /problems/:id)
+  // ==========================================
+  router.get('/proxy/problem', asyncRoute(async (req, res) => {
     const url = String(req.query.url);
     if (!url || !url.includes('codeforces')) {
       res.status(400).send('Invalid URL');
@@ -116,7 +87,6 @@ router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) =
     }
     
     try {
-      // Added User-Agent headers to trick Codeforces into thinking we are a real browser
       const { data } = await axios.get(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -146,65 +116,65 @@ router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) =
       res.status(500).send(`Failed to fetch problem statement. Error: ${e.message}`);
     }
   }));
-  // 👉 FIX 3: AI Testcases (Now accepts masterSolution from body)
+
+  // ==========================================
+  // 2. AI GENERATOR (Contest Owner)
+  // ==========================================
   router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
     const { masterSolution } = req.body;
-    if (!masterSolution) throw new Error("Master solution is required for AI generation.");
-    
+    if (!masterSolution) {
+      res.status(400).json({ error: "Master solution is required for AI generation." });
+      return;
+    }
     const testcases = await generateAndAppendAITestcases(req.params.id, masterSolution);
     res.json({ success: true, generatedCount: testcases.length, testcases });
   }));
-  // Endpoint 2: For the Contestant to use the AI Debugger (Applies Penalty)
+
+  // ==========================================
+  // 3. AI DEBUGGER (Contestant Penalty)
+  // ==========================================
   router.post('/contests/:id/problems/:problemId/ai-debug', asyncRoute(async (req, res) => {
-    const viewerEmail = req.headers['x-user-email'] as string;
-    const { id: contestId, problemId } = req.params;
-    const { userCode, problemDescription } = req.body;
+    try {
+      const viewerEmail = req.headers['x-user-email'] as string;
+      const { id: contestId, problemId } = req.params;
+      const { userCode, problemDescription } = req.body;
 
-    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
-    if (!user) throw new Error("Unauthorized");
+      if (!process.env.AI_API_KEY) {
+        console.error("CRITICAL: AI_API_KEY IS MISSING FROM .env FILE!");
+        res.status(500).json({ error: "Server missing AI API Key. Please contact admin." });
+        return;
+      }
 
-    // 1. Fetch AI response first
-    const aiResponse = await findFailingTestCaseWithAI(problemDescription, userCode);
+      const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
+      if (!user) throw new Error("Unauthorized");
 
-    // 2. Apply the 50-point penalty to their standings
-    const participant = await prisma.contestParticipant.findUnique({
-      where: { contestId_userId: { contestId, userId: user.id } },
-      include: { standing: true }
-    });
+      // 1. Fetch AI response
+      const aiResponse = await findFailingTestCaseWithAI(problemDescription, userCode);
 
-    if (participant && participant.standing) {
-      await prisma.contestStanding.update({
-        where: { participantId: participant.id },
-        data: { testcasePenalty: participant.standing.testcasePenalty + 50 }
+      // 2. Apply the 50-point penalty
+      const participant = await prisma.contestParticipant.findUnique({
+        where: { contestId_userId: { contestId, userId: user.id } },
+        include: { standing: true }
       });
-      // Recalculate standings immediately
-      await recomputeContestStandings(contestId);
+
+      if (participant && participant.standing) {
+        await prisma.contestStanding.update({
+          where: { participantId: participant.id },
+          data: { testcasePenalty: participant.standing.testcasePenalty + 50 }
+        });
+        await recomputeContestStandings(contestId);
+      }
+
+      res.json({ success: true, aiDebugData: aiResponse });
+    } catch (error: any) {
+      console.error("AI Debug Error:", error.message);
+      res.status(500).json({ error: error.message || "Failed to generate AI response." });
     }
-
-    res.json({ success: true, aiDebugData: aiResponse });
-  }));
-   // 👉 Add this block INSIDE `mountV2Routes(app: Express, io: Server)` in apps/api/src/routes/v2.ts
-
-  // 👉 FIX: Override submission points authorization fix
-  router.post('/contests/:id/submissions/:submissionId/override', asyncRoute(async (req, res) => {
-    const viewerEmail = req.headers['x-user-email'] as string;
-    if (!viewerEmail) throw new Error("Unauthorized");
-    
-    // Resolve exact actorId based on email
-    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
-    if (!user) throw new Error("Unauthorized: User not found");
-
-    const { manualPoints } = req.body;
-    const contest = await overrideSubmissionPoints(
-      req.params.id,
-      req.params.submissionId,
-      manualPoints,
-      user.id // Pass the resolved user ID
-    );
-    res.json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
   }));
 
-  // 👉 FIX: Testcase Penalty Route
+  // ==========================================
+  // GENERAL ROUTES
+  // ==========================================
   router.post('/contests/:id/problems/:problemId/penalty', asyncRoute(async (req, res) => {
     const viewerEmail = req.headers['x-user-email'] as string;
     const contestId = req.params.id;
@@ -226,7 +196,6 @@ router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) =
     res.json({ success: true, message: "Penalty applied" });
   }));
 
-  // 👉 FIX: Mid-Contest Unregister Route
   router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
     const viewerEmail = req.headers['x-user-email'] as string;
     const contestId = req.params.id;
@@ -242,13 +211,11 @@ router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) =
       throw new Error("Cannot unregister after half-time has passed.");
     }
 
-    await prisma.contestParticipant.deleteMany({
-      where: { contestId, userId: user.id }
-    });
-    
+    await prisma.contestParticipant.deleteMany({ where: { contestId, userId: user.id } });
     await recomputeContestStandings(contestId);
     res.json({ success: true, message: "Unregistered successfully" });
   }));
+
   router.post('/cron/sync-live-contests', asyncRoute(async (req, res) => {
     if (req.headers['x-cron-secret'] !== (process.env.CRON_SECRET || 'dev-secret')) {
       res.status(401).json({ error: 'Unauthorized CRON trigger' });
@@ -318,17 +285,15 @@ router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) =
   }));
 
   router.post('/contests/:id/submissions/:submissionId/override', asyncRoute(async (req, res) => {
-    const viewer = viewerFromRequest(req);
-    if (!viewer.userId) throw new Error("Unauthorized");
+    const viewerEmail = req.headers['x-user-email'] as string;
+    if (!viewerEmail) throw new Error("Unauthorized");
     
+    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
+    if (!user) throw new Error("Unauthorized: User not found");
+
     const { manualPoints } = req.body;
-    const contest = await overrideSubmissionPoints(
-      req.params.id,
-      req.params.submissionId,
-      manualPoints,
-      viewer.userId
-    );
-    res.json(sanitizeContestForViewer(contest, viewer));
+    const contest = await overrideSubmissionPoints(req.params.id, req.params.submissionId, manualPoints, user.id);
+    res.json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
   }));
 
   router.get('/contests/:id', asyncRoute(async (req, res) => {
@@ -454,10 +419,7 @@ router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) =
     }
 
     const result = await syncCodeforcesContest(req.params.id);
-    io.to(`contest:${req.params.id}`).emit('standings:update', {
-      contestId: req.params.id,
-      standings: result.standings
-    });
+    io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id, standings: result.standings });
     res.json({ ok: true, ...result });
   }));
 
@@ -491,7 +453,6 @@ router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) =
       });
 
       if (contest.isRated) {
-        // 👉 FIX 2: Execute getRewardsQueue() as a function
         await getRewardsQueue().add('process-rewards', { contestId: id });
       }
 
