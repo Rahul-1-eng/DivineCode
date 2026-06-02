@@ -1,3 +1,4 @@
+// apps/api/src/modules/judge/judge0Service.ts
 import { CheckerType, SubmissionStatus, Verdict } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
@@ -58,9 +59,6 @@ function aggregateVerdict(results: { verdict: Verdict }[]) {
   return results.find((result) => result.verdict !== Verdict.ACCEPTED)?.verdict || Verdict.JUDGE_ERROR;
 }
 
-// ---------------------------------------------------------
-// 1. CONTEST SUBMISSION PATH (WANDBOX)
-// ---------------------------------------------------------
 async function submitToJudge0(input: {
   sourceCode: string;
   language: JudgeLanguage;
@@ -106,19 +104,60 @@ async function submitToJudge0(input: {
   };
 }
 
+async function finalizeVerdict(submissionId: string, verdict: Verdict) {
+  const submission = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    include: { participant: true }
+  });
+
+  if (!submission) return;
+
+  await prisma.submission.update({
+    where: { id: submissionId },
+    data: { verdict }
+  });
+
+  if (verdict === Verdict.ACCEPTED && submission.participant?.teamId) {
+    const teamId = submission.participant.teamId;
+    const problemId = submission.contestProblemId;
+
+    const teamAlreadySolved = await prisma.submission.findFirst({
+      where: {
+        contestProblemId: problemId,
+        teamId: teamId,
+        verdict: Verdict.ACCEPTED,
+        id: { not: submissionId }
+      }
+    });
+
+    if (!teamAlreadySolved) {
+      await prisma.contestParticipant.updateMany({
+        where: { teamId: teamId },
+        data: { score: { increment: 100 } }
+      });
+    }
+
+    await prisma.contestParticipant.update({
+      where: { id: submission.participantId },
+      data: { score: { increment: 100 } }
+    });
+  }
+}
+
 export async function judgeQueuedSubmission(submissionId: string) {
   const submission = await prisma.submission.findUnique({
     where: { id: submissionId },
     include: {
       problem: { include: { testcases: { orderBy: { order: 'asc' } } } },
-      contestProblem: true
+      contestProblem: true,
+      participant: true
     }
   });
 
   if (!submission) throw new Error('Submission not found');
   if (!submission.code) throw new Error('Submission has no code to judge');
 
-  // 👉 NEW: MCQ Bypass Logic
+  // MCQ Bypass Logic
   if (submission.language === 'mcq') {
     const mcq = await prisma.interviewQuestion.findUnique({
       where: { id: submission.contestProblem!.interviewQuestionId! }
@@ -138,11 +177,43 @@ export async function judgeQueuedSubmission(submissionId: string) {
       }
     });
 
+    if (verdict === Verdict.ACCEPTED) {
+      await finalizeVerdict(judged.id, verdict);
+    }
+
     const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
     return { submission: judged, standings };
   }
 
-  // STANDARD COMPILATION LOGIC BELOW
+  // Anti-Cheat / Spam Protection
+  if (submission.contestId && submission.participant?.teamId) {
+    const duplicate = await prisma.submission.findFirst({
+      where: {
+        contestId: submission.contestId,
+        contestProblemId: submission.contestProblemId,
+        code: submission.code,
+        id: { not: submission.id },
+        participant: { teamId: submission.participant.teamId }
+      }
+    });
+
+    if (duplicate) {
+      const judged = await prisma.submission.update({
+        where: { id: submission.id },
+        data: {
+          status: SubmissionStatus.FINISHED,
+          verdict: Verdict.SKIPPED,
+          judgeMessage: 'Anti-Cheat: Exact duplicate code detected within your team.',
+          isFlagged: true,
+          judgedAt: new Date()
+        },
+        include: { testResults: { orderBy: { index: 'asc' } } }
+      });
+      const standings = await recomputeContestStandings(submission.contestId);
+      return { submission: judged, standings };
+    }
+  }
+
   if (!languageMap[submission.language as JudgeLanguage]) throw new Error(`Unsupported language: ${submission.language}`);
 
   if (!submission.problem) {
@@ -218,14 +289,16 @@ export async function judgeQueuedSubmission(submissionId: string) {
     include: { testResults: { orderBy: { index: 'asc' } } }
   });
 
+  // Call the scoring logic internally if the user answered correctly
+  if (finalVerdict === Verdict.ACCEPTED) {
+    await finalizeVerdict(judged.id, finalVerdict);
+  }
+
   const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
 
   return { submission: judged, standings };
 }
 
-// ---------------------------------------------------------
-// 2. LIVE EDITOR PATH (WANDBOX)
-// ---------------------------------------------------------
 interface ExecutionResult {
   verdict: 'ACCEPTED' | 'WRONG_ANSWER' | 'TIME_LIMIT_EXCEEDED' | 'RUNTIME_ERROR' | 'COMPILATION_ERROR' | 'EXECUTED';
   runtimeMs?: number;
@@ -261,12 +334,10 @@ export async function executeSubmission(
 
     const data = await response.json();
 
-    // 1. Compilation Error
     if (data.compiler_error) {
       return { verdict: 'COMPILATION_ERROR', compileError: data.compiler_error };
     }
 
-    // 2. Runtime Error
     if (data.status !== '0') {
       const isTimeout = data.program_error?.toLowerCase().includes('killed');
       return { 
@@ -276,7 +347,6 @@ export async function executeSubmission(
       };
     }
 
-    // 3. Output comparison (If expected output is provided)
     const actual = String(data.program_message || '').trim().replace(/\s+/g, ' ');
     
     let verdict: ExecutionResult['verdict'] = 'EXECUTED';
@@ -295,53 +365,5 @@ export async function executeSubmission(
   } catch (error) {
     console.error('Wandbox connection error details:', error);
     return { verdict: 'RUNTIME_ERROR', stderr: 'Could not connect to execution engine.' };
-  }
-}
-// apps/api/src/modules/judge/judgeService.ts (or where your verdict handling lives)
-
-async function finalizeVerdict(submissionId: string, verdict: Verdict) {
-  const submission = await prisma.submission.findUnique({
-    where: { id: submissionId },
-    include: { participant: true }
-  });
-
-  if (!submission) return;
-
-  // 1. Update the verdict
-  await prisma.submission.update({
-    where: { id: submissionId },
-    data: { verdict }
-  });
-
-  // 2. IF ACCEPTED, Apply Team Scoring Rules
-  if (verdict === Verdict.ACCEPTED) {
-    const teamId = submission.participant.teamId;
-    const problemId = submission.contestProblemId;
-
-    // Check if the team has ALREADY solved this
-    const teamAlreadySolved = await prisma.submission.findFirst({
-      where: {
-        contestProblemId: problemId,
-        teamId: teamId,
-        verdict: Verdict.ACCEPTED,
-        id: { not: submissionId } // Ensure we aren't counting the current submission
-      }
-    });
-
-    // AWARD TEAM POINTS ONLY IF FIRST SOLVE
-    if (!teamAlreadySolved) {
-      await prisma.contestParticipant.updateMany({
-        where: { teamId: teamId }, // Update all members of the team
-        data: {
-          score: { increment: 100 } // Or your specific point value
-        }
-      });
-    }
-
-    // ALWAYS AWARD INDIVIDUAL POINTS
-    await prisma.contestParticipant.update({
-      where: { id: submission.participantId },
-      data: { score: { increment: 100 } }
-    });
   }
 }
