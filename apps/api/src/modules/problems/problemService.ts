@@ -112,18 +112,13 @@ export async function createInternalProblem(input: CreateProblemInput) {
 }
 
 // 👉 NEW: AI Test Case Generator
-export async function generateAndAppendAITestcases(problemId: string) {
-  const problem = await prisma.problem.findUnique({
-    where: { id: problemId },
-    include: { officialSolutions: true }
-  });
-
+// Replace the existing function with this one:
+export async function generateAndAppendAITestcases(problemId: string, providedMasterSolution: string) {
+  const problem = await prisma.problem.findUnique({ where: { id: problemId } });
   if (!problem) throw new Error('Problem not found');
-  const masterSolution = problem.officialSolutions.find(s => s.isPrimary)?.code || problem.officialSolutions[0]?.code;
   
-  if (!masterSolution) throw new Error('Problem must have an official solution code to generate AI test cases.');
-
-  const generatedCases = await generateTestCasesWithAI(problem.description, masterSolution);
+  // Use the provided solution from the frontend prompt
+  const generatedCases = await generateTestCasesWithAI(problem.description || problem.title, providedMasterSolution);
 
   const testcaseRecords = generatedCases.map((tc: any, index: number) => ({
     problemId: problem.id,
@@ -133,13 +128,12 @@ export async function generateAndAppendAITestcases(problemId: string) {
     explanation: tc.explanation,
     isPublic: false,
     weight: 1,
-    order: index + 100 // Append to the end
+    order: index + 100 
   }));
 
   await prisma.testcase.createMany({ data: testcaseRecords });
   return generatedCases;
 }
-
 export async function syncTestCasesFromCodeforces(problemId: string, url: string) {
   try {
     const { data } = await axios.get(url);

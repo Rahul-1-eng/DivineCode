@@ -195,20 +195,20 @@ export default function ContestRoomPage() {
 
   const [generatingTcFor, setGeneratingTcFor] = useState<string | null>(null);
 
-  async function generateAITestcases(problemId: string) {
-    if (!confirm('Generate tricky AI system test cases for this problem?')) return;
+ async function generateAITestcases(problemId: string) {
+    const masterSolution = prompt('To generate accurate system test cases, the AI needs a correct Master Solution. Please paste working code here:');
+    if (!masterSolution) return;
+    
     setGeneratingTcFor(problemId);
     try {
       const res = await fetch(`${API_V2_BASE_URL}/problems/${problemId}/generate-ai-testcases`, { 
         method: 'POST', 
-        headers: viewerHeaders(session) 
+        headers: viewerHeaders(session),
+        body: JSON.stringify({ masterSolution }) // Sends solution to backend
       });
       const data = await res.json();
-      if (res.ok) {
-        alert(`Successfully generated ${data.generatedCount} new system test cases!`);
-      } else {
-        alert(data.error || 'Failed to generate test cases.');
-      }
+      if (res.ok) alert(`Successfully generated ${data.generatedCount} new system test cases!`);
+      else alert(data.error || 'Failed to generate test cases.');
     } catch (e: any) {
       alert('Network error while connecting to AI.');
     } finally {
@@ -409,8 +409,8 @@ export default function ContestRoomPage() {
           </div>
         </div>
 
-        {/* 👉 ADDED: Lock Screen for Scheduled Contests */}
-        {isScheduledLockScreen ? (
+       {/* 👉 FIX 2: Added !isOwner so the creator can always edit the scheduled time */}
+        {isScheduledLockScreen && !isOwner ? (
           <section style={{...panel, textAlign: 'center', padding: '60px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(251,191,36,0.05))'}}>
              <h2 style={{fontSize: 32, marginBottom: 10, color: '#fbbf24'}}>🔒 Contest has not started yet</h2>
              <p style={{color: '#a8b3c7', fontSize: 18}}>Problems will be revealed when the countdown reaches zero.</p>
@@ -420,6 +420,7 @@ export default function ContestRoomPage() {
           </section>
         ) : (
           <>
+            {/* The rest of the dashboard UI goes here */}
             {/* The rest of the workspace is hidden behind the lock screen until the start time */}
             {!isOwner && !viewerMember && contest.status !== 'ENDED' && (
               <section style={{ ...panel, marginBottom: 18, border: '1px solid #22d3ee', background: 'rgba(34, 211, 238, 0.05)' }}>

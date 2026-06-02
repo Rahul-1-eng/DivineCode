@@ -18,7 +18,8 @@ import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge
 import { submissionRouter } from './submissionRoutes';
 import { syncUserRatings } from '../modules/external-sync/profileSyncService';
 import { ContestStatus } from '@prisma/client';
-
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 // 👉 FIX 1: Import getRewardsQueue instead of rewardsQueue
 import { getRewardsQueue } from '../queues/queues';
 
@@ -28,7 +29,7 @@ import { generateAndAppendAITestcases } from '../modules/problems/problemService
 import { findFailingTestCaseWithAI } from '../modules/ai/aiService';
 
 
-type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<void>;
+type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<any>;
 
 function asyncRoute(handler: AsyncHandler) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -91,12 +92,55 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
 
   // Endpoint 1: For the Problem Setter to Auto-Generate Test Cases
-  router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
-    // Only admins/setters should do this, but we'll leave it open for your testing
-    const testcases = await generateAndAppendAITestcases(req.params.id);
+router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
+    const { masterSolution } = req.body;
+    
+    if (!masterSolution) {
+      res.status(400).json({ error: "Master solution is required for AI generation." });
+      return;
+    }
+    
+    // Now passing BOTH arguments: the problem ID and the master solution
+    const testcases = await generateAndAppendAITestcases(req.params.id, masterSolution);
     res.json({ success: true, generatedCount: testcases.length, testcases });
   }));
 
+
+  // 👉 FIX 1: The Problem Proxy (Bypasses Codeforces Iframe Block)
+// 👉 FIX 1: The Problem Proxy (Bypasses Codeforces Iframe Block)
+  router.get('/proxy/problem', asyncRoute(async (req, res, next) => {
+    const url = String(req.query.url);
+    if (!url || !url.includes('codeforces')) {
+      res.status(400).send('Invalid URL');
+      return; // Separated the return statement so TypeScript is happy
+    }
+    
+    try {
+      const { data } = await axios.get(url);
+      const $ = cheerio.load(data);
+      const statementHtml = $('.problem-statement').html();
+      
+      res.send(`
+        <html><head>
+          <link rel="stylesheet" href="https://codeforces.com/css/font-awesome.min.css" />
+          <link rel="stylesheet" href="https://codeforces.com/css/default.css" />
+          <script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML"></script>
+          <style>body { padding: 15px; background: #fff; color: #000; font-family: sans-serif; }</style>
+        </head>
+        <body><div class="problem-statement" style="margin:0;">${statementHtml || 'Problem statement not found.'}</div></body></html>
+      `);
+    } catch (e) {
+      res.status(500).send('Failed to fetch problem statement.');
+    }
+  }));
+  // 👉 FIX 3: AI Testcases (Now accepts masterSolution from body)
+  router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
+    const { masterSolution } = req.body;
+    if (!masterSolution) throw new Error("Master solution is required for AI generation.");
+    
+    const testcases = await generateAndAppendAITestcases(req.params.id, masterSolution);
+    res.json({ success: true, generatedCount: testcases.length, testcases });
+  }));
   // Endpoint 2: For the Contestant to use the AI Debugger (Applies Penalty)
   router.post('/contests/:id/problems/:problemId/ai-debug', asyncRoute(async (req, res) => {
     const viewerEmail = req.headers['x-user-email'] as string;
