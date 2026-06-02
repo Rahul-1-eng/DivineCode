@@ -79,41 +79,54 @@ export function mountV2Routes(app: Express, io: Server) {
   // ==========================================
   // 1. THE CODEFORCES PROXY ROUTE (Must be before /problems/:id)
   // ==========================================
+ // ==========================================
+  // UPDATED FIX: Codeforces Proxy via Official Mirror Bypass
+  // ==========================================
   router.get('/proxy/problem', asyncRoute(async (req, res) => {
-    const url = String(req.query.url);
+    let url = String(req.query.url);
     if (!url || !url.includes('codeforces')) {
       res.status(400).send('Invalid URL');
       return; 
     }
     
+    // THE HACK: Swap main domain with the official mirror to bypass Cloudflare bot screens
+    if (url.includes('codeforces.com') && !url.includes('mirror.codeforces.com')) {
+      url = url.replace('codeforces.com', 'mirror.codeforces.com');
+    }
+
     try {
       const { data } = await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
         }
       });
+      
       const $ = cheerio.load(data);
       const statementHtml = $('.problem-statement').html();
       
       if (!statementHtml) {
-        res.status(404).send('Problem statement div not found on the page.');
+        res.status(404).send('Problem statement structure not found on the mirror page.');
         return;
       }
 
       res.send(`
         <html><head>
-          <link rel="stylesheet" href="https://codeforces.com/css/font-awesome.min.css" />
-          <link rel="stylesheet" href="https://codeforces.com/css/default.css" />
+          <link rel="stylesheet" href="https://mirror.codeforces.com/css/font-awesome.min.css" />
+          <link rel="stylesheet" href="https://mirror.codeforces.com/css/default.css" />
           <script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML"></script>
-          <style>body { padding: 15px; background: #fff; color: #000; font-family: sans-serif; }</style>
+          <style>
+            body { padding: 20px; background: #fff; color: #000; font-family: sans-serif; -webkit-font-smoothing: antialiased; }
+            .problem-statement .header { margin-bottom: 2em; text-align: center; }
+            .problem-statement .title { font-size: 150%; margin-bottom: 0.5em; }
+          </style>
         </head>
         <body><div class="problem-statement" style="margin:0;">${statementHtml}</div></body></html>
       `);
     } catch (e: any) {
-      console.error("Proxy Error:", e.message);
-      res.status(500).send(`Failed to fetch problem statement. Error: ${e.message}`);
+      console.error("Mirror Proxy Error:", e.message);
+      res.status(500).send(`Failed to bypass anti-bot shields. Error: ${e.message}`);
     }
   }));
 

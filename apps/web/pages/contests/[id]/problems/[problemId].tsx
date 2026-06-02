@@ -108,26 +108,45 @@ export default function WorkspacePage() {
     }
   };
 
-  const handleSubmitCode = async () => {
+const handleSubmitCode = async () => {
     if (!code.trim()) return alert("Code cannot be empty");
     setSubmitting(true);
+    
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
-        body: JSON.stringify({ contestProblemId: problemId, code, language })
-      });
-      const submission = await res.json();
-      await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge`, { method: 'POST' });
-      alert("Code submitted successfully! Check standings for verdict.");
-      router.push(`/contests/${id}`);
+      // If it's a Codeforces problem, we call your official API sync engine
+      if (problem.platform === 'CODEFORCES' || problem.externalUrl?.includes('codeforces')) {
+        alert("Syncing with Codeforces API... Please ensure you have submitted this code to Codeforces under your registered handle.");
+        
+        const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/sync/codeforces?wait=true`, {
+          method: 'POST',
+          headers: { 'x-user-email': session?.user?.email || '' }
+        });
+        
+        const data = await res.json();
+        if (res.ok) {
+          alert("Successfully synced submissions from Codeforces API! Check the leaderboard.");
+          router.push(`/contests/${id}`);
+        } else {
+          alert(data.error || "Could not find a matching submission on Codeforces. Double-check your handle binding.");
+        }
+      } else {
+        // Standard Local Sandbox Judging for custom problems
+        const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
+          body: JSON.stringify({ contestProblemId: problemId, code, language })
+        });
+        const submission = await res.json();
+        await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge`, { method: 'POST' });
+        alert("Code submitted to local judge! Check standings for verdict.");
+        router.push(`/contests/${id}`);
+      }
     } catch (e) {
-      alert("Submission failed.");
+      alert("Submission workflow connection failed.");
     } finally {
       setSubmitting(false);
     }
   };
-
   const handleAiDebug = async () => {
     if (!code.trim()) return alert("You must write some code first to debug it!");
     if (confirm("Using the AI Tutor will deduct 50 points from your contest score. Proceed?")) {
