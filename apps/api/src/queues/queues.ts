@@ -43,10 +43,11 @@ export function getExternalSyncQueue() {
 }
 
 // 🛠️ FIX: Lazy-load the rewards queue using the shared connection to stop Upstash leak
+
 export function getRewardsQueue() {
   if (!rewardsQueue) {
     rewardsQueue = new Queue(QUEUE_NAMES.contestRewards, {
-      connection: getSharedRedisConnection(),
+      connection: getSharedRedisConnection(), // Use shared connection
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },

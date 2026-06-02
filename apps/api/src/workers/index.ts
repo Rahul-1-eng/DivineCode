@@ -14,7 +14,17 @@ type WorkerBundle = {
 
 let startedWorkers: WorkerBundle | null = null;
 let activeIoInstance: Server | null = null;
-
+// Add drainDelay to all workers in apps/api/src/workers/index.ts
+const judgeWorker = new Worker<JudgeSubmissionJob>(
+  QUEUE_NAMES.judge,
+  handleJudgeJob,
+  {
+    connection: createRedisConnection(),
+    concurrency: Math.max(1, Number(process.env.JUDGE_WORKER_CONCURRENCY || 2)),
+    drainDelay: 5000 // Add this: wait 5 seconds before re-polling
+  }
+);
+// Apply the same drainDelay: 5000 option to externalSyncWorker and rewardsWorker
 function shouldStartWorkers() {
   return process.env.ENABLE_API_WORKERS === 'true';
 }
