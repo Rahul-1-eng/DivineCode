@@ -4,7 +4,8 @@ import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncSe
 import { judgeQueuedSubmission } from '../modules/judge/judge0Service';
 import { processContestRewards } from '../modules/ratings/ratingService';
 import { CodeforcesContestSyncJob, JudgeSubmissionJob, ContestRewardsJob, QUEUE_NAMES } from '../queues/jobTypes';
-import { createRedisConnection } from '../queues/redis';
+// 👉 FIX: Import the shared connection to prevent repeated AUTH commands
+import { getSharedRedisConnection } from '../queues/redis';
 
 type WorkerBundle = {
   judgeWorker: Worker<JudgeSubmissionJob>;
@@ -74,23 +75,31 @@ export function startQueueWorkers(io?: Server) {
   
   if (startedWorkers) return startedWorkers;
 
+  // 👉 FIX: Use one shared connection for all workers
+  const sharedConnection = getSharedRedisConnection();
+
   const judgeWorker = new Worker<JudgeSubmissionJob>(QUEUE_NAMES.judge, handleJudgeJob, {
-    connection: createRedisConnection(),
+    connection: sharedConnection,
     concurrency: Math.max(1, Number(process.env.JUDGE_WORKER_CONCURRENCY || 2)),
     drainDelay: 5000 
   });
 
   const externalSyncWorker = new Worker<CodeforcesContestSyncJob>(QUEUE_NAMES.externalSync, handleCodeforcesSyncJob, {
-    connection: createRedisConnection(),
+    connection: sharedConnection,
     concurrency: Math.max(1, Number(process.env.EXTERNAL_SYNC_WORKER_CONCURRENCY || 2)),
     drainDelay: 5000 
   });
 
   const rewardsWorker = new Worker<ContestRewardsJob>(QUEUE_NAMES.contestRewards, handleRewardsJob, {
-    connection: createRedisConnection(),
+    connection: sharedConnection,
     concurrency: 1, 
     drainDelay: 5000 
   });
+
+  // Re-added error listeners for debugging
+  judgeWorker.on('failed', (job, err) => console.error(`Judge failed: ${job?.id}`, err));
+  externalSyncWorker.on('failed', (job, err) => console.error(`Sync failed: ${job?.id}`, err));
+  rewardsWorker.on('failed', (job, err) => console.error(`Rewards failed: ${job?.id}`, err));
 
   startedWorkers = { judgeWorker, externalSyncWorker, rewardsWorker };
   console.log('BullMQ workers initialized successfully.');
