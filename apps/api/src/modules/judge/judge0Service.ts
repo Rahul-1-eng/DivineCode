@@ -222,9 +222,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
 
   const testcases = submission.problem.testcases;
   if (!testcases.length) throw new Error('Problem has no testcases configured');
-  if (submission.problem.checkerType === CheckerType.CUSTOM) {
-    throw new Error('Custom checkers are not implemented in the V2 path yet');
-  }
 
   await prisma.submission.update({
     where: { id: submission.id },
@@ -254,7 +251,8 @@ export async function judgeQueuedSubmission(submissionId: string) {
         timeMs: result.time ? Math.ceil(Number(result.time) * 1000) : null,
         memoryKb: result.memory || null,
         stdout: result.stdout || null,
-        stderr: result.stderr || null,
+        // 👉 FIX: Ensure compiler errors are saved here
+        stderr: result.compile_output || result.stderr || null, 
         checkerMessage: statusDescription
       },
       update: {
@@ -263,7 +261,8 @@ export async function judgeQueuedSubmission(submissionId: string) {
         timeMs: result.time ? Math.ceil(Number(result.time) * 1000) : null,
         memoryKb: result.memory || null,
         stdout: result.stdout || null,
-        stderr: result.stderr || null,
+        // 👉 FIX: Ensure compiler errors are saved here
+        stderr: result.compile_output || result.stderr || null,
         checkerMessage: statusDescription
       }
     });
@@ -276,6 +275,13 @@ export async function judgeQueuedSubmission(submissionId: string) {
   const maxTimeMs = results.reduce((max, result) => Math.max(max, result.timeMs || 0), 0);
   const maxMemoryKb = results.reduce((max, result) => Math.max(max, result.memoryKb || 0), 0);
 
+  // 👉 FIX: Extract the detailed error message for the main submission object
+  const firstFailed = results.find(r => r.verdict !== Verdict.ACCEPTED);
+  let detailedMessage = finalVerdict as string;
+  if (firstFailed) {
+      detailedMessage = firstFailed.stderr || firstFailed.stdout || firstFailed.checkerMessage || finalVerdict;
+  }
+
   const judged = await prisma.submission.update({
     where: { id: submission.id },
     data: {
@@ -283,13 +289,12 @@ export async function judgeQueuedSubmission(submissionId: string) {
       verdict: finalVerdict,
       timeMs: maxTimeMs || null,
       memoryKb: maxMemoryKb || null,
-      judgeMessage: finalVerdict,
+      judgeMessage: detailedMessage, // 🚀 Passes the stack trace to the frontend!
       judgedAt: new Date()
     },
     include: { testResults: { orderBy: { index: 'asc' } } }
   });
 
-  // Call the scoring logic internally if the user answered correctly
   if (finalVerdict === Verdict.ACCEPTED) {
     await finalizeVerdict(judged.id, finalVerdict);
   }

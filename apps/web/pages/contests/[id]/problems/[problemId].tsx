@@ -44,6 +44,7 @@ export default function WorkspacePage() {
   
   const [penaltyViewed, setPenaltyViewed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [judgeVerdict, setJudgeVerdict] = useState<{ status: string, message: string } | null>(null);
   const [aiDebuggerLoading, setAiDebuggerLoading] = useState(false);
   const [aiDebugResult, setAiDebugResult] = useState<any>(null);
 
@@ -149,27 +150,53 @@ export default function WorkspacePage() {
     }
     
     setSubmitting(true);
+    setJudgeVerdict(null);
+
     try {
+      // 1. Submit the code
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ contestProblemId: problemId, code, language })
       });
       const submission = await res.json();
-      const judgeRes = await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge`, { method: 'POST' });
+
+      if (!res.ok) {
+        setJudgeVerdict({ status: 'Submission Failed', message: submission.error || 'Could not create submission' });
+        setSubmitting(false);
+        return;
+      }
+
+      // 2. Await the judge execution (passing wait=true)
+      const judgeRes = await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge?wait=true`, { method: 'POST' });
       const judgeData = await judgeRes.json();
 
-      if (judgeData?.submission?.statusId === 3 || judgeData?.status?.id === 3) {
+      // Check for success statuses (statusId 3 is Accepted in Judge0, or text 'ACCEPTED')
+      const isAccepted = judgeData?.submission?.statusId === 3 || 
+                         judgeData?.status?.id === 3 || 
+                         judgeData?.submission?.verdict === 'ACCEPTED' || 
+                         judgeData?.submission?.verdict === 'Accepted';
+
+      if (isAccepted) {
+        setJudgeVerdict({ status: 'Accepted', message: 'All hidden system tests passed!' });
         playSuccessSound();
-        // Delay navigation so the sound can play
+        // Redirect on success
         setTimeout(() => {
           router.push(`/contests/${id}`);
-        }, 1000);
+        }, 1500);
       } else {
-        alert("Code submitted! Redirecting to group/individual standings...");
-        router.push(`/contests/${id}`);
+        // Handle compilation errors, runtime errors, or wrong answers without redirecting
+        const statusStr = judgeData?.submission?.verdict || judgeData?.status?.description || 'Rejected';
+        
+        // Try to extract the most descriptive error message possible
+        let errorMsg = judgeData?.submission?.judgeMessage || 
+                       (judgeData.compile_output ? atob(judgeData.compile_output) : null) || 
+                       judgeData?.message || 
+                       'Failed on hidden system tests. Check your logic and edge cases.';
+                       
+        setJudgeVerdict({ status: statusStr, message: errorMsg });
       }
     } catch (e) {
-      alert("Submission workflow connection failed.");
+      setJudgeVerdict({ status: 'Error', message: 'Network or server error during execution.' });
     } finally {
       setSubmitting(false);
     }
@@ -185,7 +212,6 @@ export default function WorkspacePage() {
       if (res.ok) {
         playSuccessSound(); 
         setShowCfModal(false);
-        // Delay navigation so the sound can play
         setTimeout(() => {
           router.push(`/contests/${id}`);
         }, 1000);
@@ -241,6 +267,53 @@ export default function WorkspacePage() {
 
   return (
     <main style={page}>
+      <style>{`
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .judge-spinner { animation: spin 1.2s linear infinite; }
+      `}</style>
+      
+      {/* 🚀 Submitting Overlay Animation */}
+      {submitting && (
+        <div style={modalOverlay}>
+          <div style={{...modalContent, textAlign: 'center', maxWidth: 400}}>
+            <svg className="judge-spinner" width="60" height="60" viewBox="0 0 24 24" fill="none" style={{ margin: '0 auto 15px' }}>
+              <circle cx="12" cy="12" r="10" stroke="rgba(56, 189, 248, 0.2)" strokeWidth="3" />
+              <path fill="#38bdf8" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6l5.25 3.15.75-1.23-4-2.37V7z"/>
+            </svg>
+            <h2 style={{ color: '#fff', margin: '0 0 10px 0' }}>Judging Submission...</h2>
+            <p style={{ color: '#67e8f9', margin: 0, fontSize: 14 }}>Compiling and running against hidden system tests</p>
+          </div>
+        </div>
+      )}
+
+      {/* ⚠️ Verdict Overlay (For Compilation Errors / Wrong Answer) */}
+      {judgeVerdict && !judgeVerdict.status.includes('Accept') && !submitting && (
+        <div style={modalOverlay}>
+          <div style={{...modalContent, border: '1px solid #f87171'}}>
+            <h2 style={{ margin: '0 0 10px 0', color: '#f87171' }}>{judgeVerdict.status}</h2>
+            <div style={{ background: '#020617', padding: 15, borderRadius: 8, maxHeight: '40vh', overflowY: 'auto' }}>
+              <pre style={{ margin: 0, color: '#e2e8f0', fontFamily: 'monospace', whiteSpace: 'pre-wrap', fontSize: 13 }}>
+                {judgeVerdict.message}
+              </pre>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+              <button onClick={() => setJudgeVerdict(null)} style={primaryBtn}>Dismiss & Fix Code</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ Accepted Overlay */}
+      {judgeVerdict && judgeVerdict.status.includes('Accept') && !submitting && (
+        <div style={modalOverlay}>
+          <div style={{...modalContent, border: '1px solid #4ade80', textAlign: 'center'}}>
+            <h2 style={{ margin: '0 0 10px 0', color: '#4ade80' }}>Accepted!</h2>
+            <p style={{ color: '#e2e8f0' }}>{judgeVerdict.message}</p>
+            <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 15 }}>Redirecting to standings...</p>
+          </div>
+        </div>
+      )}
+
       <header style={headerBar}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
           <button onClick={() => router.push(`/contests/${id}`)} style={btnDark}>← Standings</button>
@@ -254,7 +327,7 @@ export default function WorkspacePage() {
             <option value="java">Java</option>
           </select>
           <button onClick={runAllTestcases} style={runBtn}>Run Code ▶</button>
-          <button onClick={handleSubmitCode} disabled={submitting} style={submitBtn}>{submitting ? 'Submitting...' : 'Submit 🚀'}</button>
+          <button onClick={handleSubmitCode} disabled={submitting} style={submitBtn}>{submitting ? 'Judging...' : 'Submit 🚀'}</button>
         </div>
       </header>
 
