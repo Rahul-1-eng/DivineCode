@@ -102,7 +102,7 @@ export default function WorkspacePage() {
     }
   };
 
-  const runTestCase = async (index: number) => {
+ const runTestCase = async (index: number) => {
     if (!code.trim()) return alert("Code cannot be empty");
     const newCases = [...testcases];
     newCases[index].status = 'running';
@@ -115,19 +115,40 @@ export default function WorkspacePage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourceCode: code, language, input: newCases[index].input })
       });
-      const data = await res.json();
-      const actualOut = data.stdout ? atob(data.stdout).trim() : (data.compile_output ? atob(data.compile_output) : 'Error');
-      const expectedOut = newCases[index].expectedOutput.trim();
       
-      newCases[index].output = actualOut;
-      if (data.status?.id !== 3) newCases[index].status = 'error';
-      else newCases[index].status = (actualOut === expectedOut || !expectedOut) ? 'passed' : 'failed';
+      const data = await res.json();
+      let actualOut = '';
+      
+      if (!res.ok) {
+        // Handle server errors
+        actualOut = data.error || 'Execution failed on server.';
+        newCases[index].status = 'error';
+      } else if (data.verdict === 'COMPILATION_ERROR') {
+        // Handle compilation errors
+        actualOut = data.compileError || 'Compilation Error';
+        newCases[index].status = 'error';
+      } else if (data.verdict === 'RUNTIME_ERROR' || data.verdict === 'TIME_LIMIT_EXCEEDED') {
+        // Handle crashes or timeouts
+        actualOut = `[${data.verdict}]\n${data.stderr || ''}\n${data.stdout || ''}`;
+        newCases[index].status = 'error';
+      } else {
+        // Handle successful execution (no crashes)
+        actualOut = data.stdout || '';
+        const expectedOut = newCases[index].expectedOutput.trim();
+        const cleanActualOut = actualOut.trim();
+        
+        // Check if output matches expected
+        newCases[index].status = (cleanActualOut === expectedOut || !expectedOut) ? 'passed' : 'failed';
+      }
+      
+      newCases[index].output = actualOut.trim();
     } catch (e) {
       newCases[index].status = 'error';
+      newCases[index].output = 'Network error connecting to execution engine.';
     }
+    
     setTestcases([...newCases]);
   };
-
   const runAllTestcases = async () => {
     for (let i = 0; i < testcases.length; i++) {
       await runTestCase(i);
