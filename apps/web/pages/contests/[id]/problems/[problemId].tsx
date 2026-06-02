@@ -5,15 +5,15 @@ import { useSession } from 'next-auth/react';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
+type TestCase = { id: string; input: string; expectedOutput: string; output: string; status: 'idle' | 'running' | 'passed' | 'failed' | 'error' };
+
 function useContestTimer(startTime: Date, endTime: Date) {
   const [timeLeft, setTimeLeft] = useState({ state: 'loading', text: '...' });
-
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
       const start = startTime.getTime();
       const end = endTime.getTime();
-
       if (now < start) {
         const diff = Math.floor((start - now) / 1000);
         setTimeLeft({ state: 'scheduled', text: `Starts in: ${Math.floor(diff/3600)}h ${Math.floor((diff%3600)/60)}m ${diff%60}s` });
@@ -26,7 +26,6 @@ function useContestTimer(startTime: Date, endTime: Date) {
     }, 1000);
     return () => clearInterval(interval);
   }, [startTime, endTime]);
-
   return timeLeft;
 }
 
@@ -39,10 +38,8 @@ export default function WorkspacePage() {
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState('cpp');
   
-  const [activeTab, setActiveTab] = useState<'code' | 'customInput' | 'testcases'>('code');
-  const [customInput, setCustomInput] = useState('');
-  const [runResult, setRunResult] = useState<any>(null);
-  const [isRunning, setIsRunning] = useState(false);
+  const [activeTab, setActiveTab] = useState<'code' | 'cph' | 'testcases'>('code');
+  const [testcases, setTestcases] = useState<TestCase[]>([{ id: '1', input: '', expectedOutput: '', output: '', status: 'idle' }]);
   const [isFetchingSamples, setIsFetchingSamples] = useState(false);
   
   const [penaltyViewed, setPenaltyViewed] = useState(false);
@@ -50,7 +47,6 @@ export default function WorkspacePage() {
   const [aiDebuggerLoading, setAiDebuggerLoading] = useState(false);
   const [aiDebugResult, setAiDebugResult] = useState<any>(null);
 
-  // States for the Codeforces Submission Flow
   const [showCfModal, setShowCfModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -63,9 +59,8 @@ export default function WorkspacePage() {
   const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
 
-  // 👉 NEW: Auto-fetch CPH samples when problem loads
   useEffect(() => {
-    if (!problem?.externalUrl?.includes('codeforces') || customInput) return;
+    if (!problem?.externalUrl?.includes('codeforces') || testcases[0]?.input !== '') return;
     
     const fetchSamples = async () => {
       setIsFetchingSamples(true);
@@ -75,16 +70,20 @@ export default function WorkspacePage() {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
         
-        // Extract inputs from the Codeforces HTML structure
-        const inputs = Array.from(doc.querySelectorAll('.input pre')).map(el => el.textContent?.trim() || '');
-        if (inputs.length > 0) {
-          setCustomInput(inputs.join('\n\n'));
+        const inputNodes = Array.from(doc.querySelectorAll('.input pre')).map(el => el.textContent?.trim() || '');
+        const outputNodes = Array.from(doc.querySelectorAll('.output pre')).map(el => el.textContent?.trim() || '');
+        
+        if (inputNodes.length > 0) {
+          const newCases = inputNodes.map((inp, idx) => ({
+            id: Date.now().toString() + idx,
+            input: inp,
+            expectedOutput: outputNodes[idx] || '',
+            output: '',
+            status: 'idle' as const
+          }));
+          setTestcases(newCases);
         }
-      } catch (err) {
-        console.error("Failed to auto-fetch CPH samples", err);
-      } finally {
-        setIsFetchingSamples(false);
-      }
+      } catch (err) {} finally { setIsFetchingSamples(false); }
     };
     fetchSamples();
   }, [problem?.externalUrl]);
@@ -100,41 +99,45 @@ export default function WorkspacePage() {
       setCode(val.substring(0, start) + '  ' + val.substring(end));
       setTimeout(() => { target.selectionStart = target.selectionEnd = start + 2; }, 0);
     }
-    const pairs: Record<string, string> = { '(': ')', '{': '}', '[': ']' };
-    if (pairs[e.key]) {
-      e.preventDefault();
-      setCode(val.substring(0, start) + e.key + pairs[e.key] + val.substring(end));
-      setTimeout(() => { target.selectionStart = target.selectionEnd = start + 1; }, 0);
-    }
   };
 
-  const handleRunCode = async () => {
+  const runTestCase = async (index: number) => {
     if (!code.trim()) return alert("Code cannot be empty");
-    setIsRunning(true);
-    setActiveTab('customInput');
+    const newCases = [...testcases];
+    newCases[index].status = 'running';
+    newCases[index].output = '';
+    setTestcases(newCases);
+    setActiveTab('cph');
+
     try {
       const res = await fetch(`${API_V2_BASE_URL}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceCode: code, language, input: customInput })
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceCode: code, language, input: newCases[index].input })
       });
       const data = await res.json();
-      setRunResult(data);
+      const actualOut = data.stdout ? atob(data.stdout).trim() : (data.compile_output ? atob(data.compile_output) : 'Error');
+      const expectedOut = newCases[index].expectedOutput.trim();
+      
+      newCases[index].output = actualOut;
+      if (data.status?.id !== 3) newCases[index].status = 'error';
+      else newCases[index].status = (actualOut === expectedOut || !expectedOut) ? 'passed' : 'failed';
     } catch (e) {
-      alert("Execution failed to connect to Judge.");
-    } finally {
-      setIsRunning(false);
+      newCases[index].status = 'error';
+    }
+    setTestcases([...newCases]);
+  };
+
+  const runAllTestcases = async () => {
+    for (let i = 0; i < testcases.length; i++) {
+      await runTestCase(i);
     }
   };
 
-  const handleRevealTestcases = async () => {
-    if (confirm("Viewing test cases during an active contest will deduct 50 points from your score. Proceed?")) {
-      await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}/penalty`, {
-        method: 'POST', headers: { 'x-user-email': session?.user?.email || '' }
-      });
-      setPenaltyViewed(true);
-      setActiveTab('testcases');
-    }
+  const playSuccessSound = () => {
+    try {
+      const audio = new Audio('/accepted.mp3'); 
+      audio.play();
+    } catch (e) {}
   };
 
   const handleSubmitCode = async () => {
@@ -148,14 +151,23 @@ export default function WorkspacePage() {
     setSubmitting(true);
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ contestProblemId: problemId, code, language })
       });
       const submission = await res.json();
-      await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge`, { method: 'POST' });
-      alert("Code submitted to local judge! Check standings for verdict.");
-      router.push(`/contests/${id}`);
+      const judgeRes = await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge`, { method: 'POST' });
+      const judgeData = await judgeRes.json();
+
+      if (judgeData?.submission?.statusId === 3 || judgeData?.status?.id === 3) {
+        playSuccessSound();
+        // Delay navigation so the sound can play
+        setTimeout(() => {
+          router.push(`/contests/${id}`);
+        }, 1000);
+      } else {
+        alert("Code submitted! Redirecting to group/individual standings...");
+        router.push(`/contests/${id}`);
+      }
     } catch (e) {
       alert("Submission workflow connection failed.");
     } finally {
@@ -167,21 +179,23 @@ export default function WorkspacePage() {
     setIsSyncing(true);
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/sync/codeforces?wait=true`, {
-        method: 'POST',
-        headers: { 'x-user-email': session?.user?.email || '' }
+        method: 'POST', headers: { 'x-user-email': session?.user?.email || '' }
       });
       const data = await res.json();
       if (res.ok) {
-        alert("Successfully synced submissions from Codeforces! Check the leaderboard.");
+        playSuccessSound(); 
         setShowCfModal(false);
-        router.push(`/contests/${id}`);
+        // Delay navigation so the sound can play
+        setTimeout(() => {
+          router.push(`/contests/${id}`);
+        }, 1000);
       } else {
         alert(data.error || "Could not find a matching submission. Are you sure you submitted it under your bound handle?");
       }
-    } catch (e) {
-      alert("Failed to connect to Codeforces sync engine.");
-    } finally {
-      setIsSyncing(false);
+    } catch (e) { 
+      alert("Failed to connect to Codeforces sync engine."); 
+    } finally { 
+      setIsSyncing(false); 
     }
   };
 
@@ -191,18 +205,25 @@ export default function WorkspacePage() {
       setAiDebuggerLoading(true);
       try {
         const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}/ai-debug`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
           body: JSON.stringify({ userCode: code, problemDescription: problem?.titleSnapshot }) 
         });
         const data = await res.json();
         if (res.ok) {
           setAiDebugResult(data.aiDebugData);
           setActiveTab('testcases');
-        } else {
-          alert(data.error || "Failed to process AI debugging.");
-        }
+        } else alert(data.error || "Failed to process AI debugging.");
       } catch (err) { alert("Failed to connect to AI."); } finally { setAiDebuggerLoading(false); }
+    }
+  };
+
+  const handleRevealTestcases = async () => {
+    if (confirm("Viewing test cases during an active contest will deduct 50 points from your score. Proceed?")) {
+      await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}/penalty`, {
+        method: 'POST', headers: { 'x-user-email': session?.user?.email || '' }
+      });
+      setPenaltyViewed(true);
+      setActiveTab('testcases');
     }
   };
 
@@ -215,12 +236,8 @@ export default function WorkspacePage() {
   let cfSubmitUrl = problem.externalUrl || 'https://codeforces.com/problemset/submit';
   const psMatch = cfSubmitUrl.match(/problemset\/problem\/([0-9]+)\/([A-Za-z0-9]+)/i);
   const contestMatch = cfSubmitUrl.match(/contest\/([0-9]+)\/problem\/([A-Za-z0-9]+)/i);
-
-  if (psMatch) {
-    cfSubmitUrl = `https://codeforces.com/contest/${psMatch[1]}/submit/${psMatch[2]}`;
-  } else if (contestMatch) {
-    cfSubmitUrl = `https://codeforces.com/contest/${contestMatch[1]}/submit/${contestMatch[2]}`;
-  }
+  if (psMatch) cfSubmitUrl = `https://codeforces.com/contest/${psMatch[1]}/submit/${psMatch[2]}`;
+  else if (contestMatch) cfSubmitUrl = `https://codeforces.com/contest/${contestMatch[1]}/submit/${contestMatch[2]}`;
 
   return (
     <main style={page}>
@@ -236,12 +253,8 @@ export default function WorkspacePage() {
             <option value="python">Python 3</option>
             <option value="java">Java</option>
           </select>
-          <button onClick={handleRunCode} disabled={isRunning} style={runBtn}>
-            {isRunning ? 'Running...' : 'Run Code ▶'}
-          </button>
-          <button onClick={handleSubmitCode} disabled={submitting} style={submitBtn}>
-            {submitting ? 'Submitting...' : 'Submit 🚀'}
-          </button>
+          <button onClick={runAllTestcases} style={runBtn}>Run Code ▶</button>
+          <button onClick={handleSubmitCode} disabled={submitting} style={submitBtn}>{submitting ? 'Submitting...' : 'Submit 🚀'}</button>
         </div>
       </header>
 
@@ -249,7 +262,7 @@ export default function WorkspacePage() {
         <section style={leftPane}>
           <div style={paneHeader}>Problem Description</div>
           <div style={paneContent}>
-             <p style={{ color: '#94a3b8' }}>Platform: {problem.platform} | Points: {problem.points}</p>
+             <p style={{ color: '#94a3b8', padding: '0 16px' }}>Platform: {problem.platform} | Points: {problem.points}</p>
              <iframe src={problemIframeUrl} style={iframeStyle} title="Problem Statement" />
           </div>
         </section>
@@ -257,8 +270,10 @@ export default function WorkspacePage() {
         <section style={rightPane}>
           <div style={tabsHeader}>
             <button style={activeTab === 'code' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('code')}>Code Editor</button>
-            <button style={activeTab === 'customInput' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('customInput')}>Custom Input (Run)</button>
-            <button style={activeTab === 'testcases' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('testcases')}>Test Cases / Debug</button>
+            <button style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('cph')}>
+              {isFetchingSamples ? '⚡ Fetching...' : 'CPH Runner'}
+            </button>
+            <button style={activeTab === 'testcases' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('testcases')}>AI Tutor / Hidden</button>
           </div>
           
           <div style={paneContent}>
@@ -266,35 +281,30 @@ export default function WorkspacePage() {
               <textarea value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={handleEditorKeyDown} style={codeEditor} spellCheck={false} placeholder={`// Write your ${language} solution here...`} />
             )}
 
-            {activeTab === 'customInput' && (
-              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <strong style={{ color: '#94a3b8' }}>Custom Input:</strong>
-                  {isFetchingSamples && <span style={{ color: '#38bdf8', fontSize: 12 }}>⚡ Auto-fetching samples...</span>}
-                </div>
-                <textarea 
-                  value={customInput} 
-                  onChange={e => setCustomInput(e.target.value)} 
-                  placeholder={isFetchingSamples ? "Fetching samples..." : "Paste custom input or CPH test cases here..."}
-                  style={{ ...codeEditor, flex: 0.5, border: '1px solid #334155', borderRadius: 8 }} 
-                />
-                
-                <strong style={{ color: '#94a3b8' }}>Execution Result:</strong>
-                <div style={{ flex: 0.5, background: '#020617', border: '1px solid #334155', borderRadius: 8, padding: 10, overflow: 'auto', fontFamily: 'monospace' }}>
-                  {isRunning ? <span style={{ color: '#fbbf24' }}>Running code on Judge0...</span> : 
-                   runResult ? (
-                    <>
-                      <div style={{ color: runResult.status?.id === 3 ? '#4ade80' : '#f87171', fontWeight: 'bold', marginBottom: 10 }}>
-                        Verdict: {runResult.status?.description || 'Error'}
-                      </div>
-                      {runResult.compile_output && <><div style={{ color: '#f87171' }}>Compile Output:</div><pre>{atob(runResult.compile_output)}</pre></>}
-                      {runResult.stdout && <><div style={{ color: '#94a3b8' }}>Standard Output:</div><pre style={{ color: '#fff' }}>{atob(runResult.stdout)}</pre></>}
-                      {runResult.stderr && <><div style={{ color: '#f87171' }}>Standard Error:</div><pre>{atob(runResult.stderr)}</pre></>}
-                      <div style={{ color: '#64748b', fontSize: 12, marginTop: 10 }}>Time: {runResult.time}s | Memory: {runResult.memory}KB</div>
-                    </>
-                   ) : <span style={{ color: '#64748b' }}>Click "Run Code" to see results here.</span>
-                  }
-                </div>
+            {activeTab === 'cph' && (
+              <div style={{ padding: 15, overflowY: 'auto', height: '100%' }}>
+                {testcases.map((tc, idx) => (
+                  <div key={tc.id} style={tcCard}>
+                    <div style={tcHeader}>
+                      <strong>Test Case {idx + 1}</strong>
+                      <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' || tc.status === 'error' ? '#f87171' : '#94a3b8' }}>
+                        {tc.status.toUpperCase()}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, padding: 10 }}>
+                      <div style={{ flex: 1 }}><div style={tcLabel}>Input</div><textarea value={tc.input} onChange={e => { const n = [...testcases]; n[idx].input = e.target.value; setTestcases(n); }} style={tcBox} /></div>
+                      <div style={{ flex: 1 }}><div style={tcLabel}>Expected Output</div><textarea value={tc.expectedOutput} onChange={e => { const n = [...testcases]; n[idx].expectedOutput = e.target.value; setTestcases(n); }} style={tcBox} /></div>
+                    </div>
+                    <div style={{ padding: '0 10px 10px' }}>
+                      <div style={tcLabel}>Actual Output</div>
+                      <pre style={{...tcBox, height: 60, margin: 0, overflow: 'auto', background: tc.status === 'failed' ? 'rgba(248,113,113,0.1)' : '#020617'}}>{tc.output}</pre>
+                    </div>
+                    <button onClick={() => runTestCase(idx)} style={{ width: '100%', padding: 8, background: '#1e293b', color: '#fff', border: 'none', borderTop: '1px solid #334155', cursor: 'pointer' }}>
+                      {tc.status === 'running' ? 'Running...' : '▶ Run this case'}
+                    </button>
+                  </div>
+                ))}
+                <button onClick={() => setTestcases([...testcases, { id: Date.now().toString(), input: '', expectedOutput: '', output: '', status: 'idle' }])} style={{...secondaryBtn, width: '100%'}}>+ Add Custom Test Case</button>
               </div>
             )}
             
@@ -302,7 +312,7 @@ export default function WorkspacePage() {
               <div style={testcaseWrap}>
                 <div style={aiTutorCard}>
                   <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>🤖 AI Contest Tutor</h3>
-                  <p style={{ color: '#cbd5e1', fontSize: 14 }}>Stuck with a failure check? The AI assistant can isolate structural flaws inside your solution and produce a precise boundary case where your logic breaks down.</p>
+                  <p style={{ color: '#cbd5e1', fontSize: 14 }}>Stuck with a failure check? Isolate structural flaws inside your solution and produce a precise boundary case where your logic breaks down.</p>
                   
                   {!aiDebugResult ? (
                     <button onClick={handleAiDebug} disabled={aiDebuggerLoading} style={aiTriggerBtn}>
@@ -354,22 +364,13 @@ export default function WorkspacePage() {
             </ol>
             
             <div style={{ display: 'flex', gap: 10, marginBottom: 25 }}>
-              <button 
-                onClick={() => navigator.clipboard.writeText(code).then(() => alert('Code copied to clipboard!'))}
-                style={secondaryBtn}
-              >
-                📋 Copy Code
-              </button>
-              <a href={cfSubmitUrl} target="_blank" rel="noreferrer" style={primaryBtn}>
-                ↗ Open Codeforces Submit Page
-              </a>
+              <button onClick={() => navigator.clipboard.writeText(code).then(() => alert('Code copied to clipboard!'))} style={secondaryBtn}>📋 Copy Code</button>
+              <a href={cfSubmitUrl} target="_blank" rel="noreferrer" style={primaryBtn}>↗ Open Codeforces Submit Page</a>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid #334155', paddingTop: 20 }}>
               <button onClick={() => setShowCfModal(false)} style={cancelBtn}>Cancel</button>
-              <button onClick={handleSyncCodeforces} disabled={isSyncing} style={syncBtn}>
-                {isSyncing ? 'Syncing...' : '🔄 Sync Verdict'}
-              </button>
+              <button onClick={handleSyncCodeforces} disabled={isSyncing} style={syncBtn}>{isSyncing ? 'Syncing...' : '🔄 Sync Verdict'}</button>
             </div>
           </div>
         </div>
@@ -390,23 +391,27 @@ const splitLayout: CSSProperties = { display: 'flex', flex: 1, overflow: 'hidden
 const leftPane: CSSProperties = { flex: 1, background: '#0f172a', borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid #1e293b' };
 const rightPane: CSSProperties = { flex: 1, background: '#0f172a', borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid #1e293b' };
 const paneHeader: CSSProperties = { padding: '12px 16px', background: '#1e293b', fontWeight: 'bold', fontSize: 14, color: '#94a3b8' };
-const paneContent: CSSProperties = { flex: 1, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column' };
+const paneContent: CSSProperties = { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' };
 const iframeStyle: CSSProperties = { width: '100%', height: '100%', border: 'none', background: '#fff', borderRadius: 8 };
 const tabsHeader: CSSProperties = { display: 'flex', background: '#1e293b' };
 const activeTabStyle: CSSProperties = { flex: 1, background: '#0f172a', border: 'none', color: '#38bdf8', padding: '12px', borderTop: '2px solid #38bdf8', cursor: 'pointer', fontWeight: 'bold' };
 const inactiveTabStyle: CSSProperties = { flex: 1, background: 'transparent', border: 'none', color: '#94a3b8', padding: '12px', cursor: 'pointer' };
-const codeEditor: CSSProperties = { width: '100%', height: '100%', flex: 1, background: '#020617', color: '#a5b4fc', border: 'none', outline: 'none', fontFamily: 'monospace', fontSize: 14, resize: 'none', lineHeight: '1.6', padding: 8 };
+const codeEditor: CSSProperties = { width: '100%', height: '100%', flex: 1, background: '#020617', color: '#a5b4fc', border: 'none', outline: 'none', fontFamily: 'monospace', fontSize: 14, resize: 'none', padding: 15 };
 const testcaseWrap: CSSProperties = { background: '#020617', borderRadius: 8, padding: 16, flex: 1 };
 const btnDanger: CSSProperties = { background: '#ef4444', color: '#fff', padding: '10px 18px', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', marginTop: 12 };
 const aiTutorCard: CSSProperties = { padding: 16, background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.3)', borderRadius: 10, marginBottom: 16 };
 const aiTriggerBtn: CSSProperties = { background: '#5356ff', color: '#fff', padding: '10px 18px', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 13 };
 const codeBlockError: CSSProperties = { background: 'rgba(248, 113, 113, 0.08)', padding: 10, color: '#f87171', borderRadius: 6, overflow: 'auto', border: '1px solid rgba(248, 113, 113, 0.2)', fontFamily: 'monospace', marginTop: 6, fontSize: 13 };
 const codeBlockSuccess: CSSProperties = { ...codeBlockError, background: 'rgba(74, 222, 128, 0.08)', color: '#4ade80', border: '1px solid rgba(74, 222, 128, 0.2)' };
-
-// Modal Styles
 const modalOverlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(2, 6, 23, 0.8)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
 const modalContent: CSSProperties = { background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b', width: '90%', maxWidth: 500, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' };
 const secondaryBtn: CSSProperties = { background: '#334155', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
 const primaryBtn: CSSProperties = { background: '#0284c7', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', textDecoration: 'none', textAlign: 'center' };
 const cancelBtn: CSSProperties = { background: 'transparent', color: '#94a3b8', border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 'bold' };
 const syncBtn: CSSProperties = { background: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
+
+// CPH Test Case Styles
+const tcCard: CSSProperties = { background: '#0f172a', border: '1px solid #334155', borderRadius: 8, overflow: 'hidden', marginBottom: 15 };
+const tcHeader: CSSProperties = { background: '#1e293b', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', fontSize: 13 };
+const tcBox: CSSProperties = { width: '100%', height: 80, background: '#020617', border: '1px solid #334155', borderRadius: 6, color: '#fff', fontFamily: 'monospace', padding: 8, fontSize: 13, resize: 'none' };
+const tcLabel: CSSProperties = { fontSize: 12, color: '#94a3b8', marginBottom: 4 };

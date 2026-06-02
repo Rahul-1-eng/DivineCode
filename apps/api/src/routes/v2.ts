@@ -6,8 +6,7 @@ import { canManageContest, findViewerParticipant, sanitizeContestForViewer, sani
 import { 
   addContestProblemV2, createContestV2, deleteContestV2, extendContestV2, 
   listContestsV2, loadContestForViewer, removeContestProblemV2, replaceContestProblemV2, 
-  updateContestSettingsV2, getContestSubmissionsV2,
-  registerForContestV2, overrideSubmissionPoints 
+  updateContestSettingsV2, getContestSubmissionsV2, registerForContestV2, overrideSubmissionPoints 
 } from '../modules/contests/contestService';
 import { createQueuedContestSubmission } from '../modules/contests/submissionService';
 import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncService';
@@ -16,12 +15,12 @@ import { recomputeContestStandings } from '../modules/standings/standingService'
 import { recommendationBand } from '../modules/ratings/recommendationMath';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
 import { syncUserRatings } from '../modules/external-sync/profileSyncService';
-import { findFailingTestCaseWithAI } from '../modules/ai/aiService';
+// 👉 FIX: Added generateTestCasesWithAI import
+import { findFailingTestCaseWithAI, generateTestCasesWithAI } from '../modules/ai/aiService';
 import { ContestStatus } from '@prisma/client';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
-// Routers
 import { submissionRouter } from './submissionRoutes';
 import { profileRouter } from './profileRoutes';
 import { interviewRouter } from './interviewRoutes'; 
@@ -77,10 +76,7 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
 
   // ==========================================
-  // 1. THE CODEFORCES PROXY ROUTE (Must be before /problems/:id)
-  // ==========================================
- // ==========================================
-  // UPDATED FIX: Codeforces Proxy via Official Mirror Bypass
+  // CODEFORCES MIRROR PROXY
   // ==========================================
   router.get('/proxy/problem', asyncRoute(async (req, res) => {
     let url = String(req.query.url);
@@ -89,7 +85,6 @@ export function mountV2Routes(app: Express, io: Server) {
       return; 
     }
     
-    // THE HACK: Swap main domain with the official mirror to bypass Cloudflare bot screens
     if (url.includes('codeforces.com') && !url.includes('mirror.codeforces.com')) {
       url = url.replace('codeforces.com', 'mirror.codeforces.com');
     }
@@ -99,91 +94,90 @@ export function mountV2Routes(app: Express, io: Server) {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
         }
       });
-      
       const $ = cheerio.load(data);
       const statementHtml = $('.problem-statement').html();
-      
-      if (!statementHtml) {
-        res.status(404).send('Problem statement structure not found on the mirror page.');
-        return;
-      }
+      if (!statementHtml) return res.status(404).send('Problem statement structure not found on the mirror page.');
 
       res.send(`
         <html><head>
           <link rel="stylesheet" href="https://mirror.codeforces.com/css/font-awesome.min.css" />
           <link rel="stylesheet" href="https://mirror.codeforces.com/css/default.css" />
           <script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML"></script>
-          <style>
-            body { padding: 20px; background: #fff; color: #000; font-family: sans-serif; -webkit-font-smoothing: antialiased; }
-            .problem-statement .header { margin-bottom: 2em; text-align: center; }
-            .problem-statement .title { font-size: 150%; margin-bottom: 0.5em; }
-          </style>
-        </head>
-        <body><div class="problem-statement" style="margin:0;">${statementHtml}</div></body></html>
+          <style>body { padding: 20px; background: #fff; color: #000; font-family: sans-serif; -webkit-font-smoothing: antialiased; } .problem-statement .header { margin-bottom: 2em; text-align: center; } .problem-statement .title { font-size: 150%; margin-bottom: 0.5em; }</style>
+        </head><body><div class="problem-statement" style="margin:0;">${statementHtml}</div></body></html>
       `);
     } catch (e: any) {
-      console.error("Mirror Proxy Error:", e.message);
       res.status(500).send(`Failed to bypass anti-bot shields. Error: ${e.message}`);
     }
   }));
 
   // ==========================================
-  // 2. AI GENERATOR (Contest Owner)
+  // AI ROUTES
   // ==========================================
+  
+  // 1. Contest Owner AI Generator
   router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
     const { masterSolution } = req.body;
-    if (!masterSolution) {
-      res.status(400).json({ error: "Master solution is required for AI generation." });
-      return;
-    }
+    if (!masterSolution) return res.status(400).json({ error: "Master solution required." });
     const testcases = await generateAndAppendAITestcases(req.params.id, masterSolution);
     res.json({ success: true, generatedCount: testcases.length, testcases });
   }));
 
-  // ==========================================
-  // 3. AI DEBUGGER (Contestant Penalty)
-  // ==========================================
+  // 2. Contestant AI Debugger (Deducts 50 Points from Standings)
   router.post('/contests/:id/problems/:problemId/ai-debug', asyncRoute(async (req, res) => {
-    try {
-      const viewerEmail = req.headers['x-user-email'] as string;
-      const { id: contestId, problemId } = req.params;
-      const { userCode, problemDescription } = req.body;
+    const viewerEmail = req.headers['x-user-email'] as string;
+    const { id: contestId } = req.params;
+    const { userCode, problemDescription } = req.body;
 
-      if (!process.env.AI_API_KEY) {
-        console.error("CRITICAL: AI_API_KEY IS MISSING FROM .env FILE!");
-        res.status(500).json({ error: "Server missing AI API Key. Please contact admin." });
-        return;
-      }
+    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
+    if (!user) throw new Error("Unauthorized");
 
-      const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
-      if (!user) throw new Error("Unauthorized");
+    const aiResponse = await findFailingTestCaseWithAI(problemDescription, userCode);
+    const participant = await prisma.contestParticipant.findUnique({
+      where: { contestId_userId: { contestId, userId: user.id } }, include: { standing: true }
+    });
 
-      // 1. Fetch AI response
-      const aiResponse = await findFailingTestCaseWithAI(problemDescription, userCode);
-
-      // 2. Apply the 50-point penalty
-      const participant = await prisma.contestParticipant.findUnique({
-        where: { contestId_userId: { contestId, userId: user.id } },
-        include: { standing: true }
+    if (participant && participant.standing) {
+      await prisma.contestStanding.update({
+        where: { participantId: participant.id },
+        data: { testcasePenalty: participant.standing.testcasePenalty + 50 }
       });
-
-      if (participant && participant.standing) {
-        await prisma.contestStanding.update({
-          where: { participantId: participant.id },
-          data: { testcasePenalty: participant.standing.testcasePenalty + 50 }
-        });
-        await recomputeContestStandings(contestId);
-      }
-
-      res.json({ success: true, aiDebugData: aiResponse });
-    } catch (error: any) {
-      console.error("AI Debug Error:", error.message);
-      res.status(500).json({ error: error.message || "Failed to generate AI response." });
+      await recomputeContestStandings(contestId);
     }
+    res.json({ success: true, aiDebugData: aiResponse });
   }));
+
+  // 👉 NEW: 3. Standalone Judge AI Testcase Generator (Free)
+  router.post('/ai/generate-testcases', asyncRoute(async (req, res) => {
+    const { problemDescription, masterSolution } = req.body;
+    if (!problemDescription || !masterSolution) throw new Error("Description and solution required.");
+    const testcases = await generateTestCasesWithAI(problemDescription, masterSolution);
+    res.json({ success: true, testcases });
+  }));
+
+  // 👉 NEW: 4. Standalone Judge AI Debugger (Deducts 50 Coins)
+  router.post('/ai/debug-with-coins', asyncRoute(async (req, res) => {
+    const viewerEmail = req.headers['x-user-email'] as string;
+    const { userCode, problemDescription } = req.body;
+    if (!viewerEmail) throw new Error("Unauthorized");
+
+    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
+    if (!user) throw new Error("Unauthorized");
+    
+    // Check and deduct coins
+    if ((user.coins || 0) < 50) throw new Error("Insufficient coins. You need 50 coins to use the AI Tutor.");
+    
+    await prisma.user.update({
+      where: { email: viewerEmail },
+      data: { coins: { decrement: 50 } }
+    });
+
+    const aiResponse = await findFailingTestCaseWithAI(problemDescription, userCode);
+    res.json({ success: true, aiDebugData: aiResponse });
+  }));
+
 
   // ==========================================
   // GENERAL ROUTES
