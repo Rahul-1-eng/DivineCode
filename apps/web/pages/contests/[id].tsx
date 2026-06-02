@@ -43,12 +43,39 @@ export default function ContestRoomPage() {
   const [newProblemPlatform, setNewProblemPlatform] = useState('Codeforces');
   const [reportReason, setReportReason] = useState('');
   const [overridePoints, setOverridePoints] = useState<number | ''>('');
+
+  // 👉 MOVED INSIDE COMPONENT: Registration State
+  const [registerHandle, setRegisterHandle] = useState('');
+  const [registerTeam, setRegisterTeam] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
   
   const syncingRef = useRef(false);
 
   const isOwner = Boolean(contest?.canManage);
   const viewerMember = contest?.viewerMember || null;
   const canSeeProblemMeta = Boolean(contest?.visibility?.canSeeProblemMeta);
+
+  // 👉 MOVED INSIDE COMPONENT: Registration Function
+  async function registerForContest() {
+    if (!id || !session || !registerHandle.trim()) return alert("Codeforces handle is required");
+    setIsRegistering(true);
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/register`, {
+      method: 'POST',
+      headers: viewerHeaders(session),
+      body: JSON.stringify({
+        codeforcesHandle: registerHandle,
+        teamName: registerTeam || 'Solo' // Default to solo if left blank
+      })
+    });
+    const data = await res.json();
+    setIsRegistering(false);
+    
+    if (!res.ok) return alert(data.error || 'Failed to register');
+    
+    setContest(data);
+    await loadSubmissions();
+    alert("Successfully registered! You can now submit code.");
+  }
 
   async function loadContest() {
     if (!id) return;
@@ -170,7 +197,7 @@ export default function ContestRoomPage() {
 
   async function submitOverride() {
     if (!selectedSubmission || overridePoints === '') return;
-    const res = await fetch(`${API_BASE_URL}/api/submissions/${selectedSubmission.id}/override`, {
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions/${selectedSubmission.id}/override`, {
       method: 'POST', headers: viewerHeaders(session), body: JSON.stringify({ manualPoints: Number(overridePoints) })
     });
     if (res.ok) {
@@ -214,13 +241,16 @@ export default function ContestRoomPage() {
     return solvedSet;
   }, [contest, submissions, memberById]);
 
-  const canInspectMember = (memberId: string) => {
-    if (isOwner || isFinal || timeLeft === 0) return true;
-    const member = memberById[memberId];
-    return Boolean(viewerMember && (viewerMember.id === memberId || (viewerMember.team && viewerMember.team !== 'Individuals' && member?.team === viewerMember.team)));
-  };
+  const individualStandings = useMemo(() => {
+    return (contest?.standings || [])
+      .sort((a: any, b: any) => a.rank - b.rank)
+      .map((s: any) => ({
+        ...s,
+        name: memberById[s.memberId]?.name || memberById[s.memberId]?.user?.name || 'Unknown',
+        team: memberById[s.memberId]?.teamName || memberById[s.memberId]?.team || 'Individuals'
+      }));
+  }, [contest, memberById]);
 
-  // 👉 FIXED: Standings now securely calculate total scores dynamically from the problem points
   const teamStandings = useMemo(() => {
     const grouped: Record<string, any> = {};
     (contest?.standings || []).forEach((standing: any) => {
@@ -228,28 +258,24 @@ export default function ContestRoomPage() {
       const team = member.teamName || member.team || 'Individuals';
       if (!grouped[team]) grouped[team] = { team, solved: 0, penalty: 0, score: 0, players: [] };
    
-      // Ensure score calculates if backend falls back to 0
       let safeScore = standing.score || 0;
       if (safeScore === 0 && standing.solvedProblems) {
         safeScore = standing.solvedProblems.reduce((sum: number, pId: string) => sum + (problemById[pId]?.points || 1000), 0);
       }
-      // Add this below your existing teamStandings useMemo
-const individualStandings = useMemo(() => {
-  return (contest?.standings || [])
-    .sort((a: any, b: any) => a.rank - b.rank)
-    .map((s: any) => ({
-      ...s,
-      name: memberById[s.memberId]?.name || 'Unknown',
-      team: memberById[s.memberId]?.teamName || 'Individuals'
-    }));
-}, [contest, memberById]);
+      
       grouped[team].solved += standing.solved || 0;
       grouped[team].penalty += standing.penalty || 0;
       grouped[team].score += safeScore;
-      grouped[team].players.push({ ...standing, codeforcesHandle: member.codeforcesHandle, team, score: safeScore });
+      grouped[team].players.push({ ...standing, codeforcesHandle: member.codeforcesHandle || member.externalHandle?.handle, team, score: safeScore });
     });
     return Object.values(grouped).map((team: any) => ({ ...team, players: team.players.sort((a: any, b: any) => b.solved - a.solved || a.penalty - b.penalty) })).sort((a: any, b: any) => b.solved - a.solved || a.penalty - b.penalty || a.team.localeCompare(b.team));
   }, [contest, memberById, problemById]);
+
+  const canInspectMember = (memberId: string) => {
+    if (isOwner || isFinal || timeLeft === 0) return true;
+    const member = memberById[memberId];
+    return Boolean(viewerMember && (viewerMember.id === memberId || (viewerMember.team && viewerMember.team !== 'Individuals' && member?.team === viewerMember.team)));
+  };
 
   const memberSubmissions = selectedMember ? submissions.filter((submission) => submission.memberId === selectedMember.memberId || submission.participantId === selectedMember.memberId) : [];
 
@@ -261,7 +287,6 @@ const individualStandings = useMemo(() => {
   return (
     <main style={page}>
       
-      {/* 👉 NEW: Pop-Up Modal to view specific Player Submissions */}
       {selectedMember && (
         <div style={overlay}>
           <div style={{...overlayModal, width: '90%', maxWidth: 900, maxHeight: '85vh', display: 'flex', flexDirection: 'column'}}>
@@ -275,30 +300,26 @@ const individualStandings = useMemo(() => {
                    <thead><tr><th style={th}>Time</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Language</th></tr></thead>
                    <tbody>
                      {memberSubmissions.map(sub => (
-                       // Inside your submissions table (in apps/web/pages/contests/[id].tsx)
-// Replace the onClick on the <tr> with a button wrapper inside the <td>:
-
-<tr key={sub.id} style={clickRow}>
-  <td style={td}>{new Date(sub.createdAt).toLocaleString()}</td>
-  <td style={td}>{sub.userId}</td>
-  <td style={td}>
-    {problemById[sub.problemId]?.label || ''} 
-    {canSeeProblemMeta ? problemById[sub.problemId]?.titleSnapshot : ''}
-  </td>
-  <td style={{...td, color: sub.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>{sub.verdict}</td>
-  <td style={td}>
-    {/* 👉 FIX: Use an explicit button for the modal trigger */}
-    <button 
-      onClick={(e) => { 
-        e.stopPropagation(); 
-        setSelectedSubmission(sub); 
-      }} 
-      style={ghostButton}
-    >
-      View Details
-    </button>
-  </td>
-</tr>
+                        <tr key={sub.id} style={clickRow}>
+                          <td style={td}>{new Date(sub.createdAt).toLocaleString()}</td>
+                          <td style={td}>{sub.userId}</td>
+                          <td style={td}>
+                            {problemById[sub.problemId]?.label || ''} 
+                            {canSeeProblemMeta ? problemById[sub.problemId]?.titleSnapshot : ''}
+                          </td>
+                          <td style={{...td, color: sub.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>{sub.verdict}</td>
+                          <td style={td}>
+                            <button 
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                setSelectedSubmission(sub); 
+                              }} 
+                              style={ghostButton}
+                            >
+                              View Details
+                            </button>
+                          </td>
+                        </tr>
                      ))}
                    </tbody>
                  </table>
@@ -327,6 +348,35 @@ const individualStandings = useMemo(() => {
           </div>
         </div>
 
+        {/* 👉 NEW: Registration Card for users who haven't joined yet */}
+        {!isOwner && !viewerMember && contest.status !== 'ENDED' && (
+          <section style={{ ...panel, marginBottom: 18, border: '1px solid #22d3ee', background: 'rgba(34, 211, 238, 0.05)' }}>
+            <h2 style={{color: '#22d3ee', margin: '0 0 10px 0'}}>Join this Contest</h2>
+            <p style={{color: '#a8b3c7', marginBottom: 16}}>You must register your Codeforces handle to submit solutions and appear on the leaderboard.</p>
+            <div style={{display: 'flex', gap: 12, flexWrap: 'wrap'}}>
+              <input 
+                placeholder="Codeforces Handle (e.g. tourist)" 
+                style={{...smallInput, maxWidth: 250, marginBottom: 0}} 
+                value={registerHandle} 
+                onChange={e => setRegisterHandle(e.target.value)} 
+              />
+              <input 
+                placeholder="Team Name (Leave empty for solo)" 
+                style={{...smallInput, maxWidth: 250, marginBottom: 0}} 
+                value={registerTeam} 
+                onChange={e => setRegisterTeam(e.target.value)} 
+              />
+              <button 
+                onClick={registerForContest} 
+                disabled={isRegistering} 
+                style={{...primaryButton, width: 'auto', marginBottom: 0}}
+              >
+                {isRegistering ? 'Joining...' : 'Register Now'}
+              </button>
+            </div>
+          </section>
+        )}
+
         <div style={grid}>
           {isOwner && !isFinal && <section style={panel}>
             <h2>Owner controls</h2>
@@ -343,14 +393,14 @@ const individualStandings = useMemo(() => {
             <input value={newProblemCode} onChange={(e) => setNewProblemCode(e.target.value)} placeholder="1805A" style={smallInput} />
             <button onClick={addProblem} style={primaryButton}>Add Problem</button>
             <h2>Players</h2>
-{(contest.participants || contest.members || []).map((m: any) => (
-  <p key={m.id} style={{ color: '#cbd5e1', marginBottom: '8px', lineHeight: '1.4' }}>
-    {m.user?.name || m.name || m.displayName || 'Unknown Player'}<br/>
-    <span style={{ color: '#67e8f9' }}>
-      {m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}
-    </span>
-  </p>
-))}
+            {(contest.participants || contest.members || []).map((m: any) => (
+              <p key={m.id} style={{ color: '#cbd5e1', marginBottom: '8px', lineHeight: '1.4' }}>
+                {m.user?.name || m.name || m.displayName || 'Unknown Player'}<br/>
+                <span style={{ color: '#67e8f9' }}>
+                  {m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}
+                </span>
+              </p>
+            ))}
           </section>}
 
           <section style={isOwner && !isFinal ? panelWide : { ...panelWide, gridColumn: '1 / -1' }}>
@@ -360,7 +410,7 @@ const individualStandings = useMemo(() => {
                 const label = String.fromCharCode(65 + index);
                 const actualTitle = p.titleSnapshot || p.problem?.title || `Problem ${label}`;
                 const visibleTitle = canSeeProblemMeta ? actualTitle : `Problem ${label}`;
-                const safeProblemHref = `/submit?contestId=${contest.id}&problemId=${p.id}`; // DIRECTS TO SUBMIT PAGE
+                const safeProblemHref = `/submit?contestId=${contest.id}&problemId=${p.id}`; 
                 const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
 
                 return <div key={p.id} style={{
@@ -401,41 +451,50 @@ const individualStandings = useMemo(() => {
         <section style={{ ...panel, marginTop: 18 }}>
           <h2>Team Standings</h2>
           <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Rank</th><th style={th}>Group</th><th style={th}>Solved</th><th style={th}>Penalty</th><th style={th}>Score</th></tr></thead><tbody>{teamStandings.map((team: any, i: number) => <Fragment key={team.team}><tr onClick={() => setOpenTeam(openTeam === team.team ? null : team.team)} style={clickRow}><td style={td}>#{i + 1}</td><td style={td}>{team.team}</td><td style={td}>{team.solved}</td><td style={td}>{team.penalty}</td><td style={{...td, color: '#fbbf24', fontWeight: 'bold'}}>{team.score}</td></tr>{openTeam === team.team && team.players.map((player: any, pi: number) => <tr key={player.memberId} onClick={() => canInspectMember(player.memberId) && setSelectedMember(player)} style={canInspectMember(player.memberId) ? subRow : mutedRow}><td style={td}>#{pi + 1}</td><td style={td}>{player.name}</td><td style={td}>{player.solved}</td><td style={td}>{player.penalty}</td><td style={td}>{player.score}</td></tr>)}</Fragment>)}</tbody></table></div>
-       
-       
         </section>
         
         <section style={{ ...panel, marginTop: 18 }}>
           <h2>{isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}</h2>
           {submissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
-          <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Time</th><th style={th}>User</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Source</th></tr></thead>// Find this table in apps/web/pages/contests/[id].tsx
-<tbody>
-  {submissions.map((submission) => (
-    <tr key={submission.id} style={clickRow}>
-      <td style={td}>{new Date(submission.createdAt).toLocaleString()}</td>
-      <td style={td}>{submission.userId}</td>
-      <td style={td}>
-        {problemById[submission.problemId]?.label || ''} 
-        {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot : ''}
-      </td>
-      <td style={{...td, color: submission.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>
-        {submission.verdict}
-      </td>
-      <td style={td}>
-        {/* 👉 ADD THIS BUTTON WRAPPER TO FIX MODAL CLICK */}
-        <button 
-          onClick={(e) => { 
-            e.stopPropagation(); 
-            setSelectedSubmission(submission); 
-          }} 
-          style={ghostButton}
-        >
-          View Details
-        </button>
-      </td>
-    </tr>
-  ))}
-</tbody></table></div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={table}>
+              <thead>
+                <tr>
+                  <th style={th}>Time</th>
+                  <th style={th}>User</th>
+                  <th style={th}>Problem</th>
+                  <th style={th}>Verdict</th>
+                  <th style={th}>Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {submissions.map((submission) => (
+                  <tr key={submission.id} style={clickRow}>
+                    <td style={td}>{new Date(submission.createdAt).toLocaleString()}</td>
+                    <td style={td}>{submission.userId}</td>
+                    <td style={td}>
+                      {problemById[submission.problemId]?.label || ''} 
+                      {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot : ''}
+                    </td>
+                    <td style={{...td, color: submission.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>
+                      {submission.verdict}
+                    </td>
+                    <td style={td}>
+                      <button 
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          setSelectedSubmission(submission); 
+                        }} 
+                        style={ghostButton}
+                      >
+                        View Details
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
 
         {selectedSubmission && <section style={{ ...panel, marginTop: 18 }}>
@@ -447,7 +506,6 @@ const individualStandings = useMemo(() => {
             <p><b>Verdict:</b> {selectedSubmission.verdict}</p>
             <p><b>Language:</b> {selectedSubmission.language || 'Unknown'}</p>
             
-            {/* 👉 NEW: Show the Code if the backend returned it! */}
             {selectedSubmission.code && (
               <div style={{marginTop: 12}}>
                 <strong style={{color: '#cbd5e1'}}>Source Code:</strong>

@@ -7,9 +7,6 @@ export async function getServerSideProps() { return { props: {} }; }
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
-const WANDBOX_URL = 'https://wandbox.org/api/compile.json';
-const languageMap: Record<string, string> = { cpp: 'gcc-head', c: 'gcc-head-c', java: 'openjdk-head', python: 'cpython-head', javascript: 'nodejs-head' };
-
 const starter = `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n\n    // write your solution here\n    return 0;\n}\n`;
 
 function viewerQuery(session: any) {
@@ -73,7 +70,6 @@ export default function SubmitPage() {
   const problemIndex = Math.max(0, (contest?.problems || []).findIndex((p: any) => p.id === problem?.id));
   const problemLabel = problem ? String.fromCharCode(65 + problemIndex) : '';
 
-  // Fetch MCQ details if it is an MCQ
   useEffect(() => {
     if (isMCQ && problem?.interviewQuestionId) {
       fetch(`${API_V2_BASE_URL}/interview/questions`)
@@ -93,29 +89,33 @@ export default function SubmitPage() {
     }
   };
 
+  // 👉 UPDATED: Route execution through your own backend instead of direct external API
   async function runCustomTest() {
     setExecuting(true);
     setActiveTab('output');
-    setTestOutput('Compiling code in sandbox...');
+    setTestOutput('Running code in backend sandbox...');
     setTestError('');
     
-    const compiler = languageMap[language];
     try {
-      const res = await fetch(WANDBOX_URL, {
+      const res = await fetch(`${API_V2_BASE_URL}/execute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ compiler, code, stdin: testInput || '' })
+        headers: viewerHeaders(session),
+        body: JSON.stringify({ sourceCode: code, language, input: testInput || '' })
       });
       const data = await res.json();
       
-      if (data.compiler_error) setTestError(data.compiler_error);
-      else if (data.status !== '0') setTestError(data.program_error || 'Runtime error');
-      else {
-        setTestOutput(data.program_message || '');
+      if (!res.ok) {
+        setTestError(data.error || 'Execution failed on server.');
+      } else if (data.verdict === 'COMPILATION_ERROR') {
+        setTestError(data.compileError || 'Compilation Error');
+      } else if (data.verdict === 'RUNTIME_ERROR' || data.verdict === 'TIME_LIMIT_EXCEEDED') {
+        setTestError(`[${data.verdict}]\n${data.stderr || ''}\n${data.stdout || ''}`);
+      } else {
+        setTestOutput(data.stdout || 'Executed successfully with no output.');
         playSuccessSound();
       }
     } catch (e) {
-      setTestError('Network error connecting to execution engine.');
+      setTestError('Network error connecting to backend execution engine.');
     } finally {
       setExecuting(false);
     }

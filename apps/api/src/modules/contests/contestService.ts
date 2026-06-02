@@ -10,7 +10,7 @@ import { fetchCodeforcesAccepted } from '../../externalSync';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
 
-type MemberInput = {
+export type MemberInput = {
   username?: string;
   userId?: string;
   email?: string;
@@ -21,7 +21,7 @@ type MemberInput = {
   ratingBefore?: number;
 };
 
-type ProblemInput = {
+export type ProblemInput = {
   problemId?: string;
   interviewQuestionId?: string;
   title?: string;
@@ -34,7 +34,7 @@ type ProblemInput = {
   points?: number;
 };
 
-type CreateContestInput = {
+export type CreateContestInput = {
   title?: string;
   description?: string;
   type?: ContestType;
@@ -111,13 +111,12 @@ function externalUrl(problem: ProblemInput, platform: Platform) {
 }
 
 function normalizedMember(input: MemberInput) {
-  // 👉 UPDATED: Added input.username to the validation list
   const displayName = String(
     input.displayName || 
     input.name || 
     input.email || 
     input.codeforcesHandle || 
-    input.username || // Added this line
+    input.username || 
     ''
   ).trim();
 
@@ -127,7 +126,7 @@ function normalizedMember(input: MemberInput) {
   
   return {
     ...input,
-    displayName, // This ensures the rest of the backend sees the username as the display name
+    displayName,
     teamName: String(input.teamName || 'Individuals').trim() || 'Individuals'
   };
 }
@@ -243,7 +242,6 @@ async function assertUnsolvedByAll(members: MemberInput[], problems: ProblemInpu
 
     for (const member of members) {
       if (!member.codeforcesHandle) {
-        // Log this to console so you can see who is failing
         console.log(`Validation failed: Member ${member.displayName} is missing CF handle`);
         throw new Error(`CF MISSING: Participant ${member.displayName || 'Unnamed'} needs a Codeforces handle for Codeforces problems.`);
       }
@@ -257,7 +255,6 @@ async function assertUnsolvedByAll(members: MemberInput[], problems: ProblemInpu
   }
 }
 
-// Add this to apps/api/src/modules/contests/contestService.ts
 async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
   contestId: string;
   problem: ProblemInput;
@@ -282,6 +279,7 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
     }
   });
 }
+
 export async function loadContestForViewer(contestId: string) {
   return prisma.contest.findUnique({
     where: { id: contestId },
@@ -315,6 +313,58 @@ export async function loadContestForViewer(contestId: string) {
   });
 }
 
+// 👉 NEW: Dynamic Registration Function
+export async function registerForContestV2(contestId: string, input: MemberInput) {
+  const contest = await prisma.contest.findUnique({ where: { id: contestId } });
+  if (!contest) throw new Error('Contest not found');
+  
+  if (!contest.allowLateJoin && contest.status !== ContestStatus.SCHEDULED) {
+    throw new Error('Late joining is not allowed for this contest.');
+  }
+
+  const memberInput = normalizedMember(input);
+  
+  await prisma.$transaction(async (tx) => {
+    const user = await ensureParticipantUser(tx, memberInput);
+    
+    // Link email to Codeforces Handle dynamically
+    let externalHandle = null;
+    if (memberInput.codeforcesHandle) {
+      externalHandle = await ensureCodeforcesHandle(tx, user.id, memberInput.codeforcesHandle);
+    } else {
+      externalHandle = await tx.externalHandle.findFirst({
+        where: { userId: user.id, platform: Platform.CODEFORCES }
+      });
+    }
+
+    // Ensure the participant isn't already registered
+    const existing = await tx.contestParticipant.findFirst({
+      where: { contestId, userId: user.id }
+    });
+    if (existing) throw new Error('User is already registered for this contest.');
+
+    // Assign teamId (Crucial for group shared scores/tickmarks)
+    const isTeam = memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo';
+    const teamId = isTeam ? slugify(`${contest.id}_${memberInput.teamName}`) : user.id;
+
+    await tx.contestParticipant.create({
+      data: {
+        contestId: contest.id,
+        userId: user.id,
+        externalHandleId: externalHandle?.id || null,
+        displayName: memberInput.displayName!,
+        teamName: memberInput.teamName,
+        teamId: teamId, 
+        role: ContestParticipantRole.PARTICIPANT,
+        isOfficial: true
+      }
+    });
+  });
+
+  await recomputeContestStandings(contestId);
+  return loadContestForViewer(contestId);
+}
+
 export async function createContestV2(input: CreateContestInput) {
   const title = String(input.title || '').trim();
   if (!title) throw new Error('Contest title is required');
@@ -329,12 +379,12 @@ export async function createContestV2(input: CreateContestInput) {
   const durationMinutes = Math.max(1, Number(input.durationMinutes || 120));
   const endTime = new Date(startTime.getTime() + durationMinutes * 60000);
   
-  // 👉 ADDED: Calculate the exact DateTime when the standings should freeze
   const freezeTime = input.freezeMinutes ? new Date(endTime.getTime() - input.freezeMinutes * 60000) : null;
 
   if (!input.ownerUserId && !input.ownerEmail) {
     throw new Error('V2 contests require ownerUserId or ownerEmail so edit/delete permissions are deterministic.');
   }
+
   for (const member of members) {
     if (!member.codeforcesHandle && member.username) {
       const user = await prisma.user.findUnique({ 
@@ -342,7 +392,7 @@ export async function createContestV2(input: CreateContestInput) {
       });
       
       if (user) {
-        member.userId = user.id; // Map for later
+        member.userId = user.id;
         const handleRecord = await prisma.externalHandle.findFirst({
           where: { userId: user.id, platform: Platform.CODEFORCES }
         });
@@ -351,7 +401,9 @@ export async function createContestV2(input: CreateContestInput) {
           member.codeforcesHandle = handleRecord.handle;
         }
       }
-    }}
+    }
+  }
+
   if (input.requireUnsolvedByAll !== false) {
     await assertUnsolvedByAll(members, problems);
   }
@@ -372,7 +424,7 @@ export async function createContestV2(input: CreateContestInput) {
         status: startTime.getTime() <= Date.now() ? ContestStatus.RUNNING : ContestStatus.SCHEDULED,
         startTime,
         endTime,
-        freezeTime, // 👉 ADDED: Save freeze time to DB
+        freezeTime,
         durationMinutes,
         isRated: Boolean(input.isRated),
         allowLateJoin: Boolean(input.allowLateJoin),
@@ -388,11 +440,15 @@ export async function createContestV2(input: CreateContestInput) {
       if (member.codeforcesHandle) {
         externalHandle = await ensureCodeforcesHandle(tx, user.id, member.codeforcesHandle);
       } else {
-        // Automatically find the existing CF handle linked to this user
         externalHandle = await tx.externalHandle.findFirst({
           where: { userId: user.id, platform: Platform.CODEFORCES }
         });
       }
+
+      // Assign Team ID correctly on initialization
+      const isTeam = member.teamName !== 'Individuals' && member.teamName !== 'Solo';
+      const teamId = isTeam ? slugify(`${created.id}_${member.teamName}`) : user.id;
+
       await tx.contestParticipant.create({
         data: {
           contestId: created.id,
@@ -400,6 +456,7 @@ export async function createContestV2(input: CreateContestInput) {
           externalHandleId: externalHandle?.id || null,
           displayName: member.displayName!,
           teamName: member.teamName,
+          teamId: teamId, 
           role: ContestParticipantRole.PARTICIPANT,
           isOfficial: true,
           ratingBefore: member.ratingBefore
@@ -448,7 +505,7 @@ export async function deleteContestV2(contestId: string, actorId?: string) {
 export async function listContestsV2() {
   const contests = await prisma.contest.findMany({
     include: {
-      createdBy: true, // <-- ADDED: Fetch owner data
+      createdBy: true,
       _count: {
         select: {
           participants: true,
@@ -457,7 +514,7 @@ export async function listContestsV2() {
       }
     },
     orderBy: { createdAt: 'desc' },
-    take: 40 // <-- Reduced from 100 to improve DB latency
+    take: 40 
   });
 
   return contests.map((contest) => ({
@@ -472,7 +529,6 @@ export async function listContestsV2() {
     problemsCount: contest._count.problems,
     questionCount: 0,
     createdAt: contest.createdAt,
-    // EXPOSE OWNER INFO TO FRONTEND:
     ownerEmail: contest.createdBy?.email,
     createdById: contest.createdById
   }));
@@ -655,7 +711,31 @@ export async function replaceContestProblemV2(contestId: string, contestProblemI
   return loadContestForViewer(contestId);
 }
 
-// 👉 RECTIFIED: Handles Post-Contest Visibility & Strict Team Matching
+// 👉 NEW: Override submission points manually (Admin/Owner action)
+export async function overrideSubmissionPoints(
+  contestId: string,
+  submissionId: string,
+  manualPoints: number | null,
+  actorId: string
+) {
+  const contest = await prisma.contest.findUnique({ where: { id: contestId } });
+  if (!contest) throw new Error('Contest not found');
+  
+  if (contest.createdById !== actorId) {
+    throw new Error('Only the contest owner can override submission points.');
+  }
+
+  await prisma.submission.update({
+    where: { id: submissionId },
+    data: { manualPoints }
+  });
+
+  // Since standings groups by teamId, updating points for one team member 
+  // will reflect on the entire team's score output.
+  await recomputeContestStandings(contestId);
+  return loadContestForViewer(contestId);
+}
+
 export async function getContestSubmissionsV2(contestId: string, viewerUserId?: string, viewerEmail?: string) {
   const contest = await prisma.contest.findUnique({
     where: { id: contestId },
@@ -672,17 +752,14 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
     if (u) resolvedUserId = u.id;
   }
 
-  // 🔥 CHECK IF CONTEST IS OVER
   const isContestOver = Date.now() >= contest.endTime.getTime();
   const isOwner = contest.createdById === resolvedUserId;
 
-  let allowedParticipantIds: string[] | null = null; // null means can see all
+  let allowedParticipantIds: string[] | null = null; 
 
-  // Owner OR Contest is Over -> see everything
   if (isOwner || isContestOver) {
     allowedParticipantIds = null;
   } else {
-    // Contest is Live -> enforce privacy filter
     const viewerParticipant = contest.participants.find(
       p => (resolvedUserId && p.userId === resolvedUserId) ||
            (normalizedEmail && p.user?.email?.toLowerCase() === normalizedEmail)
@@ -691,17 +768,14 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
     if (viewerParticipant) {
       const team = viewerParticipant.teamName?.trim() || 'Individuals';
       
-      // If they are in a real team, let them see team submissions
       if (contest.allowTeamSubmissionView && team !== 'Individuals' && team !== 'Solo') {
         allowedParticipantIds = contest.participants
           .filter(p => (p.teamName?.trim() || 'Individuals') === team)
           .map(p => p.id);
       } else {
-        // Solo player, strictly see their own
         allowedParticipantIds = [viewerParticipant.id];
       }
     } else {
-      // Viewer isn't a participant -> block view
       allowedParticipantIds = [];
     }
   }
@@ -723,7 +797,6 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
     take: 250
   });
 
- // At the bottom of contestService.ts
   return submissions.map(sub => ({
     id: sub.id,
     contestId: sub.contestId,
@@ -736,6 +809,6 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
     externalSubmissionId: sub.externalSubmissionId,
     createdAt: sub.externalCreatedAt || sub.judgedAt,
     platform: sub.contestProblem?.platform || 'Codeforces',
-    code: sub.code // 👉 ADD THIS LINE SO THE UI CAN RENDER IT!
+    code: sub.code
   }));
 }

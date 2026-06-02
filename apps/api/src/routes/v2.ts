@@ -3,7 +3,12 @@ import { Server } from 'socket.io';
 import { prisma } from '../prisma/client';
 import { enqueueCodeforcesContestSync, enqueueJudgeSubmission } from '../queues/queues';
 import { canManageContest, findViewerParticipant, sanitizeContestForViewer, sanitizeSubmissionForViewer, viewerFromRequest } from '../modules/contests/contestRules';
-import { addContestProblemV2, createContestV2, deleteContestV2, extendContestV2, listContestsV2, loadContestForViewer, removeContestProblemV2, replaceContestProblemV2, updateContestSettingsV2, getContestSubmissionsV2 } from '../modules/contests/contestService';
+import { 
+  addContestProblemV2, createContestV2, deleteContestV2, extendContestV2, 
+  listContestsV2, loadContestForViewer, removeContestProblemV2, replaceContestProblemV2, 
+  updateContestSettingsV2, getContestSubmissionsV2,
+  registerForContestV2, overrideSubmissionPoints // 👉 NEW IMPORTS
+} from '../modules/contests/contestService';
 import { createQueuedContestSubmission } from '../modules/contests/submissionService';
 import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncService';
 import { createInternalProblem, syncTestCasesFromCodeforces } from '../modules/problems/problemService';
@@ -15,7 +20,6 @@ import { syncUserRatings } from '../modules/external-sync/profileSyncService';
 import { ContestStatus } from '@prisma/client';
 import { rewardsQueue } from '../queues/queues';
 import { profileRouter } from './profileRoutes';
-// 👉 IMPORT THE NEW INTERVIEW ROUTER
 import { interviewRouter } from './interviewRoutes'; 
 
 type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<void>;
@@ -135,6 +139,33 @@ export function mountV2Routes(app: Express, io: Server) {
   router.post('/contests', asyncRoute(async (req, res) => {
     const contest = await createContestV2(req.body);
     res.status(201).json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
+  }));
+
+  // 👉 NEW: Dynamic Registration Route
+  router.post('/contests/:id/register', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    const contest = await registerForContestV2(req.params.id, {
+      ...req.body,
+      email: viewer.email,
+      name: viewer.name,
+      userId: viewer.userId
+    });
+    res.json(sanitizeContestForViewer(contest, viewer));
+  }));
+
+  // 👉 NEW: Owner Points Override Route
+  router.post('/contests/:id/submissions/:submissionId/override', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    if (!viewer.userId) throw new Error("Unauthorized");
+    
+    const { manualPoints } = req.body;
+    const contest = await overrideSubmissionPoints(
+      req.params.id,
+      req.params.submissionId,
+      manualPoints,
+      viewer.userId
+    );
+    res.json(sanitizeContestForViewer(contest, viewer));
   }));
 
   router.get('/contests/:id', asyncRoute(async (req, res) => {
@@ -318,9 +349,8 @@ export function mountV2Routes(app: Express, io: Server) {
     });
   });
 
-  // 👉 MOUNT BOTH ROUTERS SAFELY HERE
   app.use('/api/v2', router);
   app.use('/api/v2/submissions', submissionRouter); 
-  app.use('/api/v2/interview', interviewRouter); // <--- MOUNTED
+  app.use('/api/v2/interview', interviewRouter);
   app.use('/api/v2/profile', profileRouter);
 }

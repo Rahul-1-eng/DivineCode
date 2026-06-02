@@ -119,7 +119,6 @@ export async function syncCodeforcesContest(contestId: string) {
             const isAccepted = targetVerdict === Verdict.ACCEPTED;
 
             // 👉 FIXED: Codeforces separates standard contests (< 100000) from Gyms/Mashups (>= 100000)
-            // Using /contest/ for a Gym ID results in a "No such contest" error.
             const isGym = Number(cfContestId) >= 100000;
             const submissionUrl = isGym 
               ? `https://codeforces.com/gym/${cfContestId}/submission/${externalSubmissionId}`
@@ -168,7 +167,8 @@ export async function syncCodeforcesContest(contestId: string) {
                   data: {
                     userId: participant.userId as string,
                     participantId: participant.id,
-                    teamId: participant.teamId,
+                    // 👉 OPTIMIZATION: Strict team mapping fallback to prevent background worker typing errors
+                    teamId: participant.teamId || null,
                     contestId,
                     contestProblemId: targetContestProblem.id,
                     problemId: targetContestProblem.problemId || null,
@@ -201,8 +201,12 @@ export async function syncCodeforcesContest(contestId: string) {
       }
     }
 
-    // 3. Recompute scores with new historical points/penalties factored in
-    const standings = await recomputeContestStandings(contestId);
+    // 👉 OPTIMIZATION: Conditional Recomputation
+    // Only hammer the database to rebuild the scoreboard if we ACTUALLY synced new records.
+    let standings = null;
+    if (synced.length > 0) {
+      standings = await recomputeContestStandings(contestId);
+    }
 
     await prisma.externalSyncJob.update({
       where: { id: job.id },
