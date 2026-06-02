@@ -335,7 +335,23 @@ export async function createContestV2(input: CreateContestInput) {
   if (!input.ownerUserId && !input.ownerEmail) {
     throw new Error('V2 contests require ownerUserId or ownerEmail so edit/delete permissions are deterministic.');
   }
-
+  for (const member of members) {
+    if (!member.codeforcesHandle && member.username) {
+      const user = await prisma.user.findUnique({ 
+        where: { username: member.username } 
+      });
+      
+      if (user) {
+        member.userId = user.id; // Map for later
+        const handleRecord = await prisma.externalHandle.findFirst({
+          where: { userId: user.id, platform: Platform.CODEFORCES }
+        });
+        
+        if (handleRecord?.handle) {
+          member.codeforcesHandle = handleRecord.handle;
+        }
+      }
+    }}
   if (input.requireUnsolvedByAll !== false) {
     await assertUnsolvedByAll(members, problems);
   }

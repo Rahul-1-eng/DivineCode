@@ -343,7 +343,14 @@ const individualStandings = useMemo(() => {
             <input value={newProblemCode} onChange={(e) => setNewProblemCode(e.target.value)} placeholder="1805A" style={smallInput} />
             <button onClick={addProblem} style={primaryButton}>Add Problem</button>
             <h2>Players</h2>
-            {contest.members.map((m: any) => <p key={m.id} style={{ color: '#cbd5e1' }}>{m.name}<br/><span style={{ color: '#67e8f9' }}>{m.team || 'Individuals'} - CF: {m.codeforcesHandle || m.handle || 'missing'}</span></p>)}
+{(contest.participants || contest.members || []).map((m: any) => (
+  <p key={m.id} style={{ color: '#cbd5e1', marginBottom: '8px', lineHeight: '1.4' }}>
+    {m.user?.name || m.name || m.displayName || 'Unknown Player'}<br/>
+    <span style={{ color: '#67e8f9' }}>
+      {m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}
+    </span>
+  </p>
+))}
           </section>}
 
           <section style={isOwner && !isFinal ? panelWide : { ...panelWide, gridColumn: '1 / -1' }}>
