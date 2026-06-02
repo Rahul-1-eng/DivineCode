@@ -7,7 +7,7 @@ import {
   addContestProblemV2, createContestV2, deleteContestV2, extendContestV2, 
   listContestsV2, loadContestForViewer, removeContestProblemV2, replaceContestProblemV2, 
   updateContestSettingsV2, getContestSubmissionsV2,
-  registerForContestV2, overrideSubmissionPoints // 👉 NEW IMPORTS
+  registerForContestV2, overrideSubmissionPoints 
 } from '../modules/contests/contestService';
 import { createQueuedContestSubmission } from '../modules/contests/submissionService';
 import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncService';
@@ -18,7 +18,10 @@ import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge
 import { submissionRouter } from './submissionRoutes';
 import { syncUserRatings } from '../modules/external-sync/profileSyncService';
 import { ContestStatus } from '@prisma/client';
-import { rewardsQueue } from '../queues/queues';
+
+// 👉 FIX 1: Import getRewardsQueue instead of rewardsQueue
+import { getRewardsQueue } from '../queues/queues';
+
 import { profileRouter } from './profileRoutes';
 import { interviewRouter } from './interviewRoutes'; 
 
@@ -141,7 +144,6 @@ export function mountV2Routes(app: Express, io: Server) {
     res.status(201).json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
   }));
 
-  // 👉 NEW: Dynamic Registration Route
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contest = await registerForContestV2(req.params.id, {
@@ -153,7 +155,6 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest, viewer));
   }));
 
-  // 👉 NEW: Owner Points Override Route
   router.post('/contests/:id/submissions/:submissionId/override', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     if (!viewer.userId) throw new Error("Unauthorized");
@@ -328,7 +329,8 @@ export function mountV2Routes(app: Express, io: Server) {
       });
 
       if (contest.isRated) {
-        await rewardsQueue.add('process-rewards', { contestId: id });
+        // 👉 FIX 2: Execute getRewardsQueue() as a function
+        await getRewardsQueue().add('process-rewards', { contestId: id });
       }
 
       return res.json({ 

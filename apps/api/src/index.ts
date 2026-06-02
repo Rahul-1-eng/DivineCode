@@ -7,7 +7,8 @@ import { connectDB } from './db';
 import { fetchCodeforcesAccepted } from './externalSync';
 import { deleteContestDocument, loadContestDocuments, loadSubmissionDocuments, saveContestDocument, saveSubmissionDocument, upsertGoogleUser } from './storage';
 import { mountV2Routes } from './routes/v2';
-import { startQueueWorkers } from './workers/runWorkers';
+// Point to the file where we consolidated the workers
+import { startQueueWorkers } from './workers/index';
 import { enqueueCodeforcesContestSync } from './queues/queues';
 import { setupDuelSockets } from './modules/duel/duelSocketService';
 const app = express();

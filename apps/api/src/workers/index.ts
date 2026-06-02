@@ -61,7 +61,6 @@ async function handleCodeforcesSyncJob(job: Job<CodeforcesContestSyncJob>) {
   };
 }
 
-// NEW HANDLER: Post-Contest Rewards
 async function handleRewardsJob(job: Job<ContestRewardsJob>) {
   console.log(`[Worker] Processing rewards for contest: ${job.data.contestId}`);
   const result = await processContestRewards(job.data.contestId);
@@ -92,7 +91,8 @@ export function startQueueWorkers(io?: Server) {
     handleJudgeJob,
     {
       connection: createRedisConnection(),
-      concurrency: Math.max(1, Number(process.env.JUDGE_WORKER_CONCURRENCY || 2))
+      concurrency: Math.max(1, Number(process.env.JUDGE_WORKER_CONCURRENCY || 2)),
+      drainDelay: 5000 
     }
   );
 
@@ -101,7 +101,8 @@ export function startQueueWorkers(io?: Server) {
     handleCodeforcesSyncJob,
     {
       connection: createRedisConnection(),
-      concurrency: Math.max(1, Number(process.env.EXTERNAL_SYNC_WORKER_CONCURRENCY || 2))
+      concurrency: Math.max(1, Number(process.env.EXTERNAL_SYNC_WORKER_CONCURRENCY || 2)),
+      drainDelay: 5000 
     }
   );
 
@@ -110,7 +111,8 @@ export function startQueueWorkers(io?: Server) {
     handleRewardsJob,
     {
       connection: createRedisConnection(),
-      concurrency: 1 // Keep this at 1 to prevent DB deadlock during heavy transaction writes
+      concurrency: 1, 
+      drainDelay: 5000 
     }
   );
 
