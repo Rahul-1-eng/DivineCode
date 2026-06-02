@@ -39,16 +39,20 @@ export default function WorkspacePage() {
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState('cpp');
   
-  // 👉 NEW: Custom Input & Execution States
   const [activeTab, setActiveTab] = useState<'code' | 'customInput' | 'testcases'>('code');
   const [customInput, setCustomInput] = useState('');
   const [runResult, setRunResult] = useState<any>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [isFetchingSamples, setIsFetchingSamples] = useState(false);
   
   const [penaltyViewed, setPenaltyViewed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [aiDebuggerLoading, setAiDebuggerLoading] = useState(false);
   const [aiDebugResult, setAiDebugResult] = useState<any>(null);
+
+  // States for the Codeforces Submission Flow
+  const [showCfModal, setShowCfModal] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
     if (!id || !session?.user?.email) return;
@@ -58,6 +62,32 @@ export default function WorkspacePage() {
 
   const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
+
+  // 👉 NEW: Auto-fetch CPH samples when problem loads
+  useEffect(() => {
+    if (!problem?.externalUrl?.includes('codeforces') || customInput) return;
+    
+    const fetchSamples = async () => {
+      setIsFetchingSamples(true);
+      try {
+        const res = await fetch(`${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(problem.externalUrl)}`);
+        const html = await res.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        
+        // Extract inputs from the Codeforces HTML structure
+        const inputs = Array.from(doc.querySelectorAll('.input pre')).map(el => el.textContent?.trim() || '');
+        if (inputs.length > 0) {
+          setCustomInput(inputs.join('\n\n'));
+        }
+      } catch (err) {
+        console.error("Failed to auto-fetch CPH samples", err);
+      } finally {
+        setIsFetchingSamples(false);
+      }
+    };
+    fetchSamples();
+  }, [problem?.externalUrl]);
 
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const target = e.target as HTMLTextAreaElement;
@@ -78,11 +108,10 @@ export default function WorkspacePage() {
     }
   };
 
-  // 👉 NEW: Run Code Function (Executes without submitting to leaderboard)
   const handleRunCode = async () => {
     if (!code.trim()) return alert("Code cannot be empty");
     setIsRunning(true);
-    setActiveTab('customInput'); // Switch to results view automatically
+    setActiveTab('customInput');
     try {
       const res = await fetch(`${API_V2_BASE_URL}/execute`, {
         method: 'POST',
@@ -108,45 +137,54 @@ export default function WorkspacePage() {
     }
   };
 
-const handleSubmitCode = async () => {
+  const handleSubmitCode = async () => {
     if (!code.trim()) return alert("Code cannot be empty");
-    setSubmitting(true);
+
+    if (problem?.platform === 'CODEFORCES' || problem?.externalUrl?.includes('codeforces')) {
+      setShowCfModal(true);
+      return;
+    }
     
+    setSubmitting(true);
     try {
-      // If it's a Codeforces problem, we call your official API sync engine
-      if (problem.platform === 'CODEFORCES' || problem.externalUrl?.includes('codeforces')) {
-        alert("Syncing with Codeforces API... Please ensure you have submitted this code to Codeforces under your registered handle.");
-        
-        const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/sync/codeforces?wait=true`, {
-          method: 'POST',
-          headers: { 'x-user-email': session?.user?.email || '' }
-        });
-        
-        const data = await res.json();
-        if (res.ok) {
-          alert("Successfully synced submissions from Codeforces API! Check the leaderboard.");
-          router.push(`/contests/${id}`);
-        } else {
-          alert(data.error || "Could not find a matching submission on Codeforces. Double-check your handle binding.");
-        }
-      } else {
-        // Standard Local Sandbox Judging for custom problems
-        const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
-          body: JSON.stringify({ contestProblemId: problemId, code, language })
-        });
-        const submission = await res.json();
-        await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge`, { method: 'POST' });
-        alert("Code submitted to local judge! Check standings for verdict.");
-        router.push(`/contests/${id}`);
-      }
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
+        body: JSON.stringify({ contestProblemId: problemId, code, language })
+      });
+      const submission = await res.json();
+      await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge`, { method: 'POST' });
+      alert("Code submitted to local judge! Check standings for verdict.");
+      router.push(`/contests/${id}`);
     } catch (e) {
       alert("Submission workflow connection failed.");
     } finally {
       setSubmitting(false);
     }
   };
+
+  const handleSyncCodeforces = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/sync/codeforces?wait=true`, {
+        method: 'POST',
+        headers: { 'x-user-email': session?.user?.email || '' }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert("Successfully synced submissions from Codeforces! Check the leaderboard.");
+        setShowCfModal(false);
+        router.push(`/contests/${id}`);
+      } else {
+        alert(data.error || "Could not find a matching submission. Are you sure you submitted it under your bound handle?");
+      }
+    } catch (e) {
+      alert("Failed to connect to Codeforces sync engine.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleAiDebug = async () => {
     if (!code.trim()) return alert("You must write some code first to debug it!");
     if (confirm("Using the AI Tutor will deduct 50 points from your contest score. Proceed?")) {
@@ -170,10 +208,19 @@ const handleSubmitCode = async () => {
 
   if (!contest || !problem) return <div style={page}>Loading Workspace...</div>;
 
-  // 👉 PROXY URL to bypass X-Frame-Options
   const problemIframeUrl = problem.externalUrl?.includes('codeforces') 
     ? `${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(problem.externalUrl)}` 
     : problem.externalUrl;
+
+  let cfSubmitUrl = problem.externalUrl || 'https://codeforces.com/problemset/submit';
+  const psMatch = cfSubmitUrl.match(/problemset\/problem\/([0-9]+)\/([A-Za-z0-9]+)/i);
+  const contestMatch = cfSubmitUrl.match(/contest\/([0-9]+)\/problem\/([A-Za-z0-9]+)/i);
+
+  if (psMatch) {
+    cfSubmitUrl = `https://codeforces.com/contest/${psMatch[1]}/submit/${psMatch[2]}`;
+  } else if (contestMatch) {
+    cfSubmitUrl = `https://codeforces.com/contest/${contestMatch[1]}/submit/${contestMatch[2]}`;
+  }
 
   return (
     <main style={page}>
@@ -189,7 +236,6 @@ const handleSubmitCode = async () => {
             <option value="python">Python 3</option>
             <option value="java">Java</option>
           </select>
-          {/* 👉 NEW: Run Code Button */}
           <button onClick={handleRunCode} disabled={isRunning} style={runBtn}>
             {isRunning ? 'Running...' : 'Run Code ▶'}
           </button>
@@ -220,14 +266,16 @@ const handleSubmitCode = async () => {
               <textarea value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={handleEditorKeyDown} style={codeEditor} spellCheck={false} placeholder={`// Write your ${language} solution here...`} />
             )}
 
-            {/* 👉 NEW: Custom Input Tab */}
             {activeTab === 'customInput' && (
               <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10 }}>
-                <strong style={{ color: '#94a3b8' }}>Custom Input:</strong>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong style={{ color: '#94a3b8' }}>Custom Input:</strong>
+                  {isFetchingSamples && <span style={{ color: '#38bdf8', fontSize: 12 }}>⚡ Auto-fetching samples...</span>}
+                </div>
                 <textarea 
                   value={customInput} 
                   onChange={e => setCustomInput(e.target.value)} 
-                  placeholder="Paste custom input or CPH test cases here..."
+                  placeholder={isFetchingSamples ? "Fetching samples..." : "Paste custom input or CPH test cases here..."}
                   style={{ ...codeEditor, flex: 0.5, border: '1px solid #334155', borderRadius: 8 }} 
                 />
                 
@@ -264,7 +312,7 @@ const handleSubmitCode = async () => {
                     <div style={{ marginTop: 15, background: '#0f172a', padding: 16, borderRadius: 8, border: '1px solid #334155' }}>
                       <p style={{ color: '#fbbf24', fontWeight: 'bold', margin: '0 0 12px 0' }}>💡 Hint: {aiDebugResult.hint}</p>
                       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                        <div style={{ flex: '1 1 200px' }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>FAILING INPUT</strong><pre style={codeBlockError}>{aiDebugResult.input}</pre></div>
+                        <div style={{ flex: '1 1 200px' }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>FAILLING INPUT</strong><pre style={codeBlockError}>{aiDebugResult.input}</pre></div>
                         <div style={{ flex: '1 1 200px' }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>EXPECTED OUTPUT</strong><pre style={codeBlockSuccess}>{aiDebugResult.expectedOutput}</pre></div>
                       </div>
                     </div>
@@ -289,8 +337,43 @@ const handleSubmitCode = async () => {
             )}
           </div>
         </section>
-
       </div>
+
+      {showCfModal && (
+        <div style={modalOverlay}>
+          <div style={modalContent}>
+            <h2 style={{ margin: '0 0 15px 0', color: '#38bdf8' }}>Codeforces Submission</h2>
+            <p style={{ color: '#cbd5e1', lineHeight: '1.6', marginBottom: 20 }}>
+              Because this is an official Codeforces problem, you must submit it directly on their platform to register the verdict.
+            </p>
+            <ol style={{ color: '#e2e8f0', lineHeight: '1.8', marginBottom: 25, paddingLeft: 20 }}>
+              <li><strong>Copy</strong> your code from the editor below.</li>
+              <li><strong>Click the link</strong> to open the Codeforces Submit page.</li>
+              <li><strong>Submit</strong> your code on Codeforces.</li>
+              <li>Come back here and click <strong>"Sync Verdict"</strong>.</li>
+            </ol>
+            
+            <div style={{ display: 'flex', gap: 10, marginBottom: 25 }}>
+              <button 
+                onClick={() => navigator.clipboard.writeText(code).then(() => alert('Code copied to clipboard!'))}
+                style={secondaryBtn}
+              >
+                📋 Copy Code
+              </button>
+              <a href={cfSubmitUrl} target="_blank" rel="noreferrer" style={primaryBtn}>
+                ↗ Open Codeforces Submit Page
+              </a>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid #334155', paddingTop: 20 }}>
+              <button onClick={() => setShowCfModal(false)} style={cancelBtn}>Cancel</button>
+              <button onClick={handleSyncCodeforces} disabled={isSyncing} style={syncBtn}>
+                {isSyncing ? 'Syncing...' : '🔄 Sync Verdict'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -319,3 +402,11 @@ const aiTutorCard: CSSProperties = { padding: 16, background: 'rgba(99, 102, 241
 const aiTriggerBtn: CSSProperties = { background: '#5356ff', color: '#fff', padding: '10px 18px', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 13 };
 const codeBlockError: CSSProperties = { background: 'rgba(248, 113, 113, 0.08)', padding: 10, color: '#f87171', borderRadius: 6, overflow: 'auto', border: '1px solid rgba(248, 113, 113, 0.2)', fontFamily: 'monospace', marginTop: 6, fontSize: 13 };
 const codeBlockSuccess: CSSProperties = { ...codeBlockError, background: 'rgba(74, 222, 128, 0.08)', color: '#4ade80', border: '1px solid rgba(74, 222, 128, 0.2)' };
+
+// Modal Styles
+const modalOverlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(2, 6, 23, 0.8)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
+const modalContent: CSSProperties = { background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b', width: '90%', maxWidth: 500, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' };
+const secondaryBtn: CSSProperties = { background: '#334155', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
+const primaryBtn: CSSProperties = { background: '#0284c7', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', textDecoration: 'none', textAlign: 'center' };
+const cancelBtn: CSSProperties = { background: 'transparent', color: '#94a3b8', border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 'bold' };
+const syncBtn: CSSProperties = { background: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
