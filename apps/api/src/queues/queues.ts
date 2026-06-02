@@ -1,9 +1,10 @@
 import { Queue } from 'bullmq';
 import { CodeforcesContestSyncJob, JudgeSubmissionJob, QUEUE_NAMES } from './jobTypes';
-import { getSharedRedisConnection,createRedisConnection } from './redis';
+import { getSharedRedisConnection } from './redis';
 
 let judgeQueue: Queue<JudgeSubmissionJob> | null = null;
 let externalSyncQueue: Queue<CodeforcesContestSyncJob> | null = null;
+let rewardsQueue: Queue | null = null;
 
 export function getJudgeQueue() {
   if (!judgeQueue) {
@@ -41,6 +42,21 @@ export function getExternalSyncQueue() {
   return externalSyncQueue;
 }
 
+// 🛠️ FIX: Lazy-load the rewards queue using the shared connection to stop Upstash leak
+export function getRewardsQueue() {
+  if (!rewardsQueue) {
+    rewardsQueue = new Queue(QUEUE_NAMES.contestRewards, {
+      connection: getSharedRedisConnection(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 2000 },
+        removeOnComplete: true,
+      }
+    });
+  }
+  return rewardsQueue;
+}
+
 export async function enqueueJudgeSubmission(submissionId: string) {
   const job = await getJudgeQueue().add('judge-submission', { submissionId }, { jobId: `judge:${submissionId}` });
   return {
@@ -58,11 +74,3 @@ export async function enqueueCodeforcesContestSync(contestId: string) {
     queue: QUEUE_NAMES.externalSync
   };
 }
-export const rewardsQueue = new Queue(QUEUE_NAMES.contestRewards, {
-  connection: createRedisConnection(),
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 2000 },
-    removeOnComplete: true,
-  }
-});
