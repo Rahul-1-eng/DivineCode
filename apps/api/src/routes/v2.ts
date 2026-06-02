@@ -107,19 +107,31 @@ router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) =
 
 
   // 👉 FIX 1: The Problem Proxy (Bypasses Codeforces Iframe Block)
-// 👉 FIX 1: The Problem Proxy (Bypasses Codeforces Iframe Block)
+// 👉 UPDATED FIX: The Problem Proxy (Bypasses Codeforces Iframe & Bot Blocks)
   router.get('/proxy/problem', asyncRoute(async (req, res, next) => {
     const url = String(req.query.url);
     if (!url || !url.includes('codeforces')) {
       res.status(400).send('Invalid URL');
-      return; // Separated the return statement so TypeScript is happy
+      return; 
     }
     
     try {
-      const { data } = await axios.get(url);
+      // Added User-Agent headers to trick Codeforces into thinking we are a real browser
+      const { data } = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+        }
+      });
       const $ = cheerio.load(data);
       const statementHtml = $('.problem-statement').html();
       
+      if (!statementHtml) {
+        res.status(404).send('Problem statement div not found on the page.');
+        return;
+      }
+
       res.send(`
         <html><head>
           <link rel="stylesheet" href="https://codeforces.com/css/font-awesome.min.css" />
@@ -127,10 +139,11 @@ router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) =
           <script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML"></script>
           <style>body { padding: 15px; background: #fff; color: #000; font-family: sans-serif; }</style>
         </head>
-        <body><div class="problem-statement" style="margin:0;">${statementHtml || 'Problem statement not found.'}</div></body></html>
+        <body><div class="problem-statement" style="margin:0;">${statementHtml}</div></body></html>
       `);
-    } catch (e) {
-      res.status(500).send('Failed to fetch problem statement.');
+    } catch (e: any) {
+      console.error("Proxy Error:", e.message);
+      res.status(500).send(`Failed to fetch problem statement. Error: ${e.message}`);
     }
   }));
   // 👉 FIX 3: AI Testcases (Now accepts masterSolution from body)
