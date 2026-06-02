@@ -1,7 +1,9 @@
+// apps/api/src/modules/problems/problemService.ts
 import { CheckerType, Platform, ProblemSource, ProblemVisibility, TestcaseType } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { generateTestCasesWithAI } from '../ai/aiService';
 
 type TestcaseInput = {
   type?: TestcaseType;
@@ -49,11 +51,7 @@ type CreateProblemInput = {
 };
 
 function slugify(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 export async function createInternalProblem(input: CreateProblemInput) {
@@ -73,18 +71,16 @@ export async function createInternalProblem(input: CreateProblemInput) {
       description: statement,
       rating: input.difficultyRating || null,
       tags: input.tags || [],
-      
       source: ProblemSource.INTERNAL,
       platform: Platform.DIVINECODE,
       visibility: input.visibility || ProblemVisibility.DRAFT,
       checkerType: input.checkerType || CheckerType.EXACT,
       authorId: input.createdById || null,
-      
       testcases: {
         create: (input.testcases || []).map((testcase, index) => ({
           type: testcase.type || (testcase.isPublic ? TestcaseType.SAMPLE : TestcaseType.HIDDEN),
-          input: testcase.input ?? '', // Explicitly fallback to empty string
-          expectedOutput: testcase.expectedOutput ?? '', // Explicitly fallback to empty string
+          input: testcase.input ?? '',
+          expectedOutput: testcase.expectedOutput ?? '',
           explanation: testcase.explanation || null,
           weight: Math.max(1, Number(testcase.weight || 1)),
           order: index,
@@ -111,12 +107,37 @@ export async function createInternalProblem(input: CreateProblemInput) {
           }
         : undefined
     },
-    include: {
-      testcases: true,
-      officialSolutions: true,
-      editorial: true
-    }
+    include: { testcases: true, officialSolutions: true, editorial: true }
   });
+}
+
+// 👉 NEW: AI Test Case Generator
+export async function generateAndAppendAITestcases(problemId: string) {
+  const problem = await prisma.problem.findUnique({
+    where: { id: problemId },
+    include: { officialSolutions: true }
+  });
+
+  if (!problem) throw new Error('Problem not found');
+  const masterSolution = problem.officialSolutions.find(s => s.isPrimary)?.code || problem.officialSolutions[0]?.code;
+  
+  if (!masterSolution) throw new Error('Problem must have an official solution code to generate AI test cases.');
+
+  const generatedCases = await generateTestCasesWithAI(problem.description, masterSolution);
+
+  const testcaseRecords = generatedCases.map((tc: any, index: number) => ({
+    problemId: problem.id,
+    type: TestcaseType.SYSTEM,
+    input: tc.input,
+    expectedOutput: tc.expectedOutput,
+    explanation: tc.explanation,
+    isPublic: false,
+    weight: 1,
+    order: index + 100 // Append to the end
+  }));
+
+  await prisma.testcase.createMany({ data: testcaseRecords });
+  return generatedCases;
 }
 
 export async function syncTestCasesFromCodeforces(problemId: string, url: string) {
@@ -144,8 +165,8 @@ export async function syncTestCasesFromCodeforces(problemId: string, url: string
         testcases: {
           create: scrapedCases.map((tc, index) => ({
             type: tc.type || TestcaseType.SAMPLE,
-            input: tc.input ?? '', // Resolved TS error here
-            expectedOutput: tc.expectedOutput ?? '', // Resolved TS error here
+            input: tc.input ?? '',
+            expectedOutput: tc.expectedOutput ?? '',
             weight: tc.weight || 1,
             order: index,
             isPublic: !!tc.isPublic

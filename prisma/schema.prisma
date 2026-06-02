@@ -319,6 +319,10 @@ model ContestStanding {
   solved           Int                @default(0)
   penalty          Int                @default(0)
   score            Int                @default(0)
+  // 👉 FIX: Track individual vs team performance
+  individualScore  Int                @default(0) 
+  individualSolved Int                @default(0)
+  testcasePenalty  Int                @default(0) // Tracks penalty for viewing testcases
   solvedProblemIds String[]
   lastAcceptedAt   DateTime?
   updatedAt        DateTime           @updatedAt

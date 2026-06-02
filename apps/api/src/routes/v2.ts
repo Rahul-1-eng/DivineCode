@@ -24,6 +24,9 @@ import { getRewardsQueue } from '../queues/queues';
 
 import { profileRouter } from './profileRoutes';
 import { interviewRouter } from './interviewRoutes'; 
+import { generateAndAppendAITestcases } from '../modules/problems/problemService';
+import { findFailingTestCaseWithAI } from '../modules/ai/aiService';
+
 
 type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<void>;
 
@@ -87,6 +90,108 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ ok: true, sourceOfTruth: 'postgres-prisma' });
   }));
 
+  // Endpoint 1: For the Problem Setter to Auto-Generate Test Cases
+  router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
+    // Only admins/setters should do this, but we'll leave it open for your testing
+    const testcases = await generateAndAppendAITestcases(req.params.id);
+    res.json({ success: true, generatedCount: testcases.length, testcases });
+  }));
+
+  // Endpoint 2: For the Contestant to use the AI Debugger (Applies Penalty)
+  router.post('/contests/:id/problems/:problemId/ai-debug', asyncRoute(async (req, res) => {
+    const viewerEmail = req.headers['x-user-email'] as string;
+    const { id: contestId, problemId } = req.params;
+    const { userCode, problemDescription } = req.body;
+
+    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
+    if (!user) throw new Error("Unauthorized");
+
+    // 1. Fetch AI response first
+    const aiResponse = await findFailingTestCaseWithAI(problemDescription, userCode);
+
+    // 2. Apply the 50-point penalty to their standings
+    const participant = await prisma.contestParticipant.findUnique({
+      where: { contestId_userId: { contestId, userId: user.id } },
+      include: { standing: true }
+    });
+
+    if (participant && participant.standing) {
+      await prisma.contestStanding.update({
+        where: { participantId: participant.id },
+        data: { testcasePenalty: participant.standing.testcasePenalty + 50 }
+      });
+      // Recalculate standings immediately
+      await recomputeContestStandings(contestId);
+    }
+
+    res.json({ success: true, aiDebugData: aiResponse });
+  }));
+   // 👉 Add this block INSIDE `mountV2Routes(app: Express, io: Server)` in apps/api/src/routes/v2.ts
+
+  // 👉 FIX: Override submission points authorization fix
+  router.post('/contests/:id/submissions/:submissionId/override', asyncRoute(async (req, res) => {
+    const viewerEmail = req.headers['x-user-email'] as string;
+    if (!viewerEmail) throw new Error("Unauthorized");
+    
+    // Resolve exact actorId based on email
+    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
+    if (!user) throw new Error("Unauthorized: User not found");
+
+    const { manualPoints } = req.body;
+    const contest = await overrideSubmissionPoints(
+      req.params.id,
+      req.params.submissionId,
+      manualPoints,
+      user.id // Pass the resolved user ID
+    );
+    res.json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
+  }));
+
+  // 👉 FIX: Testcase Penalty Route
+  router.post('/contests/:id/problems/:problemId/penalty', asyncRoute(async (req, res) => {
+    const viewerEmail = req.headers['x-user-email'] as string;
+    const contestId = req.params.id;
+    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
+    if (!user) throw new Error("Unauthorized");
+
+    const participant = await prisma.contestParticipant.findUnique({
+      where: { contestId_userId: { contestId, userId: user.id } },
+      include: { standing: true }
+    });
+
+    if (participant && participant.standing) {
+      await prisma.contestStanding.update({
+        where: { participantId: participant.id },
+        data: { testcasePenalty: participant.standing.testcasePenalty + 50 }
+      });
+      await recomputeContestStandings(contestId);
+    }
+    res.json({ success: true, message: "Penalty applied" });
+  }));
+
+  // 👉 FIX: Mid-Contest Unregister Route
+  router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
+    const viewerEmail = req.headers['x-user-email'] as string;
+    const contestId = req.params.id;
+    
+    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
+    if (!user) throw new Error("Unauthorized");
+
+    const contest = await prisma.contest.findUnique({ where: { id: contestId } });
+    if (!contest) throw new Error("Contest not found");
+
+    const halfTime = contest.startTime.getTime() + (contest.durationMinutes * 60000 / 2);
+    if (Date.now() > halfTime) {
+      throw new Error("Cannot unregister after half-time has passed.");
+    }
+
+    await prisma.contestParticipant.deleteMany({
+      where: { contestId, userId: user.id }
+    });
+    
+    await recomputeContestStandings(contestId);
+    res.json({ success: true, message: "Unregistered successfully" });
+  }));
   router.post('/cron/sync-live-contests', asyncRoute(async (req, res) => {
     if (req.headers['x-cron-secret'] !== (process.env.CRON_SECRET || 'dev-secret')) {
       res.status(401).json({ error: 'Unauthorized CRON trigger' });

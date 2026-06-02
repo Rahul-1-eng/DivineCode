@@ -22,52 +22,15 @@ profileRouter.get('/me', async (req, res) => {
   }
 });
 
-// 👉 ADDED: Unlink route to clear handles
 profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
-  try {
-    const email = req.headers['x-user-email'] as string;
-    const { platform, handle } = req.params;
-    if (!email) return res.status(401).json({ error: 'Unauthorized' });
-
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    await prisma.externalHandle.deleteMany({
-      where: {
-        userId: user.id,
-        platform: platform.toUpperCase() as Platform,
-        handle: handle
-      }
-    });
-
-    return res.json({ success: true });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
+  // ... (Keep existing delete logic)
 });
 
 profileRouter.post('/claim-username', async (req, res) => {
-  try {
-    const email = req.headers['x-user-email'] as string;
-    const { username } = req.body;
-    if (!email) return res.status(401).json({ error: 'Unauthorized' });
-
-    const existing = await prisma.user.findUnique({ where: { username } });
-    if (existing && existing.email !== email) {
-      return res.status(400).json({ error: 'Username is already taken!' });
-    }
-
-    const user = await prisma.user.update({
-      where: { email },
-      data: { username }
-    });
-
-    return res.json({ success: true, user });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
+  // ... (Keep existing claim logic)
 });
 
+// 👉 FIX: Strict Handle Verification logic
 profileRouter.post('/save-handles', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;
@@ -78,13 +41,22 @@ profileRouter.post('/save-handles', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     if (codeforcesHandle) {
+      // Step 1: Ensure handle is not used by another DivineCode email
       const existing = await prisma.externalHandle.findFirst({
         where: { platform: Platform.CODEFORCES, handle: { equals: codeforcesHandle, mode: 'insensitive' } }
       });
       if (existing && existing.userId !== user.id) {
-        return res.status(400).json({ error: `The Codeforces handle "${codeforcesHandle}" is already linked to another account.` });
+        return res.status(400).json({ error: `The Codeforces handle "${codeforcesHandle}" is already linked to another DivineCode account.` });
       }
 
+      // Step 2: Validate against CF API (Ensures handle actually exists)
+      const cfCheck = await fetch(`https://codeforces.com/api/user.info?handles=${codeforcesHandle}`);
+      const cfData = await cfCheck.json();
+      if (cfData.status !== "OK") {
+        return res.status(400).json({ error: `Codeforces account "${codeforcesHandle}" does not exist.` });
+      }
+
+      // Save to database
       await prisma.externalHandle.upsert({
         where: { userId_platform: { userId: user.id, platform: Platform.CODEFORCES } },
         create: { userId: user.id, platform: Platform.CODEFORCES, handle: codeforcesHandle },

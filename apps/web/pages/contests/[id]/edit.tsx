@@ -27,6 +27,10 @@ export default function ContestEditPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [durationMinutes, setDurationMinutes] = useState(120);
+  
+  // 👉 ADDED: Start Time Edit State
+  const [startTimeStr, setStartTimeStr] = useState('');
+  
   const [newProblemCode, setNewProblemCode] = useState('');
   const [newProblemPlatform, setNewProblemPlatform] = useState('Codeforces');
   const [saving, setSaving] = useState(false);
@@ -41,6 +45,13 @@ export default function ContestEditPage() {
     setTitle(data.title || '');
     setDescription(data.description || '');
     setDurationMinutes(data.durationMinutes || 120);
+    
+    // Convert UTC to local datetime-local format
+    if (data.startTime) {
+      const dt = new Date(data.startTime);
+      dt.setMinutes(dt.getMinutes() - dt.getTimezoneOffset());
+      setStartTimeStr(dt.toISOString().slice(0, 16));
+    }
   }
 
   useEffect(() => { loadContest(); }, [id, status, session?.user?.email, session?.user?.name]);
@@ -48,7 +59,12 @@ export default function ContestEditPage() {
   async function saveSettings() {
     if (!id || !session) return;
     setSaving(true);
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}`, { method: 'PUT', headers: viewerHeaders(session), body: JSON.stringify({ title, description, durationMinutes }) });
+    const bodyPayload: any = { title, description, durationMinutes };
+    if (startTimeStr) {
+      bodyPayload.startTime = new Date(startTimeStr).toISOString();
+    }
+    
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}`, { method: 'PUT', headers: viewerHeaders(session), body: JSON.stringify(bodyPayload) });
     const data = await res.json();
     setSaving(false);
     if (!res.ok) return alert(data.error || 'Could not save contest');
@@ -113,7 +129,10 @@ export default function ContestEditPage() {
   if (!contest) return <main style={page}>Loading editor...</main>;
   if (!contest.canManage) return <main style={page}><section style={panel}><h1>Owner only</h1><p style={{ color: '#94a3b8' }}>Only the contest creator can open the editing page.</p><a href={`/contests/${id}`} style={primary}>Back to contest</a></section></main>;
 
-  return <main style={page}><section style={{ maxWidth: 1120, margin: '0 auto' }}><nav style={nav}><a href={`/contests/${id}`} style={link}>Back to live room</a><button onClick={deleteContest} style={danger}>Delete mashup</button></nav><div style={hero}><p style={eyebrow}>Owner editing page</p><h1 style={{ margin: 0, fontSize: 44 }}>{contest.title}</h1><p style={{ color: '#a8b3c7' }}>Only the creator can see this page. Problems added here are rejected if any player has already solved them on Codeforces.</p></div><section style={panel}><h2>Contest settings</h2><label>Title</label><input value={title} onChange={(e) => setTitle(e.target.value)} style={input} /><label>Description</label><textarea value={description} onChange={(e) => setDescription(e.target.value)} style={{ ...input, minHeight: 90 }} /><label>Duration minutes</label><input type="number" value={durationMinutes} onChange={(e) => setDurationMinutes(Number(e.target.value))} style={{ ...input, maxWidth: 180 }} /><button onClick={saveSettings} disabled={saving} style={primary}>{saving ? 'Saving...' : 'Save settings'}</button></section><section style={panel}><h2>Add problem</h2><div style={inline}><select value={newProblemPlatform} onChange={(e) => setNewProblemPlatform(e.target.value)} style={input}><option>Codeforces</option><option>LeetCode</option><option>AtCoder</option><option>CodeChef</option></select><input value={newProblemCode} onChange={(e) => setNewProblemCode(e.target.value)} placeholder="1805A" style={input} /><button onClick={addProblem} style={primary}>Add</button></div></section><section style={panel}><h2>Problems</h2>{contest.problems.map((problem: any, index: number) => <div key={problem.id} style={row}><strong>{String.fromCharCode(65 + index)}</strong><div><b>{problem.title}</b><p style={{ margin: '4px 0 0', color: '#94a3b8' }}>{problem.platform} - Rating {problem.rating || problem.difficulty || 'Practice'}</p></div><button onClick={() => replaceProblem(problem.id)} style={ghost}>Replace</button><button onClick={() => removeProblem(problem.id)} style={ghost}>Remove</button></div>)}</section><section style={panel}><h2>Players</h2>{contest.members.map((member: any) => <div key={member.id} style={playerRow}><span>{member.name}</span><span>{member.team || 'Individuals'}</span><span>{member.codeforcesHandle || member.handle || 'missing handle'}</span></div>)}</section></section></main>;
+  return <main style={page}><section style={{ maxWidth: 1120, margin: '0 auto' }}><nav style={nav}><a href={`/contests/${id}`} style={link}>Back to live room</a><button onClick={deleteContest} style={danger}>Delete mashup</button></nav><div style={hero}><p style={eyebrow}>Owner editing page</p><h1 style={{ margin: 0, fontSize: 44 }}>{contest.title}</h1><p style={{ color: '#a8b3c7' }}>Only the creator can see this page. Problems added here are rejected if any player has already solved them on Codeforces.</p></div><section style={panel}><h2>Contest settings</h2><label>Title</label><input value={title} onChange={(e) => setTitle(e.target.value)} style={input} /><label>Description</label><textarea value={description} onChange={(e) => setDescription(e.target.value)} style={{ ...input, minHeight: 90 }} /><label>Duration minutes</label><input type="number" value={durationMinutes} onChange={(e) => setDurationMinutes(Number(e.target.value))} style={{ ...input, maxWidth: 180 }} />
+  {/* 👉 ADDED: UI input for Schedule Time Editing */}
+  <label style={{display: 'block', marginTop: 10}}>Scheduled Start Time</label><input type="datetime-local" value={startTimeStr} onChange={(e) => setStartTimeStr(e.target.value)} style={{ ...input, maxWidth: 220 }} />
+  <button onClick={saveSettings} disabled={saving} style={primary}>{saving ? 'Saving...' : 'Save settings'}</button></section><section style={panel}><h2>Add problem</h2><div style={inline}><select value={newProblemPlatform} onChange={(e) => setNewProblemPlatform(e.target.value)} style={input}><option>Codeforces</option><option>LeetCode</option><option>AtCoder</option><option>CodeChef</option></select><input value={newProblemCode} onChange={(e) => setNewProblemCode(e.target.value)} placeholder="1805A" style={input} /><button onClick={addProblem} style={primary}>Add</button></div></section><section style={panel}><h2>Problems</h2>{contest.problems.map((problem: any, index: number) => <div key={problem.id} style={row}><strong>{String.fromCharCode(65 + index)}</strong><div><b>{problem.title}</b><p style={{ margin: '4px 0 0', color: '#94a3b8' }}>{problem.platform} - Rating {problem.rating || problem.difficulty || 'Practice'}</p></div><button onClick={() => replaceProblem(problem.id)} style={ghost}>Replace</button><button onClick={() => removeProblem(problem.id)} style={ghost}>Remove</button></div>)}</section><section style={panel}><h2>Players</h2>{contest.members.map((member: any) => <div key={member.id} style={playerRow}><span>{member.name}</span><span>{member.team || 'Individuals'}</span><span>{member.codeforcesHandle || member.handle || 'missing handle'}</span></div>)}</section></section></main>;
 }
 
 const page: CSSProperties = { minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.32), transparent 34rem), #070a16' };

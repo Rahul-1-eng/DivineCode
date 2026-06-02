@@ -26,7 +26,7 @@ export async function recomputeContestStandings(contestId: string) {
     const contest = await tx.contest.findUnique({
       where: { id: contestId },
       include: {
-        participants: true,
+        participants: { include: { standing: true } },
         problems: true,
         submissions: { orderBy: { createdAt: 'asc' } }
       }
@@ -34,92 +34,84 @@ export async function recomputeContestStandings(contestId: string) {
 
     if (!contest) throw new Error('Contest not found');
 
-    // 👉 NEW: Identify the freeze time boundary
     const freezeTime = contest.freezeTime ? new Date(contest.freezeTime).getTime() : null;
 
-    const teamState = new Map<string, Map<string, { 
-      wrongAttempts: number, 
-      acceptedAt?: Date, 
-      manualPoints: number | null,
-      isFrozen: boolean // 👉 TRACK IF A SOLVE HAPPENED AFTER FREEZE
-    }>>();
+    // Track Team State (for shared group score)
+    const teamState = new Map<string, Map<string, { wrongAttempts: number, acceptedAt?: Date, manualPoints: number | null, isFrozen: boolean }>>();
+    // 👉 FIX: Track Individual State (for personal leaderboard)
+    const individualState = new Map<string, Map<string, { acceptedAt?: Date, manualPoints: number | null }>>();
 
     for (const submission of contest.submissions) {
       if (!submission.teamId || !submission.contestProblemId) continue;
       if (!isCountableSubmission(contest, submission)) continue;
 
-      if (!teamState.has(submission.teamId)) {
-        teamState.set(submission.teamId, new Map());
-      }
-      
-      const problemMap = teamState.get(submission.teamId)!;
       const problemId = String(submission.contestProblemId);
-      const state = problemMap.get(problemId) || { wrongAttempts: 0, manualPoints: null, isFrozen: false };
-
-      // 👉 NEW: Check if this submission is in the "Frozen" zone
       const submissionTime = new Date(submission.createdAt).getTime();
       const isSubmissionFrozen = freezeTime !== null && submissionTime > freezeTime;
+      const isAccepted = submission.verdict === Verdict.ACCEPTED && submission.status === SubmissionStatus.FINISHED;
 
-      // Logic: If already solved, ignore further
-      if (state.acceptedAt && submission.manualPoints === null) {
-        continue;
+      // --- TEAM LOGIC ---
+      if (!teamState.has(submission.teamId)) teamState.set(submission.teamId, new Map());
+      const tMap = teamState.get(submission.teamId)!;
+      const tState = tMap.get(problemId) || { wrongAttempts: 0, manualPoints: null, isFrozen: false };
+      
+      if (!tState.acceptedAt || submission.manualPoints !== null) {
+        if (isAccepted) { tState.acceptedAt = submission.createdAt; tState.isFrozen = isSubmissionFrozen; }
+        else if (isWrongAttempt(submission) && !isSubmissionFrozen) tState.wrongAttempts += 1;
+        if (submission.manualPoints !== null) tState.manualPoints = submission.manualPoints;
+        tMap.set(problemId, tState);
       }
 
-      if (submission.verdict === Verdict.ACCEPTED && submission.status === SubmissionStatus.FINISHED) {
-        state.acceptedAt = submission.createdAt;
-        state.isFrozen = isSubmissionFrozen; // Flag if this specific solve was frozen
-      } else if (isWrongAttempt(submission)) {
-        // Only count wrong attempts before freeze time for penalty
-        if (!isSubmissionFrozen) {
-          state.wrongAttempts += 1;
-        }
+      // --- INDIVIDUAL LOGIC ---
+      if (!submission.participantId) continue;
+      if (!individualState.has(submission.participantId)) individualState.set(submission.participantId, new Map());
+      const iMap = individualState.get(submission.participantId)!;
+      const iState = iMap.get(problemId) || { manualPoints: null };
+      
+      if (!iState.acceptedAt || submission.manualPoints !== null) {
+        if (isAccepted) iState.acceptedAt = submission.createdAt;
+        if (submission.manualPoints !== null) iState.manualPoints = submission.manualPoints;
+        iMap.set(problemId, iState);
       }
-
-      if (submission.manualPoints !== null) {
-         state.manualPoints = submission.manualPoints;
-      }
-
-      problemMap.set(problemId, state);
     }
 
     const standingRows = contest.participants.map((participant) => {
-      if (!participant.teamId || !teamState.has(participant.teamId)) {
-        return { participantId: participant.id, contestId, rank: 0, solved: 0, penalty: 0, score: 0, solvedProblemIds: [], lastAcceptedAt: null };
-      }
+      // Team calculation
+      const tMap = participant.teamId && teamState.has(participant.teamId) ? teamState.get(participant.teamId)! : new Map();
+      const solvedEntries = [...tMap.entries()].filter(([, state]) => state.acceptedAt && !state.isFrozen);
       
-      const problemMap = teamState.get(participant.teamId)!;
+      let teamPenalty = solvedEntries.reduce((sum, [, state]) => sum + acceptedMinute(contest, state.acceptedAt!) + (state.wrongAttempts * PENALTY_PER_WRONG_ATTEMPT), 0);
       
-      // 👉 Logic: If the solve is frozen, it doesn't count towards the public 'solved' count or rank
-      const solvedEntries = [...problemMap.entries()].filter(([, state]) => state.acceptedAt && !state.isFrozen);
-      
-      const penalty = solvedEntries.reduce((sum, [, state]) => {
-        return sum + acceptedMinute(contest, state.acceptedAt!) + (state.wrongAttempts * PENALTY_PER_WRONG_ATTEMPT);
-      }, 0);
+      // 👉 FIX: Add Testcase penalty reduction
+      const testcasePenalty = participant.standing?.testcasePenalty || 0;
+      let teamScore = solvedEntries.reduce((sum, [, state]) => sum + (state.manualPoints !== null ? state.manualPoints : 1000), 0) - teamPenalty - testcasePenalty;
 
-      const totalScore = solvedEntries.reduce((sum, [, state]) => {
-        return sum + (state.manualPoints !== null ? state.manualPoints : 1000);
-      }, 0) - penalty;
+      // Individual calculation
+      const iMap = individualState.has(participant.id) ? individualState.get(participant.id)! : new Map();
+      const iSolved = [...iMap.entries()].filter(([, state]) => state.acceptedAt);
+      const iScore = iSolved.reduce((sum, [, state]) => sum + (state.manualPoints !== null ? state.manualPoints : 1000), 0) - testcasePenalty;
 
       return {
         participantId: participant.id,
         contestId,
         rank: 0,
         solved: solvedEntries.length,
-        penalty,
-        score: totalScore,
+        penalty: teamPenalty,
+        score: teamScore,
+        individualScore: iScore,
+        individualSolved: iSolved.length,
+        testcasePenalty: testcasePenalty,
         solvedProblemIds: solvedEntries.map(([id]) => id),
-        lastAcceptedAt: solvedEntries.length > 0 
-          ? solvedEntries.map(([, state]) => state.acceptedAt!).sort((a, b) => b.getTime() - a.getTime())[0] 
-          : null
+        lastAcceptedAt: solvedEntries.length > 0 ? solvedEntries.map(([, state]) => state.acceptedAt!).sort((a, b) => b.getTime() - a.getTime())[0] : null
       };
     });
 
-    standingRows.sort((a, b) => b.solved - a.solved || a.penalty - b.penalty || a.participantId.localeCompare(b.participantId));
+    standingRows.sort((a, b) => b.score - a.score || a.penalty - b.penalty || a.participantId.localeCompare(b.participantId));
 
     let currentRank = 0;
     let lastScoreKey = '';
     standingRows.forEach((row, index) => {
-      const scoreKey = `${row.solved}:${row.penalty}`;
+      const scoreKey = `${row.score}:${row.penalty}`;
       if (scoreKey !== lastScoreKey) currentRank = index + 1;
       row.rank = currentRank;
       lastScoreKey = scoreKey;
@@ -129,7 +121,7 @@ export async function recomputeContestStandings(contestId: string) {
       await tx.contestStanding.upsert({
         where: { participantId: row.participantId },
         create: row,
-        update: { rank: row.rank, solved: row.solved, penalty: row.penalty, score: row.score, solvedProblemIds: row.solvedProblemIds, lastAcceptedAt: row.lastAcceptedAt }
+        update: { rank: row.rank, solved: row.solved, penalty: row.penalty, score: row.score, individualScore: row.individualScore, individualSolved: row.individualSolved, solvedProblemIds: row.solvedProblemIds, lastAcceptedAt: row.lastAcceptedAt }
       });
     }
 

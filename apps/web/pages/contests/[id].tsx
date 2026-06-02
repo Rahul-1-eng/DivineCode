@@ -44,18 +44,44 @@ export default function ContestRoomPage() {
   const [reportReason, setReportReason] = useState('');
   const [overridePoints, setOverridePoints] = useState<number | ''>('');
 
-  // 👉 MOVED INSIDE COMPONENT: Registration State
   const [registerHandle, setRegisterHandle] = useState('');
   const [registerTeam, setRegisterTeam] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
   
+  // 👉 ADDED: Timer Tick State for Lock Screen and Unregister Logic
+  const [nowTick, setNowTick] = useState(Date.now());
   const syncingRef = useRef(false);
 
   const isOwner = Boolean(contest?.canManage);
   const viewerMember = contest?.viewerMember || null;
   const canSeeProblemMeta = Boolean(contest?.visibility?.canSeeProblemMeta);
 
-  // 👉 MOVED INSIDE COMPONENT: Registration Function
+  // Deriving active states
+  const startTimeMs = contest ? new Date(contest.startTime).getTime() : 0;
+  const isScheduledLockScreen = nowTick < startTimeMs;
+  const halfTimeMs = startTimeMs + ((contest?.durationMinutes || 0) * 60000 / 2);
+  const canUnregister = viewerMember && !isOwner && nowTick < halfTimeMs;
+
+  function formatCountdown(ms: number) {
+    if (ms <= 0) return '00:00:00';
+    const s = Math.floor((ms / 1000) % 60);
+    const m = Math.floor((ms / 1000 / 60) % 60);
+    const h = Math.floor((ms / (1000 * 60 * 60)) % 24);
+    const d = Math.floor(ms / (1000 * 60 * 60 * 24));
+    const parts = [];
+    if (d > 0) parts.push(`${d}d`);
+    if (h > 0 || d > 0) parts.push(`${h}h`);
+    parts.push(`${m}m`);
+    parts.push(`${s}s`);
+    return parts.join(' ');
+  }
+
+  // Effect for live lock-screen countdown
+  useEffect(() => {
+    const ticker = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(ticker);
+  }, []);
+
   async function registerForContest() {
     if (!id || !session || !registerHandle.trim()) return alert("Codeforces handle is required");
     setIsRegistering(true);
@@ -64,7 +90,7 @@ export default function ContestRoomPage() {
       headers: viewerHeaders(session),
       body: JSON.stringify({
         codeforcesHandle: registerHandle,
-        teamName: registerTeam || 'Solo' // Default to solo if left blank
+        teamName: registerTeam || 'Solo'
       })
     });
     const data = await res.json();
@@ -75,6 +101,19 @@ export default function ContestRoomPage() {
     setContest(data);
     await loadSubmissions();
     alert("Successfully registered! You can now submit code.");
+  }
+
+  // 👉 ADDED: Unregister Action
+  async function unregisterFromContest() {
+    if (!confirm("Are you sure you want to unregister? You will lose access to submit.")) return;
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/unregister`, { method: 'POST', headers: viewerHeaders(session) });
+    if(res.ok) {
+      alert('Successfully unregistered.');
+      loadContest();
+    } else {
+      const data = await res.json();
+      alert(data.error || 'Failed to unregister');
+    }
   }
 
   async function loadContest() {
@@ -154,6 +193,28 @@ export default function ContestRoomPage() {
     } catch (e: any) { alert(e.message || 'Could not add problem'); }
   }
 
+  const [generatingTcFor, setGeneratingTcFor] = useState<string | null>(null);
+
+  async function generateAITestcases(problemId: string) {
+    if (!confirm('Generate tricky AI system test cases for this problem?')) return;
+    setGeneratingTcFor(problemId);
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/problems/${problemId}/generate-ai-testcases`, { 
+        method: 'POST', 
+        headers: viewerHeaders(session) 
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Successfully generated ${data.generatedCount} new system test cases!`);
+      } else {
+        alert(data.error || 'Failed to generate test cases.');
+      }
+    } catch (e: any) {
+      alert('Network error while connecting to AI.');
+    } finally {
+      setGeneratingTcFor(null);
+    }
+  }
   async function removeProblem(problemId: string) {
     if (!id || !session || !confirm('Remove this problem from the live contest?')) return;
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, { method: 'DELETE', headers: viewerHeaders(session) });
@@ -213,7 +274,7 @@ export default function ContestRoomPage() {
   useEffect(() => { loadContest(); loadSubmissions(); }, [id, session?.user?.email, session?.user?.name]);
   useEffect(() => { const timer = setInterval(() => setTimeLeft((prev) => Math.max(0, prev - 1)), 1000); return () => clearInterval(timer); }, []);
   useEffect(() => { if (!id || !session || isFinal) return; const live = setInterval(() => { loadContest(); loadSubmissions(); syncCodeforces(true); }, 30000); return () => clearInterval(live); }, [id, session?.user?.email, session?.user?.name, isFinal]);
-  useEffect(() => { if (!id || !contest || isFinal) return; if (timeLeft === 0) router.push(`/contests/${id}/final`); }, [timeLeft, id, contest, isFinal]);
+  useEffect(() => { if (!id || !contest || isFinal) return; if (timeLeft === 0 && !isScheduledLockScreen) router.push(`/contests/${id}/final`); }, [timeLeft, id, contest, isFinal, isScheduledLockScreen]);
 
   const problemById = useMemo(() => Object.fromEntries((contest?.problems || []).map((p: any, i: number) => [p.id, { ...p, label: String.fromCharCode(65 + i) }])), [contest]);
   
@@ -343,213 +404,228 @@ export default function ContestRoomPage() {
             <p style={{ color: '#67e8f9' }}>{isFinal ? 'Read-only final board' : `Last sync: ${lastSync}`}</p>
           </div>
           <div style={timerCard}>
-            <strong>{isFinal ? 'FINAL' : `${Math.floor(timeLeft / 60)}:${String(timeLeft % 60).padStart(2, '0')}`}</strong>
-            <span>{isFinal ? 'standings' : 'remaining'}</span>
+            <strong>{isFinal ? 'FINAL' : isScheduledLockScreen ? 'WAITING' : `${Math.floor(timeLeft / 60)}:${String(timeLeft % 60).padStart(2, '0')}`}</strong>
+            <span>{isFinal ? 'standings' : isScheduledLockScreen ? 'to start' : 'remaining'}</span>
           </div>
         </div>
 
-        {/* 👉 NEW: Registration Card for users who haven't joined yet */}
-        {!isOwner && !viewerMember && contest.status !== 'ENDED' && (
-          <section style={{ ...panel, marginBottom: 18, border: '1px solid #22d3ee', background: 'rgba(34, 211, 238, 0.05)' }}>
-            <h2 style={{color: '#22d3ee', margin: '0 0 10px 0'}}>Join this Contest</h2>
-            <p style={{color: '#a8b3c7', marginBottom: 16}}>You must register your Codeforces handle to submit solutions and appear on the leaderboard.</p>
-            <div style={{display: 'flex', gap: 12, flexWrap: 'wrap'}}>
-              <input 
-                placeholder="Codeforces Handle (e.g. tourist)" 
-                style={{...smallInput, maxWidth: 250, marginBottom: 0}} 
-                value={registerHandle} 
-                onChange={e => setRegisterHandle(e.target.value)} 
-              />
-              <input 
-                placeholder="Team Name (Leave empty for solo)" 
-                style={{...smallInput, maxWidth: 250, marginBottom: 0}} 
-                value={registerTeam} 
-                onChange={e => setRegisterTeam(e.target.value)} 
-              />
-              <button 
-                onClick={registerForContest} 
-                disabled={isRegistering} 
-                style={{...primaryButton, width: 'auto', marginBottom: 0}}
-              >
-                {isRegistering ? 'Joining...' : 'Register Now'}
-              </button>
-            </div>
+        {/* 👉 ADDED: Lock Screen for Scheduled Contests */}
+        {isScheduledLockScreen ? (
+          <section style={{...panel, textAlign: 'center', padding: '60px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(251,191,36,0.05))'}}>
+             <h2 style={{fontSize: 32, marginBottom: 10, color: '#fbbf24'}}>🔒 Contest has not started yet</h2>
+             <p style={{color: '#a8b3c7', fontSize: 18}}>Problems will be revealed when the countdown reaches zero.</p>
+             <div style={{fontSize: 48, fontWeight: 'bold', color: '#67e8f9', marginTop: 20, fontFamily: 'monospace'}}>
+               {formatCountdown(startTimeMs - nowTick)}
+             </div>
           </section>
-        )}
-
-        <div style={grid}>
-          {isOwner && !isFinal && <section style={panel}>
-            <h2>Owner controls</h2>
-            <a href={`/contests/${contest.id}/edit`} style={primaryButton}>Open editing page</a>
-            <button onClick={() => syncCodeforces(false)} disabled={syncing} style={primaryButton}>{syncing ? 'Syncing...' : 'Sync Codeforces now'}</button>
-            <button onClick={() => extendTime(15)} style={ghostButton}>+15 min</button>
-            <button onClick={() => extendTime(30)} style={ghostButton}>+30 min</button>
-            <button onClick={finalizeContest} style={{...primaryButton, background: 'linear-gradient(135deg, #f59e0b, #fbbf24)', color: '#000'}}>
-              End Contest & Calculate Ratings
-            </button>
-            <button onClick={deleteContest} style={dangerButton}>Delete mashup</button>
-            <h3>Add live problem</h3>
-            <select value={newProblemPlatform} onChange={(e) => setNewProblemPlatform(e.target.value)} style={smallInput}><option>Codeforces</option><option>LeetCode</option><option>AtCoder</option><option>CodeChef</option></select>
-            <input value={newProblemCode} onChange={(e) => setNewProblemCode(e.target.value)} placeholder="1805A" style={smallInput} />
-            <button onClick={addProblem} style={primaryButton}>Add Problem</button>
-            <h2>Players</h2>
-            {(contest.participants || contest.members || []).map((m: any) => (
-              <p key={m.id} style={{ color: '#cbd5e1', marginBottom: '8px', lineHeight: '1.4' }}>
-                {m.user?.name || m.name || m.displayName || 'Unknown Player'}<br/>
-                <span style={{ color: '#67e8f9' }}>
-                  {m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}
-                </span>
-              </p>
-            ))}
-          </section>}
-
-          <section style={isOwner && !isFinal ? panelWide : { ...panelWide, gridColumn: '1 / -1' }}>
-            <h2>Problems</h2>
-            <div style={{ display: 'grid', gap: 12 }}>
-              {contest.problems.map((p: any, index: number) => {
-                const label = String.fromCharCode(65 + index);
-                const actualTitle = p.titleSnapshot || p.problem?.title || `Problem ${label}`;
-                const visibleTitle = canSeeProblemMeta ? actualTitle : `Problem ${label}`;
-                const safeProblemHref = `/submit?contestId=${contest.id}&problemId=${p.id}`; 
-                const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
-
-                return <div key={p.id} style={{
-                  ...problemRow, 
-                  borderColor: isSolvedByTeam ? 'rgba(74, 222, 128, 0.4)' : 'rgba(148,163,184,.16)'
-                }}>
-                  <strong style={{ color: '#67e8f9', fontSize: 22 }}>{label}</strong>
-                  <div>
-                    <a href={safeProblemHref} style={{ color: '#eef2ff', fontWeight: 900, textDecoration: 'none' }}>{visibleTitle}</a>
-                    <p style={{ margin: '6px 0 0', color: '#94a3b8' }}>
-                      {canSeeProblemMeta 
-                        ? `${p.platform} - Rating ${p.problem?.rating || p.rating || p.difficulty || 'Practice'} · ${p.points || 1000} pts` 
-                        : `${p.platform} - rating hidden during contest`}
-                    </p>
-                  </div>
-                  
-                  {isSolvedByTeam && (
-                    <div style={{ display: 'flex', alignItems: 'center', color: '#4ade80', fontWeight: 'bold' }}>
-                      <svg style={{ width: 20, height: 20, marginRight: 4 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
-                      </svg>
-                      Solved
-                    </div>
-                  )}
-
-                  {!isFinal && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <a href={safeProblemHref} style={primaryLink}>
-                      {isSolvedByTeam ? 'Review problem' : 'Open problem'}
-                    </a>
-                    {isOwner && <><button onClick={() => replaceProblem(p.id)} style={ghostButton}>Replace</button><button onClick={() => removeProblem(p.id)} style={ghostButton}>Remove</button></>}
-                  </div>}
-                </div>;
-              })}
-            </div>
-          </section>
-        </div>
-
-        <section style={{ ...panel, marginTop: 18 }}>
-          <h2>Team Standings</h2>
-          <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Rank</th><th style={th}>Group</th><th style={th}>Solved</th><th style={th}>Penalty</th><th style={th}>Score</th></tr></thead><tbody>{teamStandings.map((team: any, i: number) => <Fragment key={team.team}><tr onClick={() => setOpenTeam(openTeam === team.team ? null : team.team)} style={clickRow}><td style={td}>#{i + 1}</td><td style={td}>{team.team}</td><td style={td}>{team.solved}</td><td style={td}>{team.penalty}</td><td style={{...td, color: '#fbbf24', fontWeight: 'bold'}}>{team.score}</td></tr>{openTeam === team.team && team.players.map((player: any, pi: number) => <tr key={player.memberId} onClick={() => canInspectMember(player.memberId) && setSelectedMember(player)} style={canInspectMember(player.memberId) ? subRow : mutedRow}><td style={td}>#{pi + 1}</td><td style={td}>{player.name}</td><td style={td}>{player.solved}</td><td style={td}>{player.penalty}</td><td style={td}>{player.score}</td></tr>)}</Fragment>)}</tbody></table></div>
-        </section>
-        
-        <section style={{ ...panel, marginTop: 18 }}>
-          <h2>{isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}</h2>
-          {submissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
-          <div style={{ overflowX: 'auto' }}>
-            <table style={table}>
-              <thead>
-                <tr>
-                  <th style={th}>Time</th>
-                  <th style={th}>User</th>
-                  <th style={th}>Problem</th>
-                  <th style={th}>Verdict</th>
-                  <th style={th}>Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {submissions.map((submission) => (
-                  <tr key={submission.id} style={clickRow}>
-                    <td style={td}>{new Date(submission.createdAt).toLocaleString()}</td>
-                    <td style={td}>{submission.userId}</td>
-                    <td style={td}>
-                      {problemById[submission.problemId]?.label || ''} 
-                      {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot : ''}
-                    </td>
-                    <td style={{...td, color: submission.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>
-                      {submission.verdict}
-                    </td>
-                    <td style={td}>
-                      <button 
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setSelectedSubmission(submission); 
-                        }} 
-                        style={ghostButton}
-                      >
-                        View Details
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        {selectedSubmission && <section style={{ ...panel, marginTop: 18 }}>
-          <h2>Submission detail</h2>
-          <button onClick={() => setSelectedSubmission(null)} style={ghostButton}>Close Panel</button>
-          <div style={detailCard}>
-            <p><b>User:</b> {selectedSubmission.userId}</p>
-            <p><b>Problem:</b> {canSeeProblemMeta ? problemById[selectedSubmission.problemId]?.titleSnapshot || selectedSubmission.problemId : problemById[selectedSubmission.problemId]?.label || selectedSubmission.problemId}</p>
-            <p><b>Verdict:</b> {selectedSubmission.verdict}</p>
-            <p><b>Language:</b> {selectedSubmission.language || 'Unknown'}</p>
-            
-            {selectedSubmission.code && (
-              <div style={{marginTop: 12}}>
-                <strong style={{color: '#cbd5e1'}}>Source Code:</strong>
-                <pre style={{background: '#020617', padding: 12, borderRadius: 8, maxHeight: 300, overflow: 'auto', marginTop: 8, color: '#e2e8f0', fontFamily: 'monospace'}}>
-                  {selectedSubmission.code}
-                </pre>
-              </div>
-            )}
-            
-            {selectedSubmission.manualPoints !== null && selectedSubmission.manualPoints !== undefined && (
-              <p style={{ color: '#fbbf24', marginTop: 10 }}><b>Manual Override Points:</b> {selectedSubmission.manualPoints}</p>
-            )}
-            
-            {isOwner && selectedSubmission.externalSubmissionId && <a href={`https://codeforces.com/contest/${problemById[selectedSubmission.problemId]?.contestCode}/submission/${selectedSubmission.externalSubmissionId}`} target="_blank" rel="noreferrer" style={{...primaryLink, marginTop: 10}}>Open Codeforces submission</a>}
-            
-            {isFinal && !isOwner && selectedSubmission.userId !== (session?.user?.name || session?.user?.email) && (
-              <div style={{ marginTop: 16, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 16 }}>
-                <h4 style={{ margin: '0 0 8px 0', color: '#f87171' }}>Report Discrepancy</h4>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input style={{...smallInput, marginBottom: 0}} placeholder="Suspected AI, Hardcoded, etc." value={reportReason} onChange={e => setReportReason(e.target.value)} />
-                  <button style={{...ghostButton, borderColor: 'rgba(248,113,113,.4)', color: '#fecaca', marginBottom: 0}} onClick={submitReport}>Report</button>
+        ) : (
+          <>
+            {/* The rest of the workspace is hidden behind the lock screen until the start time */}
+            {!isOwner && !viewerMember && contest.status !== 'ENDED' && (
+              <section style={{ ...panel, marginBottom: 18, border: '1px solid #22d3ee', background: 'rgba(34, 211, 238, 0.05)' }}>
+                <h2 style={{color: '#22d3ee', margin: '0 0 10px 0'}}>Join this Contest</h2>
+                <p style={{color: '#a8b3c7', marginBottom: 16}}>You must register your Codeforces handle to submit solutions and appear on the leaderboard.</p>
+                <div style={{display: 'flex', gap: 12, flexWrap: 'wrap'}}>
+                  <input placeholder="Codeforces Handle (e.g. tourist)" style={{...smallInput, maxWidth: 250, marginBottom: 0}} value={registerHandle} onChange={e => setRegisterHandle(e.target.value)} />
+                  <input placeholder="Team Name (Leave empty for solo)" style={{...smallInput, maxWidth: 250, marginBottom: 0}} value={registerTeam} onChange={e => setRegisterTeam(e.target.value)} />
+                  <button onClick={registerForContest} disabled={isRegistering} style={{...primaryButton, width: 'auto', marginBottom: 0}}>
+                    {isRegistering ? 'Joining...' : 'Register Now'}
+                  </button>
                 </div>
-              </div>
+              </section>
             )}
 
-            {isOwner && (
-              <div style={{ marginTop: 16, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 16 }}>
-                <h4 style={{ margin: '0 0 8px 0', color: '#fbbf24' }}>Owner Controls</h4>
+            {/* 👉 ADDED: Unregister mid-contest visibility */}
+            {canUnregister && (
+              <section style={{ ...panel, marginBottom: 18, padding: 16 }}>
+                <p style={{ color: '#94a3b8', display: 'inline-block', marginRight: 15 }}>Not ready? You can unregister before half-time.</p>
+                <button onClick={unregisterFromContest} style={{...dangerButton, width: 'auto', marginBottom: 0}}>Unregister from Contest</button>
+              </section>
+            )}
+
+            <div style={grid}>
+              {isOwner && !isFinal && <section style={panel}>
+                <h2>Owner controls</h2>
+                <a href={`/contests/${contest.id}/edit`} style={primaryButton}>Open editing page</a>
+                <button onClick={() => syncCodeforces(false)} disabled={syncing} style={primaryButton}>{syncing ? 'Syncing...' : 'Sync Codeforces now'}</button>
+                <button onClick={() => extendTime(15)} style={ghostButton}>+15 min</button>
+                <button onClick={() => extendTime(30)} style={ghostButton}>+30 min</button>
+                <button onClick={finalizeContest} style={{...primaryButton, background: 'linear-gradient(135deg, #f59e0b, #fbbf24)', color: '#000'}}>
+                  End Contest & Calculate Ratings
+                </button>
+                <button onClick={deleteContest} style={dangerButton}>Delete mashup</button>
+                <h3>Add live problem</h3>
+                <select value={newProblemPlatform} onChange={(e) => setNewProblemPlatform(e.target.value)} style={smallInput}><option>Codeforces</option><option>LeetCode</option><option>AtCoder</option><option>CodeChef</option></select>
+                <input value={newProblemCode} onChange={(e) => setNewProblemCode(e.target.value)} placeholder="1805A" style={smallInput} />
+                <button onClick={addProblem} style={primaryButton}>Add Problem</button>
+                <h2>Players</h2>
+                {(contest.participants || contest.members || []).map((m: any) => (
+                  <p key={m.id} style={{ color: '#cbd5e1', marginBottom: '8px', lineHeight: '1.4' }}>
+                    {m.user?.name || m.name || m.displayName || 'Unknown Player'}<br/>
+                    <span style={{ color: '#67e8f9' }}>
+                      {m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}
+                    </span>
+                  </p>
+                ))}
+              </section>}
+
+              <section style={isOwner && !isFinal ? panelWide : { ...panelWide, gridColumn: '1 / -1' }}>
+                <h2>Problems</h2>
+                <div style={{ display: 'grid', gap: 12 }}>
+                  {contest.problems.map((p: any, index: number) => {
+                    const label = String.fromCharCode(65 + index);
+                    const actualTitle = p.titleSnapshot || p.problem?.title || `Problem ${label}`;
+                    const visibleTitle = canSeeProblemMeta ? actualTitle : `Problem ${label}`;
+                    const safeProblemHref = `/contests/${contest.id}/problems/${p.id}`; 
+                    const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
+
+                    return <div key={p.id} style={{
+                      ...problemRow, 
+                      borderColor: isSolvedByTeam ? 'rgba(74, 222, 128, 0.4)' : 'rgba(148,163,184,.16)'
+                    }}>
+                      <strong style={{ color: '#67e8f9', fontSize: 22 }}>{label}</strong>
+                      <div>
+                        <a href={safeProblemHref} style={{ color: '#eef2ff', fontWeight: 900, textDecoration: 'none' }}>{visibleTitle}</a>
+                        <p style={{ margin: '6px 0 0', color: '#94a3b8' }}>
+                          {canSeeProblemMeta 
+                            ? `${p.platform} - Rating ${p.problem?.rating || p.rating || p.difficulty || 'Practice'} · ${p.points || 1000} pts` 
+                            : `${p.platform} - rating hidden during contest`}
+                        </p>
+                      </div>
+                      
+                      {isSolvedByTeam && (
+                        <div style={{ display: 'flex', alignItems: 'center', color: '#4ade80', fontWeight: 'bold' }}>
+                          <svg style={{ width: 20, height: 20, marginRight: 4 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                          </svg>
+                          Solved
+                        </div>
+                      )}
+
+                      {!isFinal && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <a href={safeProblemHref} style={primaryLink}>
+                          {isSolvedByTeam ? 'Review problem' : 'Open problem'}
+                        </a>
+                       {isOwner && (
+  <>
+    <button onClick={() => generateAITestcases(p.problemId || p.id)} disabled={generatingTcFor === (p.problemId || p.id)} style={{...ghostButton, color: '#a5b4fc', borderColor: 'rgba(99, 102, 241, 0.4)'}}>
+      {generatingTcFor === (p.problemId || p.id) ? 'Generating...' : '🤖 Generate Hidden Test Cases'}
+    </button>
+    <button onClick={() => replaceProblem(p.id)} style={ghostButton}>Replace</button>
+    <button onClick={() => removeProblem(p.id)} style={ghostButton}>Remove</button>
+  </>
+)}
+                      </div>}
+                    </div>;
+                  })}
+                </div>
+              </section>
+            </div>
+
+            <section style={{ ...panel, marginTop: 18 }}>
+              <h2>Team Standings</h2>
+              <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Rank</th><th style={th}>Group</th><th style={th}>Solved</th><th style={th}>Penalty</th><th style={th}>Score</th></tr></thead><tbody>{teamStandings.map((team: any, i: number) => <Fragment key={team.team}><tr onClick={() => setOpenTeam(openTeam === team.team ? null : team.team)} style={clickRow}><td style={td}>#{i + 1}</td><td style={td}>{team.team}</td><td style={td}>{team.solved}</td><td style={td}>{team.penalty}</td><td style={{...td, color: '#fbbf24', fontWeight: 'bold'}}>{team.score}</td></tr>{openTeam === team.team && team.players.map((player: any, pi: number) => <tr key={player.memberId} onClick={() => canInspectMember(player.memberId) && setSelectedMember(player)} style={canInspectMember(player.memberId) ? subRow : mutedRow}><td style={td}>#{pi + 1}</td><td style={td}>{player.name}</td><td style={td}>{player.solved}</td><td style={td}>{player.penalty}</td><td style={td}>{player.score}</td></tr>)}</Fragment>)}</tbody></table></div>
+            </section>
+            
+            <section style={{ ...panel, marginTop: 18 }}>
+              <h2>{isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}</h2>
+              {submissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
+              <div style={{ overflowX: 'auto' }}>
+                <table style={table}>
+                  <thead>
+                    <tr>
+                      <th style={th}>Time</th>
+                      <th style={th}>User</th>
+                      <th style={th}>Problem</th>
+                      <th style={th}>Verdict</th>
+                      <th style={th}>Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {submissions.map((submission) => (
+                      <tr key={submission.id} style={clickRow}>
+                        <td style={td}>{new Date(submission.createdAt).toLocaleString()}</td>
+                        <td style={td}>{submission.userId}</td>
+                        <td style={td}>
+                          {problemById[submission.problemId]?.label || ''} 
+                          {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot : ''}
+                        </td>
+                        <td style={{...td, color: submission.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>
+                          {submission.verdict}
+                        </td>
+                        <td style={td}>
+                          <button 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              setSelectedSubmission(submission); 
+                            }} 
+                            style={ghostButton}
+                          >
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            {selectedSubmission && <section style={{ ...panel, marginTop: 18 }}>
+              <h2>Submission detail</h2>
+              <button onClick={() => setSelectedSubmission(null)} style={ghostButton}>Close Panel</button>
+              <div style={detailCard}>
+                <p><b>User:</b> {selectedSubmission.userId}</p>
+                <p><b>Problem:</b> {canSeeProblemMeta ? problemById[selectedSubmission.problemId]?.titleSnapshot || selectedSubmission.problemId : problemById[selectedSubmission.problemId]?.label || selectedSubmission.problemId}</p>
+                <p><b>Verdict:</b> {selectedSubmission.verdict}</p>
+                <p><b>Language:</b> {selectedSubmission.language || 'Unknown'}</p>
                 
-                {selectedSubmission.reports?.length > 0 && (
-                  <div style={{ marginBottom: 12, padding: 12, background: 'rgba(248,113,113,.1)', borderRadius: 8, border: '1px solid rgba(248,113,113,.3)' }}>
-                    <strong style={{ color: '#f87171', display: 'block', marginBottom: 6 }}>Flagged by peers:</strong>
-                    {selectedSubmission.reports.map((r: any) => <p key={r.id} style={{ margin: '4px 0', fontSize: 13, color: '#fecaca' }}>- {r.reason}</p>)}
+                {selectedSubmission.code && (
+                  <div style={{marginTop: 12}}>
+                    <strong style={{color: '#cbd5e1'}}>Source Code:</strong>
+                    <pre style={{background: '#020617', padding: 12, borderRadius: 8, maxHeight: 300, overflow: 'auto', marginTop: 8, color: '#e2e8f0', fontFamily: 'monospace'}}>
+                      {selectedSubmission.code}
+                    </pre>
+                  </div>
+                )}
+                
+                {selectedSubmission.manualPoints !== null && selectedSubmission.manualPoints !== undefined && (
+                  <p style={{ color: '#fbbf24', marginTop: 10 }}><b>Manual Override Points:</b> {selectedSubmission.manualPoints}</p>
+                )}
+                
+                {isOwner && selectedSubmission.externalSubmissionId && <a href={`https://codeforces.com/contest/${problemById[selectedSubmission.problemId]?.contestCode}/submission/${selectedSubmission.externalSubmissionId}`} target="_blank" rel="noreferrer" style={{...primaryLink, marginTop: 10}}>Open Codeforces submission</a>}
+                
+                {isFinal && !isOwner && selectedSubmission.userId !== (session?.user?.name || session?.user?.email) && (
+                  <div style={{ marginTop: 16, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 16 }}>
+                    <h4 style={{ margin: '0 0 8px 0', color: '#f87171' }}>Report Discrepancy</h4>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input style={{...smallInput, marginBottom: 0}} placeholder="Suspected AI, Hardcoded, etc." value={reportReason} onChange={e => setReportReason(e.target.value)} />
+                      <button style={{...ghostButton, borderColor: 'rgba(248,113,113,.4)', color: '#fecaca', marginBottom: 0}} onClick={submitReport}>Report</button>
+                    </div>
                   </div>
                 )}
 
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input style={{...smallInput, width: '120px', marginBottom: 0}} type="number" placeholder="New Points" value={overridePoints} onChange={e => setOverridePoints(e.target.value === '' ? '' : Number(e.target.value))} />
-                  <button style={{...primaryButton, marginBottom: 0, width: 'auto'}} onClick={submitOverride}>Override Points</button>
-                </div>
+                {isOwner && (
+                  <div style={{ marginTop: 16, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 16 }}>
+                    <h4 style={{ margin: '0 0 8px 0', color: '#fbbf24' }}>Owner Controls</h4>
+                    
+                    {selectedSubmission.reports?.length > 0 && (
+                      <div style={{ marginBottom: 12, padding: 12, background: 'rgba(248,113,113,.1)', borderRadius: 8, border: '1px solid rgba(248,113,113,.3)' }}>
+                        <strong style={{ color: '#f87171', display: 'block', marginBottom: 6 }}>Flagged by peers:</strong>
+                        {selectedSubmission.reports.map((r: any) => <p key={r.id} style={{ margin: '4px 0', fontSize: 13, color: '#fecaca' }}>- {r.reason}</p>)}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input style={{...smallInput, width: '120px', marginBottom: 0}} type="number" placeholder="New Points" value={overridePoints} onChange={e => setOverridePoints(e.target.value === '' ? '' : Number(e.target.value))} />
+                      <button style={{...primaryButton, marginBottom: 0, width: 'auto'}} onClick={submitOverride}>Override Points</button>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </section>}
+            </section>}
+          </>
+        )}
       </section>
     </main>
   );

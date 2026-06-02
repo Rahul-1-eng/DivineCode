@@ -10,13 +10,12 @@ export default function ContestsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [mounted, setMounted] = useState(false);
-  const [nowTick, setNowTick] = useState(Date.now()); // State to force countdown re-renders
+  const [nowTick, setNowTick] = useState(Date.now()); 
 
   useEffect(() => {
     setMounted(true);
     loadContests(); 
     
-    // Update the local time state every second for live countdowns
     const ticker = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(ticker);
   }, []);
@@ -26,9 +25,7 @@ export default function ContestsPage() {
       setLoading(true);
       setError('');
       const res = await fetch(`${API_V2_BASE_URL}/contests`); 
-      
       if (!res.ok) throw new Error('Failed to fetch contests from server');
-
       const data = await res.json(); 
       setContests(Array.isArray(data) ? data : []); 
     } catch (err: any) {
@@ -65,7 +62,6 @@ export default function ContestsPage() {
     }
   }
 
-  // Format the remaining time beautifully like "02d 14h 30m 15s"
   function formatCountdown(ms: number) {
     if (ms <= 0) return 'Starting...';
     const s = Math.floor((ms / 1000) % 60);
@@ -87,12 +83,10 @@ export default function ContestsPage() {
   const userLabel = session?.user?.name || userEmail;
   const now = Date.now(); 
 
-  // 👉 ADDED: Filter out the upcoming contests that haven't started yet
   const upcomingContests = contests
     .filter(c => new Date(c.startTime).getTime() > now)
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
     
-  // Filter for live and completed contests to display in the main grid
   const pastAndLiveContests = contests.filter(c => new Date(c.startTime).getTime() <= now);
 
   return (
@@ -114,7 +108,6 @@ export default function ContestsPage() {
           <p style={{ color: '#a8b3c7', maxWidth: 720, lineHeight: 1.6, fontSize: 'clamp(14px, 3vw, 16px)' }}>Create mashups, invite coders, submit from account, and track standings like a real competitive programming arena.</p>
         </div>
 
-        {/* 👉 ADDED: The Upcoming Contest Notification Banner */}
         {upcomingContests.length > 0 && (
           <div style={notificationBanner}>
             <h3 style={{ margin: '0 0 12px 0', color: '#fbbf24', textTransform: 'uppercase', letterSpacing: 1.5, fontSize: 13 }}>Upcoming Contests</h3>
@@ -126,7 +119,8 @@ export default function ContestsPage() {
                 return (
                   <a key={contest.id} href={`/contests/${contest.id}`} style={notificationRow}>
                     <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-                      <strong style={{ fontSize: 16, color: '#eef2ff' }}>{contest.title}</strong>
+                      {/* 👉 ADDED: The 📅 Schedule icon */}
+                      <strong style={{ fontSize: 16, color: '#eef2ff' }}>📅 {contest.title}</strong>
                       <span style={{ fontSize: 13, color: '#94a3b8' }}>Starts at {new Date(contest.startTime).toLocaleString()}</span>
                     </div>
                     <div style={countdownPill}>
@@ -206,7 +200,6 @@ const tagCompleted: CSSProperties = { ...tagLive, background: '#475569', color: 
 const stats: CSSProperties = { display: 'flex', gap: 10, flexWrap: 'wrap', color: '#cbd5e1', marginTop: 'auto', fontSize: 13 };
 const deleteBtn: CSSProperties = { position: 'absolute', top: 20, right: 20, background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 'bold', cursor: 'pointer', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.3)' };
 
-// Notification CSS
 const notificationBanner: CSSProperties = { padding: 20, borderRadius: 20, border: '1px solid rgba(251,191,36,.3)', background: 'linear-gradient(180deg,rgba(15,23,42,.9),rgba(251,191,36,.05))', marginBottom: 24, boxSizing: 'border-box' };
 const notificationRow: CSSProperties = { textDecoration: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, padding: 16, borderRadius: 12, background: 'rgba(2,6,23,.5)', border: '1px solid rgba(148,163,184,.15)', transition: 'background 0.2s' };
 const countdownPill: CSSProperties = { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', background: 'rgba(251,191,36,.1)', color: '#fbbf24', padding: '8px 14px', borderRadius: 8, border: '1px solid rgba(251,191,36,.2)' };

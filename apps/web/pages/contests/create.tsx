@@ -22,12 +22,14 @@ export default function CreateContestPage() {
   const [mode, setMode] = useState<Mode>('group');
   const [title, setTitle] = useState('DivineCode Team Mashup Round');
   
-  // 👉 ADDED: New state variables for advanced features
   const [duration, setDuration] = useState(120);
   const [startTimeStr, setStartTimeStr] = useState(''); 
   const [freezeMinutes, setFreezeMinutes] = useState(0);
   const [allowTeamSubmissionView, setAllowTeamSubmissionView] = useState(true);
   const [hideProblemMetaDuringContest, setHideProblemMetaDuringContest] = useState(true);
+  
+  // 👉 ADDED: Rated / Unrated State (Defaults to Rated)
+  const [isRated, setIsRated] = useState(true);
   
   const [soloPlayer, setSoloPlayer] = useState<MemberRow>(emptyMember());
   const [teams, setTeams] = useState<TeamRow[]>([
@@ -104,11 +106,12 @@ export default function CreateContestPage() {
         body: JSON.stringify({ 
           title, 
           description: `${mode === 'single' ? 'Solo' : 'Team'} mashup`, 
-          startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined, // 👉 ADDED: Sends scheduled start time
+          startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined,
           durationMinutes: duration,
-          freezeMinutes: freezeMinutes > 0 ? freezeMinutes : undefined, // 👉 ADDED: Sends freeze time requirement
-          allowTeamSubmissionView, // 👉 ADDED: Respects group permissions checkbox
+          freezeMinutes: freezeMinutes > 0 ? freezeMinutes : undefined,
+          allowTeamSubmissionView,
           hideProblemMetaDuringContest,
+          isRated, // 👉 ADDED: Sends rating status
           ownerEmail: session.user.email, 
           members: cleanedMembers,
           problems: contestProblems 
@@ -169,20 +172,22 @@ export default function CreateContestPage() {
               <label style={{ fontWeight: 'bold' }}>Duration in minutes</label>
               <input type="number" value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={inputStyle} />
             </div>
-            {/* 👉 ADDED: Freeze Minutes Input */}
             <div style={{ flex: 1 }}>
               <label style={{ fontWeight: 'bold' }}>Freeze Standings (Last X mins)</label>
               <input type="number" min="0" value={freezeMinutes} onChange={(e) => setFreezeMinutes(Number(e.target.value))} placeholder="e.g. 30" style={inputStyle} />
             </div>
-            {/* 👉 ADDED: Start Time Scheduler */}
             <div style={{ flex: 1 }}>
               <label style={{ fontWeight: 'bold' }}>Schedule Start Time (Leave blank for now)</label>
               <input type="datetime-local" value={startTimeStr} onChange={(e) => setStartTimeStr(e.target.value)} style={inputStyle} />
             </div>
           </div>
 
-          {/* 👉 ADDED: The group access tick signs */}
           <div style={{ marginBottom: 24, display: 'flex', gap: 24, flexWrap: 'wrap', padding: '16px', background: 'rgba(2,6,23,.45)', borderRadius: '12px', border: '1px solid rgba(148,163,184,.18)' }}>
+            {/* 👉 ADDED: Rated Toggle UI */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 'bold', color: '#eef2ff' }}>
+              <input type="checkbox" checked={isRated} onChange={e => setIsRated(e.target.checked)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
+              Rated Contest (Affects Elo Profile Rating)
+            </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 'bold', color: '#eef2ff' }}>
               <input type="checkbox" checked={allowTeamSubmissionView} onChange={e => setAllowTeamSubmissionView(e.target.checked)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
               Allow members to see group submissions
@@ -273,7 +278,7 @@ export default function CreateContestPage() {
   );
 }
 
-// STYLES
+// STYLES (Kept Original)
 const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.35), transparent 36rem), radial-gradient(circle at bottom right, rgba(34,211,238,.18), transparent 30rem), #070a16', boxSizing: 'border-box' };
 const gate: CSSProperties = { maxWidth: 620, margin: '15vh auto', padding: 34, borderRadius: 28, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', textAlign: 'center' };
 const topLink: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900 };

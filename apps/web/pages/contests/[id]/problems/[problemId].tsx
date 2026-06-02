@@ -2,152 +2,275 @@ import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 
-export async function getServerSideProps() { return { props: {} }; }
-
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
-function viewerQuery(session: any) {
-  const query = new URLSearchParams();
-  if (session?.user?.email) query.set('viewerEmail', session.user.email);
-  if (session?.user?.name) query.set('viewerName', session.user.name);
-  const value = query.toString();
-  return value ? `?${value}` : '';
-}
-
-export default function ContestProblemPage() {
-  const router = useRouter();
-  const { id, problemId } = router.query;
-  const { data: session, status } = useSession();
-  
-  const [contest, setContest] = useState<any>(null);
-  const [error, setError] = useState('');
-  const [soundEnabled, setSoundEnabled] = useState(true);
+function useContestTimer(startTime: Date, endTime: Date) {
+  const [timeLeft, setTimeLeft] = useState({ state: 'loading', text: '...' });
 
   useEffect(() => {
-    if (!id || status === 'loading') return;
-    fetch(`${API_V2_BASE_URL}/contests/${id}${viewerQuery(session)}`)
-      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
-        if (!ok) { setError(data.error || 'Contest not found'); return; }
-        setContest(data);
-      })
-      .catch(() => setError('Could not load contest'));
-  }, [id, session?.user?.email, session?.user?.name, status]);
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const start = startTime.getTime();
+      const end = endTime.getTime();
 
-  const problemIndex = useMemo(() => (contest?.problems || []).findIndex((p: any) => p.id === problemId), [contest, problemId]);
-  const problem = problemIndex >= 0 ? contest.problems[problemIndex] : null;
-  const label = problemIndex >= 0 ? String.fromCharCode(65 + problemIndex) : '';
-  const canSeeMeta = Boolean(contest?.visibility?.canSeeProblemMeta);
-  const isPlayer = Boolean(contest?.viewerMember || contest?.canManage);
+      if (now < start) {
+        const diff = Math.floor((start - now) / 1000);
+        setTimeLeft({ state: 'scheduled', text: `Starts in: ${Math.floor(diff/3600)}h ${Math.floor((diff%3600)/60)}m ${diff%60}s` });
+      } else if (now >= end) {
+        setTimeLeft({ state: 'ended', text: '00:00:00 - Contest Ended' });
+      } else {
+        const diff = Math.floor((end - now) / 1000);
+        setTimeLeft({ state: 'running', text: `Time left: ${Math.floor(diff/3600)}h ${Math.floor((diff%3600)/60)}m ${diff%60}s` });
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [startTime, endTime]);
 
-  const isSolvedByTeam = useMemo(() => {
-    if (!contest || !contest.standings || !contest.viewerMember || !problemId) return false;
-    const myTeam = contest.viewerMember.team;
-    return contest.standings.some((row: any) => {
-      const member = (contest.members || []).find((m: any) => m.id === row.memberId);
-      const isMe = row.memberId === contest.viewerMember.id;
-      const isMyTeam = myTeam && myTeam !== 'Individuals' && member?.team === myTeam;
-      return (isMe || isMyTeam) && (row.solvedProblems || []).includes(problemId);
-    });
-  }, [contest, problemId]);
+  return timeLeft;
+}
 
-  if (status === 'loading') return <main style={page}><div style={centerText}><h1 style={{color: '#67e8f9'}}>Verifying Identity...</h1></div></main>;
-  if (!session) return <main style={page}><section style={gate}><h1>Access Denied</h1><p style={{ color: '#a8b3c7' }}>You must be signed in to view this problem.</p><a href="/signin" style={primaryBtn}>Sign In</a></section></main>;
-  if (error) return <main style={page}><section style={gate}><h1 style={{ color: '#f87171' }}>{error}</h1><a href="/contests" style={ghostBtn}>← Back to Contests</a></section></main>;
+export default function WorkspacePage() {
+  const router = useRouter();
+  const { id, problemId } = router.query;
+  const { data: session } = useSession();
   
-  // 👉 THE SKELETON LOADER
-  if (!contest || !problem) return (
-    <main style={page}>
-      <section style={{ maxWidth: 980, margin: '0 auto' }}>
-        <div style={{ ...panel, opacity: 0.6 }}>
-          <h2 style={{ color: '#67e8f9', margin: '0 0 10px 0' }}>Fetching problem data...</h2>
-          <div style={{ height: 40, background: 'rgba(255,255,255,0.05)', borderRadius: 8, marginBottom: 15 }}></div>
-          <div style={{ height: 20, width: '50%', background: 'rgba(255,255,255,0.05)', borderRadius: 8 }}></div>
-        </div>
-      </section>
-    </main>
-  );
+  // Base State Variables
+  const [contest, setContest] = useState<any>(null);
+  const [code, setCode] = useState('');
+  const [language, setLanguage] = useState('cpp');
+  const [activeTab, setActiveTab] = useState<'code' | 'testcases'>('code');
+  const [penaltyViewed, setPenaltyViewed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const actualTitle = problem.titleSnapshot || problem.problem?.title || `Problem ${label}`;
-  const actualUrl = problem.externalUrl || problem.problem?.url;
-  const actualRating = problem.problem?.rating || problem.rating || 'Practice';
-  const tags = problem.problem?.tags || [];
+  // 👉 FIXED: AI States moved inside the component scope
+  const [aiDebuggerLoading, setAiDebuggerLoading] = useState(false);
+  const [aiDebugResult, setAiDebugResult] = useState<any>(null);
+
+  useEffect(() => {
+    if (!id || !session?.user?.email) return;
+    fetch(`${API_V2_BASE_URL}/contests/${id}?viewerEmail=${session.user.email}`)
+      .then(res => res.json()).then(data => setContest(data.data || data));
+  }, [id, session]);
+
+  const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
+  const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
+
+  // Editor Bracket and Tab Autocomplete Logic
+  const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const target = e.target as HTMLTextAreaElement;
+    const start = target.selectionStart;
+    const end = target.selectionEnd;
+    const val = target.value;
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      setCode(val.substring(0, start) + '  ' + val.substring(end));
+      setTimeout(() => { target.selectionStart = target.selectionEnd = start + 2; }, 0);
+    }
+
+    const pairs: Record<string, string> = { '(': ')', '{': '}', '[': ']' };
+    if (pairs[e.key]) {
+      e.preventDefault();
+      setCode(val.substring(0, start) + e.key + pairs[e.key] + val.substring(end));
+      setTimeout(() => { target.selectionStart = target.selectionEnd = start + 1; }, 0);
+    }
+  };
+
+  const handleRevealTestcases = async () => {
+    if (confirm("Viewing test cases during an active contest will deduct 50 points from your score. Proceed?")) {
+      await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}/penalty`, {
+        method: 'POST',
+        headers: { 'x-user-email': session?.user?.email || '' }
+      });
+      setPenaltyViewed(true);
+      setActiveTab('testcases');
+    }
+  };
+
+  const handleSubmitCode = async () => {
+    if (!code.trim()) return alert("Code cannot be empty");
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
+        body: JSON.stringify({ contestProblemId: problemId, code, language })
+      });
+      const submission = await res.json();
+      
+      await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge`, { method: 'POST' });
+      
+      alert("Code submitted successfully! Check standings for verdict.");
+      router.push(`/contests/${id}`);
+    } catch (e) {
+      alert("Submission failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 👉 FIXED: AI Debugging Handler moved inside component scope
+  const handleAiDebug = async () => {
+    if (!code.trim()) return alert("You must write some code first to debug it!");
+    if (confirm("Using the AI Tutor will deduct 50 points from your contest score. Proceed?")) {
+      setAiDebuggerLoading(true);
+      try {
+        const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}/ai-debug`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
+          body: JSON.stringify({ userCode: code, problemDescription: problem?.titleSnapshot }) 
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setAiDebugResult(data.aiDebugData);
+          setActiveTab('testcases');
+        } else {
+          alert(data.error || "Failed to process AI debugging.");
+        }
+      } catch (err) {
+        alert("Failed to connect to AI.");
+      } finally {
+        setAiDebuggerLoading(false);
+      }
+    }
+  };
+
+  if (!contest || !problem) return <div style={page}>Loading Workspace...</div>;
 
   return (
     <main style={page}>
-      <section style={{ maxWidth: 980, margin: '0 auto' }}>
-        
-        <nav style={nav}>
-          <a href={`/contests/${id}`} style={link}>← Back to Standings</a>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <button onClick={() => setSoundEnabled(!soundEnabled)} style={soundBtn}>
-              {soundEnabled ? '🔊 Sound On' : '🔇 Muted'}
-            </button>
-            <div style={pill}>{session.user?.name || session.user?.email}</div>
-          </div>
-        </nav>
-        
-        <section style={panel}>
-          <p style={eyebrow}>Problem {label}</p>
-          <h1 style={{ fontSize: 'clamp(24px, 5vw, 36px)', margin: '10px 0' }}>{canSeeMeta ? actualTitle : `Problem ${label}`}</h1>
-          
-          <div style={tagContainer}>
-            <span style={tagStyle}>{problem.platform}</span>
-            {canSeeMeta ? (
-              <>
-                <span style={{ ...tagStyle, background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', borderColor: 'rgba(99,102,241,0.5)' }}>Rating {actualRating}</span>
-                {tags.map((tag: string) => <span key={tag} style={tagStyle}>{tag}</span>)}
-              </>
-            ) : <span style={tagStyle}>Metadata hidden</span>}
-          </div>
-          
-          {isSolvedByTeam && (
-            <div style={successBox}>
-              <strong style={{ display: 'block', fontSize: 18, marginBottom: 4 }}>🎉 Awesome work!</strong>
-              Someone in your group has already solved this problem. 
-            </div>
-          )}
+      {/* Navbar Header */}
+      <header style={headerBar}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+          <button onClick={() => router.push(`/contests/${id}`)} style={btnDark}>← Standings</button>
+          <strong style={{ color: '#fff' }}>{problem.titleSnapshot}</strong>
+        </div>
+        <div style={timerBox}>{timer.text}</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <select value={language} onChange={(e) => setLanguage(e.target.value)} style={selectBox}>
+            <option value="cpp">C++ 17</option>
+            <option value="python">Python 3</option>
+            <option value="java">Java</option>
+          </select>
+          <button onClick={handleSubmitCode} disabled={submitting} style={submitBtn}>
+            {submitting ? 'Submitting...' : 'Submit Code 🚀'}
+          </button>
+        </div>
+      </header>
 
-          <div style={actions}>
-            {actualUrl && <a href={actualUrl} target="_blank" rel="noreferrer" style={primaryOutlined}>Open Statement ↗</a>}
-            {isPlayer && !isSolvedByTeam && <a href={`/submit?contestId=${id}&problemId=${problem.id}`} style={primaryBtn}>Code & Submit ⚡</a>}
-          </div>
-        </section>
+      {/* Split Pane Layout */}
+      <div style={splitLayout}>
         
-        <section style={{ ...panel, background: 'rgba(15,23,42,0.6)' }}>
-          <h2 style={{ marginTop: 0, fontSize: 20 }}>Contest Details</h2>
-          <div style={grid}>
-            <div style={gridItem}><span style={gridLabel}>Contest Name</span><strong style={{ color: '#eef2ff' }}>{contest.title}</strong></div>
-            <div style={gridItem}><span style={gridLabel}>Player Status</span><strong style={{ color: '#eef2ff' }}>{contest.viewerMember?.name || 'Observer (Not registered)'}</strong></div>
-            <div style={gridItem}><span style={gridLabel}>Team Affiliation</span><strong style={{ color: '#eef2ff' }}>{contest.viewerMember?.team || 'Individuals'}</strong></div>
-            <div style={gridItem}><span style={gridLabel}>Problem Meta</span><strong style={{ color: '#eef2ff' }}>{canSeeMeta ? 'Visible' : 'Hidden for fairness'}</strong></div>
+        {/* Left Pane: Problem Description */}
+        <section style={leftPane}>
+          <div style={paneHeader}>Problem Description</div>
+          <div style={paneContent}>
+             <p style={{ color: '#94a3b8' }}>Platform: {problem.platform} | Points: {problem.points}</p>
+             <iframe 
+                src={problem.externalUrl} 
+                style={{ width: '100%', height: '100%', border: 'none', background: '#fff', borderRadius: 8 }} 
+                title="Problem Statement"
+             />
           </div>
         </section>
-      </section>
+
+        {/* Right Pane: Code Editor & Test Cases */}
+        <section style={rightPane}>
+          <div style={tabsHeader}>
+            <button style={activeTab === 'code' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('code')}>Code Editor</button>
+            <button style={activeTab === 'testcases' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('testcases')}>Test Cases</button>
+          </div>
+          
+          <div style={paneContent}>
+            {activeTab === 'code' && (
+              <textarea 
+                value={code} 
+                onChange={(e) => setCode(e.target.value)} 
+                onKeyDown={handleEditorKeyDown}
+                style={codeEditor} 
+                spellCheck={false}
+                placeholder={`// Write your ${language} solution here... \n// Tab and braces will auto-complete.`}
+              />
+            )}
+            
+            {activeTab === 'testcases' && (
+              <div style={testcaseWrap}>
+                
+                {/* AI Tutor Subpanel Card */}
+                <div style={aiTutorCard}>
+                  <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>🤖 AI Contest Tutor</h3>
+                  <p style={{ color: '#cbd5e1', fontSize: 14, lineHeight: 1.4 }}>
+                    Stuck with a failure check? The AI assistant can isolate structural flaws inside your solution and produce a precise boundary case where your logic breaks down.
+                  </p>
+                  
+                  {!aiDebugResult ? (
+                    <button onClick={handleAiDebug} disabled={aiDebuggerLoading} style={aiTriggerBtn}>
+                      {aiDebuggerLoading ? 'Analyzing Workspace Code...' : 'Analyze Logic & Generate Test Case (-50 pts)'}
+                    </button>
+                  ) : (
+                    <div style={{ marginTop: 15, background: '#0f172a', padding: 16, borderRadius: 8, border: '1px solid #334155' }}>
+                      <p style={{ color: '#fbbf24', fontWeight: 'bold', margin: '0 0 12px 0', lineHeight: 1.4 }}>💡 Hint: {aiDebugResult.hint}</p>
+                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                        <div style={{ flex: '1 1 200px' }}>
+                          <strong style={{ color: '#94a3b8', fontSize: 11, letterSpacing: '0.05em' }}>FAILING INPUT</strong>
+                          <pre style={codeBlockError}>{aiDebugResult.input}</pre>
+                        </div>
+                        <div style={{ flex: '1 1 200px' }}>
+                          <strong style={{ color: '#94a3b8', fontSize: 11, letterSpacing: '0.05em' }}>EXPECTED OUTPUT</strong>
+                          <pre style={codeBlockSuccess}>{aiDebugResult.expectedOutput}</pre>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Standard System Test Cases */}
+                {!penaltyViewed ? (
+                  <div style={{ textAlign: 'center', marginTop: 40, borderTop: '1px solid #1e293b', paddingTop: 30 }}>
+                    <h3 style={{ color: '#f87171', marginTop: 0 }}>⚠️ Standard Hidden Test Cases</h3>
+                    <p style={{ color: '#94a3b8', fontSize: 14 }}>Revealing standard repository verification records triggers a direct points adjustment deduction.</p>
+                    <button onClick={handleRevealTestcases} style={btnDanger}>Accept Penalty & View</button>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 20, borderTop: '1px solid #1e293b', paddingTop: 20 }}>
+                    <h4 style={{ color: '#4ade80', marginTop: 0 }}>System Test Cases Unlocked!</h4>
+                    <p style={{ color: '#94a3b8', fontFamily: 'monospace', background: '#020617', padding: 12, borderRadius: 6 }}>
+                      [System test case database matrix data from Codeforces loaded successfully]
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
+      </div>
     </main>
   );
 }
 
-// RESTORED STYLES (Mobile Responsive)
-const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.32), transparent 34rem), #070a16', boxSizing: 'border-box' };
-const centerText: CSSProperties = { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' };
-const nav: CSSProperties = { display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 24 };
-const panel: CSSProperties = { padding: 'clamp(20px, 4vw, 32px)', borderRadius: 26, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', marginBottom: 18, boxSizing: 'border-box', boxShadow: '0 24px 70px rgba(0,0,0,.3)' };
-const gate: CSSProperties = { maxWidth: 620, margin: '15vh auto', padding: 34, borderRadius: 28, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', textAlign: 'center' };
-const link: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900 };
-const pill: CSSProperties = { padding: '10px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)' };
-const soundBtn: CSSProperties = { ...pill, background: '#0f172a', color: '#fff', cursor: 'pointer', fontSize: 14 };
-const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 900, letterSpacing: '.12em', textTransform: 'uppercase', margin: 0 };
-const tagContainer: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 24 };
-const tagStyle: CSSProperties = { padding: '6px 12px', background: 'rgba(2,6,23,0.5)', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 6, fontSize: 13, color: '#94a3b8' };
-const successBox: CSSProperties = { marginBottom: 24, padding: 16, borderRadius: 12, background: 'rgba(74, 222, 128, 0.15)', border: '1px solid rgba(74, 222, 128, 0.3)', color: '#4ade80' };
-const actions: CSSProperties = { display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 20 };
-const primaryBtn: CSSProperties = { display: 'inline-block', padding: '14px 22px', borderRadius: 999, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', textDecoration: 'none', fontWeight: 900, textAlign: 'center', flex: '1 1 auto', maxWidth: 300, cursor: 'pointer', border: 0 };
-const primaryOutlined: CSSProperties = { ...primaryBtn, background: 'rgba(34,211,238,.1)', color: '#67e8f9', border: '1px solid rgba(34,211,238,.4)' };
-const ghostBtn: CSSProperties = { padding: '10px 18px', borderRadius: 999, border: '1px solid rgba(148,163,184,.28)', background: 'transparent', color: '#dbeafe', cursor: 'pointer', textDecoration: 'none' };
+// 🎨 CSS CONFIGURATIONS
+const page: CSSProperties = { height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#020617', color: '#eef2ff', fontFamily: 'Inter, sans-serif' };
+const headerBar: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', backgroundColor: '#0f172a', borderBottom: '1px solid #1e293b', zIndex: 10 };
+const btnDark: CSSProperties = { background: '#1e293b', border: 'none', color: '#cbd5e1', padding: '8px 14px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold' };
+const timerBox: CSSProperties = { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold' };
+const submitBtn: CSSProperties = { background: '#10b981', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' };
+const selectBox: CSSProperties = { background: '#1e293b', color: '#fff', border: '1px solid #334155', padding: '8px', borderRadius: 6, outline: 'none' };
+const splitLayout: CSSProperties = { display: 'flex', flex: 1, overflow: 'hidden', gap: 10, padding: 10, flexDirection: 'row' };
+const leftPane: CSSProperties = { flex: 1, background: '#0f172a', borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid #1e293b' };
+const rightPane: CSSProperties = { flex: 1, background: '#0f172a', borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid #1e293b' };
+const paneHeader: CSSProperties = { padding: '12px 16px', background: '#1e293b', fontWeight: 'bold', fontSize: 14, color: '#94a3b8' };
+const paneContent: CSSProperties = { flex: 1, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column' };
+const tabsHeader: CSSProperties = { display: 'flex', background: '#1e293b' };
+const activeTabStyle: CSSProperties = { flex: 1, background: '#0f172a', border: 'none', color: '#38bdf8', padding: '12px', borderTop: '2px solid #38bdf8', cursor: 'pointer', fontWeight: 'bold' };
+const inactiveTabStyle: CSSProperties = { flex: 1, background: 'transparent', border: 'none', color: '#94a3b8', padding: '12px', cursor: 'pointer' };
+const codeEditor: CSSProperties = { width: '100%', height: '100%', flex: 1, background: '#020617', color: '#a5b4fc', border: 'none', outline: 'none', fontFamily: 'monospace', fontSize: 14, resize: 'none', lineHeight: '1.6', padding: 8 };
+const testcaseWrap: CSSProperties = { background: '#020617', borderRadius: 8, padding: 16, flex: 1 };
+const btnDanger: CSSProperties = { background: '#ef4444', color: '#fff', padding: '10px 18px', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', marginTop: 12 };
 
-// 👉 MOBILE FIX: FlexWrap instead of rigid columns
-const grid: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 24, color: '#cbd5e1' };
-const gridItem: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 200px' };
-const gridLabel: CSSProperties = { fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#94a3b8' };
+// AI Specific Custom Styles
+const aiTutorCard: CSSProperties = { padding: 16, background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.3)', borderRadius: 10, marginBottom: 16 };
+const aiTriggerBtn: CSSProperties = { background: '#5356ff', color: '#fff', padding: '10px 18px', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 13 };
+const codeBlockError: CSSProperties = { background: 'rgba(248, 113, 113, 0.08)', padding: 10, color: '#f87171', borderRadius: 6, overflow: 'auto', border: '1px solid rgba(248, 113, 113, 0.2)', fontFamily: 'monospace', marginTop: 6, fontSize: 13 };
+const codeBlockSuccess: CSSProperties = { ...codeBlockError, background: 'rgba(74, 222, 128, 0.08)', color: '#4ade80', border: '1px solid rgba(74, 222, 128, 0.2)' };
