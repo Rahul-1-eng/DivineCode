@@ -26,7 +26,7 @@ export async function processContestRewards(contestId: string) {
     for (const pA of participants) {
       if (!pA.user || !pA.standing) continue;
 
-      const oldRating = pA.ratingBefore || pA.user.rating;
+      const oldRating = pA.ratingBefore || pA.user.rating || 1200;
       let expectedWins = 0;
       let actualWins = 0;
 
@@ -34,12 +34,13 @@ export async function processContestRewards(contestId: string) {
       for (const pB of participants) {
         if (pA.id === pB.id || !pB.user || !pB.standing) continue;
 
-        const ratingB = pB.ratingBefore || pB.user.rating;
+        const ratingB = pB.ratingBefore || pB.user.rating || 1200;
         
         // Expected score against pB
         expectedWins += 1 / (1 + Math.pow(10, (ratingB - oldRating) / 400));
 
         // Actual score against pB (1 for win, 0.5 for tie, 0 for loss)
+        // Lower rank index = better score
         if (pA.standing.rank! < pB.standing.rank!) actualWins += 1;
         else if (pA.standing.rank === pB.standing.rank) actualWins += 0.5;
       }
@@ -53,14 +54,16 @@ export async function processContestRewards(contestId: string) {
       const personalSolves = new Set(
         contest.submissions
           .filter(s => s.participantId === pA.id && s.verdict === Verdict.ACCEPTED && s.status === SubmissionStatus.FINISHED)
-          .map(s => s.problemId)
+          // 👉 FIX: Codeforces/External problems lack a native problemId, use contestProblemId to accurately count user solves.
+          .map(s => s.contestProblemId)
       ).size;
 
-      const earnedCoins = BASE_PARTICIPATION_COINS + 
-                          (personalSolves * COINS_PER_PERSONAL_SOLVE) + 
-                          (groupSolves * COINS_PER_GROUP_SOLVE);
+      // 👉 FIX: Added floor to ensure penalties/negative modifiers never pull coins below 0.
+      const earnedCoins = Math.max(0, BASE_PARTICIPATION_COINS + 
+                                      (personalSolves * COINS_PER_PERSONAL_SOLVE) + 
+                                      (groupSolves * COINS_PER_GROUP_SOLVE));
 
-      // 3. Queue Database Updates
+      // 3. Queue Database Updates Atomically
       updates.push(
         tx.user.update({
           where: { id: pA.userId! },
@@ -87,7 +90,7 @@ export async function processContestRewards(contestId: string) {
       );
     }
 
-    // Execute all updates atomically
+    // Execute all updates simultaneously
     await Promise.all(updates);
     return { success: true, processedCount: participants.length };
   });

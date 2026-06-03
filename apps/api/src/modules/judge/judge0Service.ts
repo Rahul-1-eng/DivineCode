@@ -2,49 +2,53 @@ import { CheckerType, SubmissionStatus, Verdict } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
 
-const WANDBOX_URL = 'https://wandbox.org/api/compile.json';
+const PISTON_URL = 'https://emkc.org/api/v2/piston';
 
 type JudgeLanguage = 'cpp' | 'c' | 'java' | 'python' | 'javascript';
 
-const languageMap: Record<string, string> = {
-  cpp: 'gcc-head',
-  c: 'gcc-head-c',
-  java: 'openjdk-head',
-  python: 'cpython-head',
-  javascript: 'nodejs-head'
-};
-
-type Judge0Result = {
-  stdout?: string | null;
-  stderr?: string | null;
-  compile_output?: string | null;
-  time?: string | number | null;
-  memory?: number | null;
-  status?: { id?: number; description?: string; } | null;
-};
-
-function normalizeOutput(value: string | null | undefined) {
-  return String(value || '').trim().replace(/\s+/g, ' ');
+// Intelligent language normalizer
+function getPistonConfig(language: string) {
+  const normalized = String(language || '').toLowerCase().trim();
+  if (normalized.includes('c++') || normalized === 'cpp') return { language: 'c++', version: '*' };
+  if (normalized === 'c') return { language: 'c', version: '*' };
+  if (normalized.includes('java') && !normalized.includes('javascript')) return { language: 'java', version: '*' };
+  if (normalized.includes('py')) return { language: 'python', version: '*' };
+  if (normalized.includes('js') || normalized.includes('node') || normalized.includes('javascript')) return { language: 'javascript', version: '*' };
+  
+  return { language: normalized, version: '*' }; 
 }
 
-function verdictFromJudge0(statusDescription: string, stdout: string | null | undefined, expectedOutput: string, checkerType: CheckerType) {
-  if (statusDescription === 'Compilation Error') return Verdict.COMPILATION_ERROR;
-  if (statusDescription === 'Runtime Error (NZEC)' || statusDescription.includes('Runtime')) return Verdict.RUNTIME_ERROR;
-  if (statusDescription === 'Time Limit Exceeded') return Verdict.TIME_LIMIT_EXCEEDED;
-  if (statusDescription === 'Memory Limit Exceeded') return Verdict.MEMORY_LIMIT_EXCEEDED;
-  if (statusDescription !== 'Accepted') return Verdict.JUDGE_ERROR;
-
-  if (checkerType === CheckerType.EXACT || checkerType === CheckerType.TOKEN) {
-    return normalizeOutput(stdout) === normalizeOutput(expectedOutput) ? Verdict.ACCEPTED : Verdict.WRONG_ANSWER;
+// 👉 FIX: Proper multi-line CP normalizer. Trims trailing spaces per line and trailing empty lines, but preserves structural line breaks!
+function normalizeOutput(value: string | null | undefined) {
+  if (!value) return '';
+  const lines = String(value).split(/\r?\n/).map(l => l.trimEnd());
+  while (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop();
   }
+  return lines.join('\n');
+}
 
-  if (checkerType === CheckerType.FLOAT) {
-    const actual = normalizeOutput(stdout).split(' ').map(Number);
-    const expected = normalizeOutput(expectedOutput).split(' ').map(Number);
-    const ok =
-      actual.length === expected.length &&
-      actual.every((value, index) => Number.isFinite(value) && Math.abs(value - expected[index]) <= 1e-6);
-    return ok ? Verdict.ACCEPTED : Verdict.WRONG_ANSWER;
+function evaluateVerdict(status: string, stdout: string | null | undefined, expectedOutput: string, checkerType: CheckerType): Verdict {
+  if (status === 'COMPILATION_ERROR') return Verdict.COMPILATION_ERROR;
+  if (status === 'TIME_LIMIT_EXCEEDED') return Verdict.TIME_LIMIT_EXCEEDED;
+  if (status === 'RUNTIME_ERROR') return Verdict.RUNTIME_ERROR;
+  if (status === 'JUDGE_ERROR') return Verdict.JUDGE_ERROR;
+
+  if (status === 'ACCEPTED') {
+    const actual = normalizeOutput(stdout);
+    const expected = normalizeOutput(expectedOutput);
+
+    if (checkerType === CheckerType.EXACT || checkerType === CheckerType.TOKEN) {
+      return actual === expected ? Verdict.ACCEPTED : Verdict.WRONG_ANSWER;
+    }
+
+    if (checkerType === CheckerType.FLOAT) {
+      const actualArr = actual.split(/\s+/).map(Number);
+      const expectedArr = expected.split(/\s+/).map(Number);
+      const ok = actualArr.length === expectedArr.length &&
+                 actualArr.every((val, i) => Number.isFinite(val) && Math.abs(val - expectedArr[i]) <= 1e-6);
+      return ok ? Verdict.ACCEPTED : Verdict.WRONG_ANSWER;
+    }
   }
 
   return Verdict.JUDGE_ERROR;
@@ -56,56 +60,56 @@ function aggregateVerdict(results: { verdict: Verdict }[]) {
   return results.find((result) => result.verdict !== Verdict.ACCEPTED)?.verdict || Verdict.JUDGE_ERROR;
 }
 
-async function submitToJudge0(input: {
-  sourceCode: string;
-  language: JudgeLanguage;
-  stdin: string;
-  expectedOutput: string;
-}): Promise<Judge0Result> {
-  const compiler = languageMap[input.language];
+async function submitToPiston(input: { sourceCode: string; language: JudgeLanguage; stdin: string; }) {
+  const langConfig = getPistonConfig(input.language);
+  if (!langConfig) throw new Error(`Unsupported language: ${input.language}`);
   
+  // 👉 FIX: Assign appropriate extensions to prevent Piston internal errors
+  let filename = 'main.txt';
+  if (langConfig.language === 'c++') filename = 'main.cpp';
+  else if (langConfig.language === 'c') filename = 'main.c';
+  else if (langConfig.language === 'python') filename = 'main.py';
+  else if (langConfig.language === 'javascript') filename = 'main.js';
+  
+  let files: { content: string; name?: string }[] = [{ name: filename, content: input.sourceCode }];
+  
+  if (langConfig.language === 'java') {
+    const match = input.sourceCode.match(/public\s+class\s+([A-Za-z0-9_]+)/);
+    const className = match ? match[1] : 'Main';
+    files = [{ name: `${className}.java`, content: input.sourceCode }];
+  }
+
   try {
-    const response = await fetch(WANDBOX_URL, {
+    const response = await fetch(`${PISTON_URL}/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        compiler: compiler,
-        code: input.sourceCode,
-        stdin: input.stdin || ''
+        language: langConfig.language,
+        version: langConfig.version,
+        files: files,
+        stdin: input.stdin || '',
+        run_timeout: 3000, 
+        compile_timeout: 10000
       })
     });
 
-    if (!response.ok) throw new Error(`Wandbox API request failed`);
+    if (!response.ok) throw new Error(`Piston rejected execution payload`);
     const data = await response.json();
 
-    let statusId = 3;
-    let statusDesc = 'Accepted';
-
-    if (data.compiler_error) {
-      statusId = 6;
-      statusDesc = 'Compilation Error';
-    } else if (data.status !== '0' && data.program_error?.toLowerCase().includes('killed')) {
-      statusId = 5;
-      statusDesc = 'Time Limit Exceeded';
-    } else if (data.status !== '0') {
-      statusId = 11;
-      statusDesc = 'Runtime Error (NZEC)';
+    if (data.compile && data.compile.code !== 0) return { compile_output: data.compile.output, status: 'COMPILATION_ERROR' };
+    
+    if (data.run) {
+      if (data.run.signal === 'SIGKILL') return { stderr: 'Time Limit Exceeded', status: 'TIME_LIMIT_EXCEEDED' };
+      if (data.run.code !== 0) return { stderr: data.run.output, status: 'RUNTIME_ERROR' };
+      
+      const safeStdout = data.run.stdout !== undefined ? data.run.stdout : (data.run.output || '');
+      return { stdout: safeStdout, stderr: data.run.stderr, status: 'ACCEPTED' };
     }
 
-    return {
-      stdout: data.program_message,
-      stderr: data.program_error,
-      compile_output: data.compiler_error || data.compiler_message,
-      time: 0.1, 
-      memory: 2048,
-      status: { id: statusId, description: statusDesc }
-    };
+    return { stderr: "Unknown execution error", status: 'JUDGE_ERROR' };
   } catch (error) {
-    return {
-      stdout: null,
-      stderr: "Could not connect to external execution engine.",
-      status: { id: 13, description: "Judge Error" }
-    };
+    console.error('[Judge] Execution Error:', error);
+    return { stderr: "Could not connect to the free execution engine.", status: 'JUDGE_ERROR' };
   }
 }
 
@@ -121,6 +125,14 @@ async function finalizeVerdict(submissionId: string, verdict: Verdict) {
     where: { id: submissionId },
     data: { verdict }
   });
+
+  // 👉 50 Penalty Points applied directly inside the judge engine for Wrong Answers
+  if (verdict !== Verdict.ACCEPTED && verdict !== Verdict.COMPILATION_ERROR && submission.participantId) {
+    await prisma.contestStanding.updateMany({
+      where: { participantId: submission.participantId },
+      data: { penalty: { increment: 50 } }
+    });
+  }
 
   if (verdict === Verdict.ACCEPTED && submission.participant?.teamId) {
     const teamId = submission.participant.teamId;
@@ -173,18 +185,10 @@ export async function judgeQueuedSubmission(submissionId: string) {
 
     const judged = await prisma.submission.update({
       where: { id: submission.id },
-      data: {
-        status: SubmissionStatus.FINISHED,
-        verdict,
-        judgeMessage,
-        judgedAt: new Date()
-      }
+      data: { status: SubmissionStatus.FINISHED, verdict, judgeMessage, judgedAt: new Date() }
     });
 
-    if (verdict === Verdict.ACCEPTED) {
-      await finalizeVerdict(judged.id, verdict);
-    }
-
+    await finalizeVerdict(judged.id, verdict);
     const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
     return { submission: judged, standings };
   }
@@ -204,11 +208,9 @@ export async function judgeQueuedSubmission(submissionId: string) {
       const judged = await prisma.submission.update({
         where: { id: submission.id },
         data: {
-          status: SubmissionStatus.FINISHED,
-          verdict: Verdict.SKIPPED,
+          status: SubmissionStatus.FINISHED, verdict: Verdict.SKIPPED,
           judgeMessage: 'Anti-Cheat: Exact duplicate code detected within your team.',
-          isFlagged: true,
-          judgedAt: new Date()
+          isFlagged: true, judgedAt: new Date()
         },
         include: { testResults: { orderBy: { index: 'asc' } } }
       });
@@ -217,11 +219,7 @@ export async function judgeQueuedSubmission(submissionId: string) {
     }
   }
 
-  if (!languageMap[submission.language as JudgeLanguage]) throw new Error(`Unsupported language: ${submission.language}`);
-
-  if (!submission.problem) {
-    throw new Error('This submission is linked to an external-only problem. Use external platform sync instead.');
-  }
+  if (!submission.problem) throw new Error('External problem only.');
 
   const testcases = submission.problem.testcases;
   if (!testcases.length) throw new Error('Problem has no testcases configured');
@@ -234,37 +232,24 @@ export async function judgeQueuedSubmission(submissionId: string) {
   const results = [];
 
   for (const [index, testcase] of testcases.entries()) {
-    const result = await submitToJudge0({
+    const result = await submitToPiston({
       sourceCode: submission.code,
       language: submission.language as JudgeLanguage,
-      stdin: testcase.input,
-      expectedOutput: testcase.expectedOutput
+      stdin: testcase.input
     });
 
-    const statusDescription = result.status?.description || 'Judge Error';
-    const verdict = verdictFromJudge0(statusDescription, result.stdout, testcase.expectedOutput, submission.problem.checkerType);
+    const verdict = evaluateVerdict(result.status as string, result.stdout, testcase.expectedOutput, submission.problem.checkerType);
 
     const saved = await prisma.submissionTestResult.upsert({
       where: { submissionId_index: { submissionId: submission.id, index } },
       create: {
-        submissionId: submission.id,
-        testcaseId: testcase.id,
-        index,
-        verdict,
-        timeMs: result.time ? Math.ceil(Number(result.time) * 1000) : null,
-        memoryKb: result.memory || null,
-        stdout: result.stdout || null,
-        stderr: result.compile_output || result.stderr || null, 
-        checkerMessage: statusDescription
+        submissionId: submission.id, testcaseId: testcase.id, index, verdict,
+        timeMs: 15, memoryKb: 2048, stdout: result.stdout || null, stderr: result.compile_output || result.stderr || null, 
+        checkerMessage: result.status
       },
       update: {
-        testcaseId: testcase.id,
-        verdict,
-        timeMs: result.time ? Math.ceil(Number(result.time) * 1000) : null,
-        memoryKb: result.memory || null,
-        stdout: result.stdout || null,
-        stderr: result.compile_output || result.stderr || null,
-        checkerMessage: statusDescription
+        testcaseId: testcase.id, verdict, stdout: result.stdout || null, stderr: result.compile_output || result.stderr || null,
+        checkerMessage: result.status
       }
     });
 
@@ -273,102 +258,75 @@ export async function judgeQueuedSubmission(submissionId: string) {
   }
 
   const finalVerdict = aggregateVerdict(results);
-  const maxTimeMs = results.reduce((max, result) => Math.max(max, result.timeMs || 0), 0);
-  const maxMemoryKb = results.reduce((max, result) => Math.max(max, result.memoryKb || 0), 0);
-
   const firstFailed = results.find(r => r.verdict !== Verdict.ACCEPTED);
   let detailedMessage = finalVerdict as string;
-  if (firstFailed) {
-      detailedMessage = firstFailed.stderr || firstFailed.stdout || firstFailed.checkerMessage || finalVerdict;
-  }
+  if (firstFailed) detailedMessage = firstFailed.stderr || firstFailed.stdout || firstFailed.checkerMessage || finalVerdict;
 
   const judged = await prisma.submission.update({
     where: { id: submission.id },
     data: {
-      status: SubmissionStatus.FINISHED,
-      verdict: finalVerdict,
-      timeMs: maxTimeMs || null,
-      memoryKb: maxMemoryKb || null,
-      judgeMessage: detailedMessage, 
-      judgedAt: new Date()
+      status: SubmissionStatus.FINISHED, verdict: finalVerdict,
+      timeMs: 15, memoryKb: 2048, judgeMessage: detailedMessage, judgedAt: new Date()
     },
     include: { testResults: { orderBy: { index: 'asc' } } }
   });
 
-  if (finalVerdict === Verdict.ACCEPTED) {
-    await finalizeVerdict(judged.id, finalVerdict);
-  }
-
+  await finalizeVerdict(judged.id, finalVerdict);
   const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
-
   return { submission: judged, standings };
 }
 
 interface ExecutionResult {
   verdict: 'ACCEPTED' | 'WRONG_ANSWER' | 'TIME_LIMIT_EXCEEDED' | 'RUNTIME_ERROR' | 'COMPILATION_ERROR' | 'EXECUTED';
-  runtimeMs?: number;
-  memoryKb?: number;
-  compileError?: string;
-  stdout?: string;
-  stderr?: string;
+  runtimeMs?: number; memoryKb?: number; compileError?: string; stdout?: string; stderr?: string;
 }
 
-export async function executeSubmission(
-  sourceCode: string,
-  language: string,
-  input: string,
-  expectedOutput?: string
-): Promise<ExecutionResult> {
-  const compiler = languageMap[language];
-  if (!compiler) throw new Error(`Unsupported language: ${language}`);
+export async function executeSubmission(sourceCode: string, language: string, input: string, expectedOutput?: string): Promise<ExecutionResult> {
+  const langConfig = getPistonConfig(language);
+  if (!langConfig) throw new Error(`Unsupported language: ${language}`);
+
+  let filename = 'main.txt';
+  if (langConfig.language === 'c++') filename = 'main.cpp';
+  else if (langConfig.language === 'c') filename = 'main.c';
+  else if (langConfig.language === 'python') filename = 'main.py';
+  else if (langConfig.language === 'javascript') filename = 'main.js';
+
+  let files: { content: string; name?: string }[] = [{ name: filename, content: sourceCode }];
+  
+  if (langConfig.language === 'java') {
+    const match = sourceCode.match(/public\s+class\s+([A-Za-z0-9_]+)/);
+    const className = match ? match[1] : 'Main';
+    files = [{ name: `${className}.java`, content: sourceCode }];
+  }
 
   try {
-    const response = await fetch(WANDBOX_URL, {
+    const response = await fetch(`${PISTON_URL}/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        compiler: compiler,
-        code: sourceCode,
-        stdin: input || ''
+        language: langConfig.language, version: langConfig.version,
+        files: files, stdin: input || '', run_timeout: 3000, compile_timeout: 10000
       })
     });
 
-    if (!response.ok) {
-        throw new Error(`Wandbox HTTP error! status: ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
 
-    if (data.compiler_error) {
-      return { verdict: 'COMPILATION_ERROR', compileError: data.compiler_error };
-    }
+    if (data.compile && data.compile.code !== 0) return { verdict: 'COMPILATION_ERROR', compileError: data.compile.output };
+    if (data.run && data.run.signal === 'SIGKILL') return { verdict: 'TIME_LIMIT_EXCEEDED', stderr: 'Execution took too long.' };
+    if (data.run && data.run.code !== 0) return { verdict: 'RUNTIME_ERROR', stderr: data.run.output, stdout: data.run.stdout };
 
-    if (data.status !== '0') {
-      const isTimeout = data.program_error?.toLowerCase().includes('killed');
-      return { 
-        verdict: isTimeout ? 'TIME_LIMIT_EXCEEDED' : 'RUNTIME_ERROR', 
-        stderr: data.program_error || 'Runtime error occurred', 
-        stdout: data.program_message 
-      };
-    }
-
-    const actual = String(data.program_message || '').trim().replace(/\s+/g, ' ');
+    const safeStdout = data.run.stdout !== undefined ? data.run.stdout : (data.run.output || '');
+    const actual = normalizeOutput(safeStdout);
     
     let verdict: ExecutionResult['verdict'] = 'EXECUTED';
     if (expectedOutput) {
-      const expected = String(expectedOutput || '').trim().replace(/\s+/g, ' ');
+      const expected = normalizeOutput(expectedOutput);
       verdict = actual === expected ? 'ACCEPTED' : 'WRONG_ANSWER';
     }
 
-    return { 
-      verdict, 
-      runtimeMs: 15,
-      memoryKb: 2048,
-      stdout: data.program_message,
-      stderr: data.program_error
-    };
+    return { verdict, runtimeMs: 15, memoryKb: 2048, stdout: safeStdout, stderr: data.run.stderr };
   } catch (error) {
-    console.error('Wandbox connection error details:', error);
     return { verdict: 'RUNTIME_ERROR', stderr: 'Could not connect to execution engine.' };
   }
 }

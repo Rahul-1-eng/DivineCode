@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 export async function generateTestCasesWithAI(problemDescription: string, masterSolution: string) {
-  // 👉 FIX 1: Read the key INSIDE the function so it never gets stuck as undefined
+  // 👉 Read the key INSIDE the function so it never gets stuck as undefined
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
 
@@ -16,7 +16,6 @@ export async function generateTestCasesWithAI(problemDescription: string, master
     Format: [{"input": "...", "expectedOutput": "...", "explanation": "..."}]
   `;
 
-  // 👉 FIX 2: Use Axios instead of native fetch to prevent Node version crashes
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
     const { data } = await axios.post(url, {
@@ -27,7 +26,6 @@ export async function generateTestCasesWithAI(problemDescription: string, master
     const jsonString = data.candidates[0].content.parts[0].text;
     return JSON.parse(jsonString);
   } catch (error: any) {
-    // 👉 FIX 3: Print the exact reason Google rejected the request to your terminal
     console.error("AI Generation Error from Google:", error.response?.data || error.message);
     throw new Error("Failed to parse AI test cases.");
   }
@@ -65,5 +63,35 @@ export async function findFailingTestCaseWithAI(problemDescription: string, user
   } catch (error: any) {
     console.error("AI Debug Error from Google:", error.response?.data || error.message);
     throw new Error("Failed to parse AI debug response.");
+  }
+}
+
+// 👉 NEW: AI Explainer specifically formatted for animation / step-by-step reading
+export async function generateSolutionExplanationWithAI(problemDescription: string) {
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
+
+  const prompt = `
+    You are an AI programming tutor. A student is stuck on this problem:
+    ${problemDescription}
+
+    Break down the optimal approach step-by-step. Do not just output raw code. 
+    Explain the logic, data structures used, and time complexity.
+    Respond strictly with a JSON object. Do not include markdown formatting.
+    Format: {"summary": "...", "steps": ["step 1...", "step 2..."], "complexity": "..."}
+  `;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const { data } = await axios.post(url, {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json" }
+    });
+
+    const jsonString = data.candidates[0].content.parts[0].text;
+    return JSON.parse(jsonString);
+  } catch (error: any) {
+    console.error("AI Explanation Error from Google:", error.response?.data || error.message);
+    throw new Error("Failed to generate AI explanation.");
   }
 }

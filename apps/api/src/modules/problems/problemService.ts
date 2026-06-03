@@ -1,4 +1,3 @@
-// apps/api/src/modules/problems/problemService.ts
 import { CheckerType, Platform, ProblemSource, ProblemVisibility, TestcaseType } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import axios from 'axios';
@@ -111,7 +110,7 @@ export async function createInternalProblem(input: CreateProblemInput) {
   });
 }
 
-// 👉 NEW: AI Test Case Generator
+// 👉 AI Test Case Generator
 export async function generateAndAppendAITestcases(problemId: string, providedMasterSolution: string) {
   const problem = await prisma.problem.findUnique({ where: { id: problemId } });
   if (!problem) throw new Error('Problem not found');
@@ -136,7 +135,7 @@ export async function generateAndAppendAITestcases(problemId: string, providedMa
 
 export async function syncTestCasesFromCodeforces(problemId: string, url: string) {
   try {
-    // 👉 FIXED: Route through mirror domain and add browser headers to bypass CF 503 Shield
+    // 👉 FIXED: Route through mirror domain and add browser headers to bypass CF 503 Shield/Cloudflare blocks
     const targetUrl = url.replace('codeforces.com', 'mirror.codeforces.com');
     const { data } = await axios.get(targetUrl, {
       headers: {
