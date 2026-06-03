@@ -205,7 +205,6 @@ export default function WorkspacePage() {
     } catch (e) {
       setJudgeVerdict({ status: 'Error', message: 'Network or server error during execution.' });
     } finally {
-      // ✅ Fixed typo here: changed from final to finally
       setSubmitting(false); 
     }
   };
@@ -274,10 +273,40 @@ export default function WorkspacePage() {
   else if (contestMatch) cfSubmitUrl = `https://codeforces.com/contest/${contestMatch[1]}/submit/${contestMatch[2]}`;
 
   return (
-    <main style={page}>
+    <main style={{...page, minHeight: '100vh', height: 'auto'}}>
       <style>{`
         @keyframes spin { 100% { transform: rotate(360deg); } }
         .judge-spinner { animation: spin 1.2s linear infinite; }
+
+        /* Responsive Layout Classes */
+        .responsive-split {
+          display: flex;
+          flex: 1;
+          overflow: hidden;
+          gap: 12px;
+          padding: 12px;
+          flex-direction: row;
+        }
+        .responsive-pane {
+          flex: 1;
+          background: #0f172a;
+          border-radius: 12px;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          border: 1px solid #1e293b;
+        }
+
+        @media (max-width: 768px) {
+          .responsive-split {
+            flex-direction: column !important;
+            overflow-y: auto !important;
+          }
+          .responsive-pane {
+            flex: none !important;
+            min-height: 500px !important;
+          }
+        }
       `}</style>
       
       {submitting && (
@@ -336,8 +365,8 @@ export default function WorkspacePage() {
         </div>
       </header>
 
-      <div style={splitLayout}>
-        <section style={leftPane}>
+      <div className="responsive-split">
+        <section className="responsive-pane">
           <div style={paneHeader}>Problem Description</div>
           <div style={paneContent}>
              <p style={{ color: '#94a3b8', padding: '0 16px' }}>Platform: {problem.platform} | Points: {problem.points}</p>
@@ -345,7 +374,7 @@ export default function WorkspacePage() {
           </div>
         </section>
 
-        <section style={rightPane}>
+        <section className="responsive-pane">
           <div style={tabsHeader}>
             <button style={activeTab === 'code' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('code')}>Code Editor</button>
             <button style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('cph')}>
@@ -457,16 +486,13 @@ export default function WorkspacePage() {
   );
 }
 
-const page: CSSProperties = { height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#020617', color: '#eef2ff', fontFamily: 'Inter, sans-serif' };
+const page: CSSProperties = { display: 'flex', flexDirection: 'column', backgroundColor: '#020617', color: '#eef2ff', fontFamily: 'Inter, sans-serif' };
 const headerBar: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', backgroundColor: '#0f172a', borderBottom: '1px solid #1e293b', zIndex: 10 };
 const btnDark: CSSProperties = { background: '#1e293b', border: 'none', color: '#cbd5e1', padding: '8px 14px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold' };
 const timerBox: CSSProperties = { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold' };
 const submitBtn: CSSProperties = { background: '#10b981', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' };
 const runBtn: CSSProperties = { background: '#3b82f6', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' };
 const selectBox: CSSProperties = { background: '#1e293b', color: '#fff', border: '1px solid #334155', padding: '8px', borderRadius: 6, outline: 'none' };
-const splitLayout: CSSProperties = { display: 'flex', flex: 1, overflow: 'hidden', gap: 10, padding: 10, flexDirection: 'row' };
-const leftPane: CSSProperties = { flex: 1, background: '#0f172a', borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid #1e293b' };
-const rightPane: CSSProperties = { flex: 1, background: '#0f172a', borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid #1e293b' };
 const paneHeader: CSSProperties = { padding: '12px 16px', background: '#1e293b', fontWeight: 'bold', fontSize: 14, color: '#94a3b8' };
 const paneContent: CSSProperties = { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' };
 const iframeStyle: CSSProperties = { width: '100%', height: '100%', border: 'none', background: '#fff', borderRadius: 8 };
@@ -486,7 +512,6 @@ const secondaryBtn: CSSProperties = { background: '#334155', color: '#fff', bord
 const primaryBtn: CSSProperties = { background: '#0284c7', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', textDecoration: 'none', textAlign: 'center' };
 const cancelBtn: CSSProperties = { background: 'transparent', color: '#94a3b8', border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 'bold' };
 const syncBtn: CSSProperties = { background: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
-
 const tcCard: CSSProperties = { background: '#0f172a', border: '1px solid #334155', borderRadius: 8, overflow: 'hidden', marginBottom: 15 };
 const tcHeader: CSSProperties = { background: '#1e293b', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', fontSize: 13 };
 const tcBox: CSSProperties = { width: '100%', height: 80, background: '#020617', border: '1px solid #334155', borderRadius: 6, color: '#fff', fontFamily: 'monospace', padding: 8, fontSize: 13, resize: 'none' };

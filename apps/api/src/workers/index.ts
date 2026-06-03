@@ -4,7 +4,6 @@ import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncSe
 import { judgeQueuedSubmission } from '../modules/judge/judge0Service';
 import { processContestRewards } from '../modules/ratings/ratingService';
 import { CodeforcesContestSyncJob, JudgeSubmissionJob, ContestRewardsJob, QUEUE_NAMES } from '../queues/jobTypes';
-// 👉 FIX: Import the shared connection to prevent repeated AUTH commands
 import { getSharedRedisConnection } from '../queues/redis';
 
 type WorkerBundle = {
@@ -24,11 +23,9 @@ async function handleJudgeJob(job: Job<JudgeSubmissionJob>) {
   const result = await judgeQueuedSubmission(job.data.submissionId);
   const io = activeIoInstance;
 
+  // 👉 UPDATED: Tell the frontend to fetch the new submission instantly
   if (io && result.submission.contestId && result.standings) {
-    io.to(`contest:${result.submission.contestId}`).emit('standings:update', {
-      contestId: result.submission.contestId,
-      standings: result.standings
-    });
+    io.to(result.submission.contestId).emit('submissionsUpdated');
   }
 
   if (io) {
@@ -46,11 +43,9 @@ async function handleCodeforcesSyncJob(job: Job<CodeforcesContestSyncJob>) {
   const result = await syncCodeforcesContest(job.data.contestId);
   const io = activeIoInstance;
 
+  // 👉 UPDATED: When background sync finishes, force the frontend to refresh the board!
   if (io && result.standings) {
-    io.to(`contest:${job.data.contestId}`).emit('standings:update', {
-      contestId: job.data.contestId,
-      standings: result.standings
-    });
+    io.to(job.data.contestId).emit('submissionsUpdated');
   }
 
   return {
@@ -75,7 +70,6 @@ export function startQueueWorkers(io?: Server) {
   
   if (startedWorkers) return startedWorkers;
 
-  // 👉 FIX: Use one shared connection for all workers
   const sharedConnection = getSharedRedisConnection();
 
   const judgeWorker = new Worker<JudgeSubmissionJob>(QUEUE_NAMES.judge, handleJudgeJob, {
@@ -96,7 +90,6 @@ export function startQueueWorkers(io?: Server) {
     drainDelay: 5000 
   });
 
-  // Re-added error listeners for debugging
   judgeWorker.on('failed', (job, err) => console.error(`Judge failed: ${job?.id}`, err));
   externalSyncWorker.on('failed', (job, err) => console.error(`Sync failed: ${job?.id}`, err));
   rewardsWorker.on('failed', (job, err) => console.error(`Rewards failed: ${job?.id}`, err));

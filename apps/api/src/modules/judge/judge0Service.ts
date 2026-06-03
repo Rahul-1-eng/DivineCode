@@ -1,14 +1,11 @@
-// apps/api/src/modules/judge/judge0Service.ts
 import { CheckerType, SubmissionStatus, Verdict } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
 
-// 👉 BYPASSING PISTON: We are using the 100% Free Wandbox API (No Keys Required)
 const WANDBOX_URL = 'https://wandbox.org/api/compile.json';
 
 type JudgeLanguage = 'cpp' | 'c' | 'java' | 'python' | 'javascript';
 
-// Map your frontend languages to Wandbox's specific compiler strings
 const languageMap: Record<string, string> = {
   cpp: 'gcc-head',
   c: 'gcc-head-c',
@@ -67,41 +64,49 @@ async function submitToJudge0(input: {
 }): Promise<Judge0Result> {
   const compiler = languageMap[input.language];
   
-  const response = await fetch(WANDBOX_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      compiler: compiler,
-      code: input.sourceCode,
-      stdin: input.stdin || ''
-    })
-  });
+  try {
+    const response = await fetch(WANDBOX_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        compiler: compiler,
+        code: input.sourceCode,
+        stdin: input.stdin || ''
+      })
+    });
 
-  if (!response.ok) throw new Error(`Wandbox API request failed`);
-  const data = await response.json();
+    if (!response.ok) throw new Error(`Wandbox API request failed`);
+    const data = await response.json();
 
-  let statusId = 3;
-  let statusDesc = 'Accepted';
+    let statusId = 3;
+    let statusDesc = 'Accepted';
 
-  if (data.compiler_error) {
-    statusId = 6;
-    statusDesc = 'Compilation Error';
-  } else if (data.status !== '0' && data.program_error?.toLowerCase().includes('killed')) {
-    statusId = 5;
-    statusDesc = 'Time Limit Exceeded';
-  } else if (data.status !== '0') {
-    statusId = 11;
-    statusDesc = 'Runtime Error (NZEC)';
+    if (data.compiler_error) {
+      statusId = 6;
+      statusDesc = 'Compilation Error';
+    } else if (data.status !== '0' && data.program_error?.toLowerCase().includes('killed')) {
+      statusId = 5;
+      statusDesc = 'Time Limit Exceeded';
+    } else if (data.status !== '0') {
+      statusId = 11;
+      statusDesc = 'Runtime Error (NZEC)';
+    }
+
+    return {
+      stdout: data.program_message,
+      stderr: data.program_error,
+      compile_output: data.compiler_error || data.compiler_message,
+      time: 0.1, 
+      memory: 2048,
+      status: { id: statusId, description: statusDesc }
+    };
+  } catch (error) {
+    return {
+      stdout: null,
+      stderr: "Could not connect to external execution engine.",
+      status: { id: 13, description: "Judge Error" }
+    };
   }
-
-  return {
-    stdout: data.program_message,
-    stderr: data.program_error,
-    compile_output: data.compiler_error || data.compiler_message,
-    time: 0.1, // Mocked for free tier
-    memory: 2048,
-    status: { id: statusId, description: statusDesc }
-  };
 }
 
 async function finalizeVerdict(submissionId: string, verdict: Verdict) {
@@ -157,7 +162,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
   if (!submission) throw new Error('Submission not found');
   if (!submission.code) throw new Error('Submission has no code to judge');
 
-  // MCQ Bypass Logic
   if (submission.language === 'mcq') {
     const mcq = await prisma.interviewQuestion.findUnique({
       where: { id: submission.contestProblem!.interviewQuestionId! }
@@ -185,7 +189,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
     return { submission: judged, standings };
   }
 
-  // Anti-Cheat / Spam Protection
   if (submission.contestId && submission.participant?.teamId) {
     const duplicate = await prisma.submission.findFirst({
       where: {
@@ -251,7 +254,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
         timeMs: result.time ? Math.ceil(Number(result.time) * 1000) : null,
         memoryKb: result.memory || null,
         stdout: result.stdout || null,
-        // 👉 FIX: Ensure compiler errors are saved here
         stderr: result.compile_output || result.stderr || null, 
         checkerMessage: statusDescription
       },
@@ -261,7 +263,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
         timeMs: result.time ? Math.ceil(Number(result.time) * 1000) : null,
         memoryKb: result.memory || null,
         stdout: result.stdout || null,
-        // 👉 FIX: Ensure compiler errors are saved here
         stderr: result.compile_output || result.stderr || null,
         checkerMessage: statusDescription
       }
@@ -275,7 +276,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
   const maxTimeMs = results.reduce((max, result) => Math.max(max, result.timeMs || 0), 0);
   const maxMemoryKb = results.reduce((max, result) => Math.max(max, result.memoryKb || 0), 0);
 
-  // 👉 FIX: Extract the detailed error message for the main submission object
   const firstFailed = results.find(r => r.verdict !== Verdict.ACCEPTED);
   let detailedMessage = finalVerdict as string;
   if (firstFailed) {
@@ -289,7 +289,7 @@ export async function judgeQueuedSubmission(submissionId: string) {
       verdict: finalVerdict,
       timeMs: maxTimeMs || null,
       memoryKb: maxMemoryKb || null,
-      judgeMessage: detailedMessage, // 🚀 Passes the stack trace to the frontend!
+      judgeMessage: detailedMessage, 
       judgedAt: new Date()
     },
     include: { testResults: { orderBy: { index: 'asc' } } }

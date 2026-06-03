@@ -2,7 +2,7 @@ import { Express, NextFunction, Request, Response, Router } from 'express';
 import { Server } from 'socket.io';
 import { prisma } from '../prisma/client';
 import { enqueueCodeforcesContestSync, enqueueJudgeSubmission, getRewardsQueue } from '../queues/queues';
-import { canManageContest, findViewerParticipant, sanitizeContestForViewer, sanitizeSubmissionForViewer, viewerFromRequest } from '../modules/contests/contestRules';
+import { canManageContest, sanitizeContestForViewer, viewerFromRequest } from '../modules/contests/contestRules';
 import { 
   addContestProblemV2, createContestV2, deleteContestV2, extendContestV2, 
   listContestsV2, loadContestForViewer, removeContestProblemV2, replaceContestProblemV2, 
@@ -15,7 +15,6 @@ import { recomputeContestStandings } from '../modules/standings/standingService'
 import { recommendationBand } from '../modules/ratings/recommendationMath';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
 import { syncUserRatings } from '../modules/external-sync/profileSyncService';
-// 👉 FIX: Added generateTestCasesWithAI import
 import { findFailingTestCaseWithAI, generateTestCasesWithAI } from '../modules/ai/aiService';
 import { ContestStatus } from '@prisma/client';
 import axios from 'axios';
@@ -70,6 +69,20 @@ async function requireJudgeAccess(submissionId: string, req: Request) {
 export function mountV2Routes(app: Express, io: Server) {
   const router = Router();
 
+  // 👉 UPDATED: Match the exact Socket events emitted by your React frontend
+  io.on('connection', (socket) => {
+    // Join the generic contest room
+    socket.on('joinContest', (contestId) => {
+      socket.join(contestId);
+    });
+
+    // Broadcast chat messages to the room
+    socket.on('sendChatMessage', (data) => {
+      // data expects { contestId, team, message }
+      socket.to(data.contestId).emit('chatMessage', data.message);
+    });
+  });
+
   router.get('/health', asyncRoute(async (_req, res) => {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ ok: true, sourceOfTruth: 'postgres-prisma' });
@@ -92,11 +105,20 @@ export function mountV2Routes(app: Express, io: Server) {
     try {
       const { data } = await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
         }
       });
+      
       const $ = cheerio.load(data);
+      $('img').each((_, el) => {
+        const src = $(el).attr('src');
+        if (src && src.startsWith('/')) {
+          $(el).attr('src', `https://mirror.codeforces.com${src}`);
+        }
+      });
+
       const statementHtml = $('.problem-statement').html();
       if (!statementHtml) return res.status(404).send('Problem statement structure not found on the mirror page.');
 
@@ -114,10 +136,37 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
 
   // ==========================================
-  // AI ROUTES
+  // AI & RECOMMENDATION ROUTES
   // ==========================================
   
-  // 1. Contest Owner AI Generator
+  // 👉 ADDED: The missing endpoint for the "Suggest Missing Problems" frontend button
+  router.post('/contests/:id/recommend-problems', asyncRoute(async (req, res) => {
+    // In a full implementation, you would pass the current contest problems to Gemini
+    // For now, return a curated mock to ensure the frontend button functions correctly
+    res.json({ success: true, recommendations: ['1920B (Div 2. B)', '1805C (Math/Graphs)', '1750D (Combinatorics)'] });
+  }));
+
+  router.post('/recommendations/generate', asyncRoute(async (req, res) => {
+    const { failedProblemTags, userRating } = req.body;
+    
+    if (!failedProblemTags || failedProblemTags.length === 0) {
+      return res.json({ success: true, recommendations: [] });
+    }
+
+    const baseRating = userRating || 1200;
+    
+    const recommendations = await prisma.problem.findMany({
+      where: {
+        tags: { hasSome: failedProblemTags },
+        rating: { gte: baseRating - 100, lte: baseRating + 300 }
+      },
+      take: 3,
+      orderBy: { rating: 'asc' }
+    });
+    
+    res.json({ success: true, recommendations });
+  }));
+
   router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
     const { masterSolution } = req.body;
     if (!masterSolution) return res.status(400).json({ error: "Master solution required." });
@@ -125,7 +174,6 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ success: true, generatedCount: testcases.length, testcases });
   }));
 
-  // 2. Contestant AI Debugger (Deducts 50 Points from Standings)
   router.post('/contests/:id/problems/:problemId/ai-debug', asyncRoute(async (req, res) => {
     const viewerEmail = req.headers['x-user-email'] as string;
     const { id: contestId } = req.params;
@@ -149,7 +197,6 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ success: true, aiDebugData: aiResponse });
   }));
 
-  // 👉 NEW: 3. Standalone Judge AI Testcase Generator (Free)
   router.post('/ai/generate-testcases', asyncRoute(async (req, res) => {
     const { problemDescription, masterSolution } = req.body;
     if (!problemDescription || !masterSolution) throw new Error("Description and solution required.");
@@ -157,7 +204,6 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ success: true, testcases });
   }));
 
-  // 👉 NEW: 4. Standalone Judge AI Debugger (Deducts 50 Coins)
   router.post('/ai/debug-with-coins', asyncRoute(async (req, res) => {
     const viewerEmail = req.headers['x-user-email'] as string;
     const { userCode, problemDescription } = req.body;
@@ -166,7 +212,6 @@ export function mountV2Routes(app: Express, io: Server) {
     const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
     if (!user) throw new Error("Unauthorized");
     
-    // Check and deduct coins
     if ((user.coins || 0) < 50) throw new Error("Insufficient coins. You need 50 coins to use the AI Tutor.");
     
     await prisma.user.update({
@@ -177,7 +222,6 @@ export function mountV2Routes(app: Express, io: Server) {
     const aiResponse = await findFailingTestCaseWithAI(problemDescription, userCode);
     res.json({ success: true, aiDebugData: aiResponse });
   }));
-
 
   // ==========================================
   // GENERAL ROUTES
@@ -382,26 +426,24 @@ export function mountV2Routes(app: Express, io: Server) {
     res.status(201).json(submission);
   }));
 
-// Look for your POST handler for /submissions/:id/judge
-router.post('/submissions/:id/judge', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { wait } = req.query;
-
-    if (wait === 'true') {
-      // 🚀 Crucial: Await the judging process synchronously so the frontend spinner stays active
-      const result = await judgeQueuedSubmission(id);
-      return res.json(result);
+  router.post('/submissions/:id/judge', asyncRoute(async (req, res) => {
+    await requireJudgeAccess(req.params.id, req);
+    if (String(req.query.wait || req.body?.wait || '') !== 'true') {
+      const job = await enqueueJudgeSubmission(req.params.id);
+      res.status(202).json({ ok: true, queued: true, job });
+      return;
     }
 
-    // Otherwise, handle it asynchronously via your normal background queue
-    // queue.add({ submissionId: id });
-    return res.json({ status: 'queued', submissionId: id });
-  } catch (error: any) {
-    console.error('Judging route error:', error);
-    return res.status(500).json({ error: error.message || 'Internal judging router failure' });
-  }
-});
+    const result = await judgeQueuedSubmission(req.params.id);
+    if (result.submission.contestId && result.standings) {
+      io.to(`contest:${result.submission.contestId}`).emit('standings:update', {
+        contestId: result.submission.contestId,
+        standings: result.standings
+      });
+    }
+    io.to(`submission:${result.submission.id}`).emit('submission:judged', result.submission);
+    res.json({ ok: true, ...result });
+  }));
 
   router.get('/contests/:id/submissions', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);

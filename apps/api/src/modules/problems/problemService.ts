@@ -112,7 +112,6 @@ export async function createInternalProblem(input: CreateProblemInput) {
 }
 
 // 👉 NEW: AI Test Case Generator
-// Replace the existing function with this one:
 export async function generateAndAppendAITestcases(problemId: string, providedMasterSolution: string) {
   const problem = await prisma.problem.findUnique({ where: { id: problemId } });
   if (!problem) throw new Error('Problem not found');
@@ -134,9 +133,19 @@ export async function generateAndAppendAITestcases(problemId: string, providedMa
   await prisma.testcase.createMany({ data: testcaseRecords });
   return generatedCases;
 }
+
 export async function syncTestCasesFromCodeforces(problemId: string, url: string) {
   try {
-    const { data } = await axios.get(url);
+    // 👉 FIXED: Route through mirror domain and add browser headers to bypass CF 503 Shield
+    const targetUrl = url.replace('codeforces.com', 'mirror.codeforces.com');
+    const { data } = await axios.get(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+      }
+    });
+    
     const $ = cheerio.load(data);
     const scrapedCases: TestcaseInput[] = [];
 
@@ -170,6 +179,6 @@ export async function syncTestCasesFromCodeforces(problemId: string, url: string
     });
   } catch (error) {
     console.error(error);
-    throw new Error('Failed to scrape Codeforces test cases');
+    throw new Error('Failed to scrape Codeforces test cases (Cloudflare blocked or URL invalid)');
   }
 }

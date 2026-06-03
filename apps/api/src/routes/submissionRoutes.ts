@@ -6,7 +6,7 @@ import { getContestSubmissions } from '../modules/contests/submissionService';
 
 export const submissionRouter = Router();
 
-// 👉 ADDED: Endpoint to fetch submissions securely based on privacy rules
+// Endpoint to fetch submissions securely based on privacy rules
 submissionRouter.get('/contest/:contestId', async (req, res) => {
   try {
     const { contestId } = req.params;
@@ -70,6 +70,15 @@ submissionRouter.post('/:id/report', async (req, res) => {
       }
     });
 
+    // 👉 ADDED: Tell the room to refresh so the owner sees the report instantly
+    const submission = await prisma.submission.findUnique({ where: { id } });
+    if (submission && submission.contestId) {
+      const io = req.app.get('io');
+      if (io) {
+        io.to(submission.contestId).emit('submissionsUpdated');
+      }
+    }
+
     return res.json({ success: true, report });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -91,6 +100,12 @@ submissionRouter.post('/:id/override', async (req, res) => {
     // Recompute standings so the overridden points immediately reflect on the leaderboard
     if (submission.contestId) {
       await recomputeContestStandings(submission.contestId);
+      
+      // 👉 ADDED: Fire the WebSocket event so everyone's screen flashes the new standings instantly!
+      const io = req.app.get('io');
+      if (io) {
+        io.to(submission.contestId).emit('submissionsUpdated');
+      }
     }
 
     return res.json({ success: true, submission });

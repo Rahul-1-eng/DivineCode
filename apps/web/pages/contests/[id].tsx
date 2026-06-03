@@ -2,6 +2,12 @@ import { CSSProperties, Fragment, useEffect, useMemo, useRef, useState } from 'r
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 
+// 👉 Upgraded UI & Real-Time Imports
+import toast, { Toaster } from 'react-hot-toast';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+import { io, Socket } from 'socket.io-client';
+
 export async function getServerSideProps() { return { props: {} }; }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -48,15 +54,27 @@ export default function ContestRoomPage() {
   const [registerTeam, setRegisterTeam] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
   
-  // 👉 ADDED: Timer Tick State for Lock Screen and Unregister Logic
   const [nowTick, setNowTick] = useState(Date.now());
   const syncingRef = useRef(false);
+  
+  // 👉 Socket & Scroll References
+  const socketRef = useRef<Socket | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // 👉 UI States
+  const [standingsMode, setStandingsMode] = useState<'team' | 'individual'>('team');
+  const [isRecommending, setIsRecommending] = useState(false);
+  const [generatingTcFor, setGeneratingTcFor] = useState<string | null>(null);
+
+  // 👉 Chat States
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [messages, setMessages] = useState<{id: number, text: string, sender: string, time: Date}[]>([]);
 
   const isOwner = Boolean(contest?.canManage);
   const viewerMember = contest?.viewerMember || null;
   const canSeeProblemMeta = Boolean(contest?.visibility?.canSeeProblemMeta);
 
-  // Deriving active states
   const startTimeMs = contest ? new Date(contest.startTime).getTime() : 0;
   const isScheduledLockScreen = nowTick < startTimeMs;
   const halfTimeMs = startTimeMs + ((contest?.durationMinutes || 0) * 60000 / 2);
@@ -76,14 +94,13 @@ export default function ContestRoomPage() {
     return parts.join(' ');
   }
 
-  // Effect for live lock-screen countdown
   useEffect(() => {
     const ticker = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(ticker);
   }, []);
 
   async function registerForContest() {
-    if (!id || !session || !registerHandle.trim()) return alert("Codeforces handle is required");
+    if (!id || !session || !registerHandle.trim()) return toast.error("Codeforces handle is required");
     setIsRegistering(true);
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/register`, {
       method: 'POST',
@@ -96,23 +113,22 @@ export default function ContestRoomPage() {
     const data = await res.json();
     setIsRegistering(false);
     
-    if (!res.ok) return alert(data.error || 'Failed to register');
+    if (!res.ok) return toast.error(data.error || 'Failed to register');
     
     setContest(data);
     await loadSubmissions();
-    alert("Successfully registered! You can now submit code.");
+    toast.success("Successfully registered! You can now submit code.");
   }
 
-  // 👉 ADDED: Unregister Action
   async function unregisterFromContest() {
     if (!confirm("Are you sure you want to unregister? You will lose access to submit.")) return;
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/unregister`, { method: 'POST', headers: viewerHeaders(session) });
     if(res.ok) {
-      alert('Successfully unregistered.');
+      toast.success('Successfully unregistered.');
       loadContest();
     } else {
       const data = await res.json();
-      alert(data.error || 'Failed to unregister');
+      toast.error(data.error || 'Failed to unregister');
     }
   }
 
@@ -151,18 +167,19 @@ export default function ContestRoomPage() {
     const data = await res.json();
     syncingRef.current = false;
     setSyncing(false);
-    if (!res.ok) { if (!silent) alert(data.error || 'Sync failed'); return; }
+    if (!res.ok) { if (!silent) toast.error(data.error || 'Sync failed'); return; }
     await loadContest();
     await loadSubmissions();
     setLastSync(data.queued ? `${new Date().toLocaleTimeString()} - sync queued` : `${new Date().toLocaleTimeString()} - ${data.synced?.length || 0} accepted`);
-    if (!silent) alert(data.queued ? 'Codeforces sync queued.' : `Synced ${data.synced?.length || 0} accepted submission(s).`);
+    if (!silent) toast.success(data.queued ? 'Codeforces sync queued.' : `Synced ${data.synced?.length || 0} accepted submission(s).`);
   }
 
   async function extendTime(minutes: number) {
     if (!id || !session) return;
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/extend`, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify({ minutes }) });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Could not extend');
+    if (!res.ok) return toast.error(data.error || 'Could not extend');
+    toast.success(`Time extended by ${minutes} minutes.`);
     setContest(data);
   }
 
@@ -170,7 +187,8 @@ export default function ContestRoomPage() {
     if (!id || !session || !confirm('Delete this live mashup and its submissions?')) return;
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}`, { method: 'DELETE', headers: viewerHeaders(session) });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Could not delete contest');
+    if (!res.ok) return toast.error(data.error || 'Could not delete contest');
+    toast.success('Contest deleted successfully.');
     router.push('/contests');
   }
 
@@ -182,20 +200,19 @@ export default function ContestRoomPage() {
   }
 
   async function addProblem() {
-    if (!id || !session || !newProblemCode.trim()) return alert('Enter a problem code.');
+    if (!id || !session || !newProblemCode.trim()) return toast.error('Enter a problem code.');
     try {
       const p = await lookupProblem(newProblemPlatform, newProblemCode);
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems`, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify(p) });
       const data = await res.json();
-      if (!res.ok) return alert(data.error || 'Could not add problem');
+      if (!res.ok) return toast.error(data.error || 'Could not add problem');
+      toast.success('Problem added successfully.');
       setContest(data);
       setNewProblemCode('');
-    } catch (e: any) { alert(e.message || 'Could not add problem'); }
+    } catch (e: any) { toast.error(e.message || 'Could not add problem'); }
   }
 
-  const [generatingTcFor, setGeneratingTcFor] = useState<string | null>(null);
-
- async function generateAITestcases(problemId: string) {
+  async function generateAITestcases(problemId: string) {
     const masterSolution = prompt('To generate accurate system test cases, the AI needs a correct Master Solution. Please paste working code here:');
     if (!masterSolution) return;
     
@@ -204,22 +221,41 @@ export default function ContestRoomPage() {
       const res = await fetch(`${API_V2_BASE_URL}/problems/${problemId}/generate-ai-testcases`, { 
         method: 'POST', 
         headers: viewerHeaders(session),
-        body: JSON.stringify({ masterSolution }) // Sends solution to backend
+        body: JSON.stringify({ masterSolution })
       });
       const data = await res.json();
-      if (res.ok) alert(`Successfully generated ${data.generatedCount} new system test cases!`);
-      else alert(data.error || 'Failed to generate test cases.');
+      if (res.ok) toast.success(`Successfully generated ${data.generatedCount} new system test cases!`);
+      else toast.error(data.error || 'Failed to generate test cases.');
     } catch (e: any) {
-      alert('Network error while connecting to AI.');
+      toast.error('Network error while connecting to AI.');
     } finally {
       setGeneratingTcFor(null);
     }
   }
+
+  async function generateAIRecommendations() {
+    if (!id || !session) return;
+    setIsRecommending(true);
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/recommend-problems`, { 
+        method: 'POST', headers: viewerHeaders(session) 
+      });
+      const data = await res.json();
+      if (res.ok) toast.success(`AI Recommended: ${data.recommendations.join(', ')}`);
+      else toast.error(data.error || 'Failed to fetch AI recommendations');
+    } catch (e) {
+      toast.error('Network error while generating recommendations.');
+    } finally {
+      setIsRecommending(false);
+    }
+  }
+
   async function removeProblem(problemId: string) {
     if (!id || !session || !confirm('Remove this problem from the live contest?')) return;
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, { method: 'DELETE', headers: viewerHeaders(session) });
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Could not remove problem');
+    if (!res.ok) return toast.error(data.error || 'Could not remove problem');
+    toast.success('Problem removed.');
     setContest(data);
   }
 
@@ -231,9 +267,10 @@ export default function ContestRoomPage() {
       const p = await lookupProblem('Codeforces', code);
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, { method: 'PUT', headers: viewerHeaders(session), body: JSON.stringify(p) });
       const data = await res.json();
-      if (!res.ok) return alert(data.error || 'Could not replace problem');
+      if (!res.ok) return toast.error(data.error || 'Could not replace problem');
+      toast.success('Problem replaced successfully.');
       setContest(data);
-    } catch (e: any) { alert(e.message || 'Could not replace problem'); }
+    } catch (e: any) { toast.error(e.message || 'Could not replace problem'); }
   }
 
   async function submitReport() {
@@ -241,8 +278,8 @@ export default function ContestRoomPage() {
     const res = await fetch(`${API_BASE_URL}/api/submissions/${selectedSubmission.id}/report`, {
       method: 'POST', headers: viewerHeaders(session), body: JSON.stringify({ reason: reportReason })
     });
-    if (res.ok) { alert('Report submitted successfully to the contest owner.'); setReportReason(''); } 
-    else { const data = await res.json(); alert(data.error || 'Failed to report submission'); }
+    if (res.ok) { toast.success('Report submitted successfully to the contest owner.'); setReportReason(''); } 
+    else { const data = await res.json(); toast.error(data.error || 'Failed to report submission'); }
   }
   
   async function finalizeContest() {
@@ -251,8 +288,8 @@ export default function ContestRoomPage() {
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/finalize`, { method: 'POST', headers: viewerHeaders(session) });
     const data = await res.json();
     setSyncing(false);
-    if (!res.ok) return alert(data.error || 'Could not finalize contest');
-    alert(data.message);
+    if (!res.ok) return toast.error(data.error || 'Could not finalize contest');
+    toast.success(data.message || 'Contest finalized!');
     router.push(`/contests/${id}/final`);
   }
 
@@ -262,18 +299,88 @@ export default function ContestRoomPage() {
       method: 'POST', headers: viewerHeaders(session), body: JSON.stringify({ manualPoints: Number(overridePoints) })
     });
     if (res.ok) {
-      alert('Points overridden successfully. Standings will recalculate instantly.');
+      toast.success('Points overridden successfully. Standings will recalculate instantly.');
       setSelectedSubmission(null);
       await loadSubmissions();
       await loadContest(); 
     } else {
-      const data = await res.json(); alert(data.error || 'Failed to override points');
+      const data = await res.json(); toast.error(data.error || 'Failed to override points');
     }
   }
 
+  // 👉 Local Chat Handler with WebSockets
+  const handleSendMessage = () => {
+    if (!chatInput.trim()) return;
+    
+    const newMsg = {
+      id: Date.now(),
+      text: chatInput.trim(),
+      sender: viewerMember?.name || session?.user?.name || 'Me',
+      time: new Date()
+    };
+    
+    // Optimistic UI Update
+    setMessages(prev => [...prev, newMsg]);
+    setChatInput('');
+    
+    // Emit to backend
+    if (socketRef.current) {
+      socketRef.current.emit('sendChatMessage', {
+        contestId: id,
+        team: viewerMember?.teamName || viewerMember?.team || 'Solo',
+        message: newMsg
+      });
+    }
+  };
+
+  // 👉 Core Lifecycle Effects
   useEffect(() => { loadContest(); loadSubmissions(); }, [id, session?.user?.email, session?.user?.name]);
+  
   useEffect(() => { const timer = setInterval(() => setTimeLeft((prev) => Math.max(0, prev - 1)), 1000); return () => clearInterval(timer); }, []);
-  useEffect(() => { if (!id || !session || isFinal) return; const live = setInterval(() => { loadContest(); loadSubmissions(); syncCodeforces(true); }, 30000); return () => clearInterval(live); }, [id, session?.user?.email, session?.user?.name, isFinal]);
+  
+  // 👉 Socket.io Implementation (Replaces 30s Polling)
+  useEffect(() => {
+    if (!id || !session || isFinal) return;
+  
+    socketRef.current = io(API_BASE_URL, {
+      transports: ['websocket'],
+      reconnection: true
+    });
+  
+    const socket = socketRef.current;
+  
+    socket.on('connect', () => {
+      socket.emit('joinContest', id);
+    });
+  
+    socket.on('contestUpdated', () => {
+      loadContest();
+    });
+  
+    socket.on('submissionsUpdated', () => {
+      loadSubmissions();
+      syncCodeforces(true); 
+    });
+  
+    socket.on('chatMessage', (incomingMessage) => {
+      setMessages((prev) => {
+        if (prev.some(m => m.id === incomingMessage.id)) return prev;
+        // Ensure Date is correctly parsed if coming as a string from the socket
+        return [...prev, { ...incomingMessage, time: new Date(incomingMessage.time) }];
+      });
+    });
+  
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [id, session?.user?.email, session?.user?.name, isFinal]);
+  
+  // 👉 Auto-Scroll Effect for Chat Messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   useEffect(() => { if (!id || !contest || isFinal) return; if (timeLeft === 0 && !isScheduledLockScreen) router.push(`/contests/${id}/final`); }, [timeLeft, id, contest, isFinal, isScheduledLockScreen]);
 
   const problemById = useMemo(() => Object.fromEntries((contest?.problems || []).map((p: any, i: number) => [p.id, { ...p, label: String.fromCharCode(65 + i) }])), [contest]);
@@ -318,7 +425,7 @@ export default function ContestRoomPage() {
       const member = memberById[standing.memberId] || {};
       const team = member.teamName || member.team || 'Individuals';
       if (!grouped[team]) grouped[team] = { team, solved: 0, penalty: 0, score: 0, players: [] };
-   
+    
       let safeScore = standing.score || 0;
       if (safeScore === 0 && standing.solvedProblems) {
         safeScore = standing.solvedProblems.reduce((sum: number, pId: string) => sum + (problemById[pId]?.points || 1000), 0);
@@ -340,14 +447,30 @@ export default function ContestRoomPage() {
 
   const memberSubmissions = selectedMember ? submissions.filter((submission) => submission.memberId === selectedMember.memberId || submission.participantId === selectedMember.memberId) : [];
 
-  if (status === 'loading') return <main style={page}><h1>Checking account...</h1></main>;
+  const mySubmissions = viewerMember ? submissions.filter((s) => s.memberId === viewerMember.id || s.participantId === viewerMember.id || s.userId === (session?.user?.name || session?.user?.email)) : [];
+  const myTotalAttempts = mySubmissions.length;
+  const myAccepted = mySubmissions.filter(s => s.verdict.includes('ACCEPT') || s.verdict === 'OK').length;
+  const myAccuracy = myTotalAttempts > 0 ? Math.round((myAccepted / myTotalAttempts) * 100) : 0;
+  const myStanding = viewerMember ? individualStandings.find((s: any) => s.memberId === viewerMember.id) : null;
+
+  const CentralSpinner = ({ text }: { text: string }) => (
+    <main style={{ ...page, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 48, height: 48, border: '4px solid rgba(103, 232, 249, 0.2)', borderTopColor: '#67e8f9', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <h2 style={{ color: '#a8b3c7', marginTop: 16 }}>{text}</h2>
+    </main>
+  );
+
+  if (status === 'loading') return <CentralSpinner text="Checking account..." />;
   if (!session) return <main style={page}><section style={gate}><h1>Sign in required</h1><p style={{ color: '#a8b3c7' }}>Sign in first.</p><a href="/signin" style={primaryLink}>Sign in with Google</a></section></main>;
   if (error) return <main style={page}><h1>{error}</h1><a href="/contests" style={link}>Back to contests</a></main>;
-  if (!contest) return <main style={page}><h1>Loading contest...</h1></main>;
+  if (!contest) return <CentralSpinner text="Loading contest room..." />;
 
   return (
     <main style={page}>
-      
+      {/* 👉 Global Toaster Registration */}
+      <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
+
       {selectedMember && (
         <div style={overlay}>
           <div style={{...overlayModal, width: '90%', maxWidth: 900, maxHeight: '85vh', display: 'flex', flexDirection: 'column'}}>
@@ -409,10 +532,47 @@ export default function ContestRoomPage() {
           </div>
         </div>
 
-       {/* 👉 FIX 2: Added !isOwner so the creator can always edit the scheduled time */}
+        {isFinal && viewerMember && (
+          <section style={{ ...panel, marginBottom: 18, background: 'linear-gradient(145deg, #0f172a, #1e1b4b)', border: '1px solid #6366f1' }}>
+            <h2 style={{ color: '#a5b4fc', margin: '0 0 15px 0' }}>🏆 Post-Contest Performance Report</h2>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 15 }}>
+              <div style={{ background: '#020617', padding: 15, borderRadius: 12, border: '1px solid #334155', textAlign: 'center' }}>
+                <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 5 }}>Final Rank</div>
+                <div style={{ color: '#fbbf24', fontSize: 28, fontWeight: 'bold' }}>#{myStanding?.rank || '-'}</div>
+              </div>
+
+              <div style={{ background: '#020617', padding: 15, borderRadius: 12, border: '1px solid #334155', textAlign: 'center' }}>
+                <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 5 }}>Total Score</div>
+                <div style={{ color: '#67e8f9', fontSize: 28, fontWeight: 'bold' }}>{myStanding?.score || 0}</div>
+              </div>
+
+              <div style={{ background: '#020617', padding: 15, borderRadius: 12, border: '1px solid #334155', textAlign: 'center' }}>
+                <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 5 }}>Problems Solved</div>
+                <div style={{ color: '#4ade80', fontSize: 28, fontWeight: 'bold' }}>{myStanding?.solved || 0}</div>
+              </div>
+
+              <div style={{ background: '#020617', padding: 15, borderRadius: 12, border: '1px solid #334155', textAlign: 'center' }}>
+                <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 5 }}>Accuracy</div>
+                <div style={{ color: myAccuracy >= 50 ? '#4ade80' : '#f87171', fontSize: 28, fontWeight: 'bold' }}>{myAccuracy}%</div>
+              </div>
+
+              <div style={{ background: '#020617', padding: 15, borderRadius: 12, border: '1px solid #334155', textAlign: 'center' }}>
+                <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 5 }}>Total Penalty</div>
+                <div style={{ color: '#f87171', fontSize: 28, fontWeight: 'bold' }}>{myStanding?.penalty || 0}</div>
+              </div>
+            </div>
+          </section>
+        )}
+
         {isScheduledLockScreen && !isOwner ? (
           <section style={{...panel, textAlign: 'center', padding: '60px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(251,191,36,0.05))'}}>
-             <h2 style={{fontSize: 32, marginBottom: 10, color: '#fbbf24'}}>🔒 Contest has not started yet</h2>
+             <h2 style={{ fontSize: 32, marginBottom: 10, color: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+               <svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+               </svg>
+               Contest has not started yet
+             </h2>
              <p style={{color: '#a8b3c7', fontSize: 18}}>Problems will be revealed when the countdown reaches zero.</p>
              <div style={{fontSize: 48, fontWeight: 'bold', color: '#67e8f9', marginTop: 20, fontFamily: 'monospace'}}>
                {formatCountdown(startTimeMs - nowTick)}
@@ -420,8 +580,6 @@ export default function ContestRoomPage() {
           </section>
         ) : (
           <>
-            {/* The rest of the dashboard UI goes here */}
-            {/* The rest of the workspace is hidden behind the lock screen until the start time */}
             {!isOwner && !viewerMember && contest.status !== 'ENDED' && (
               <section style={{ ...panel, marginBottom: 18, border: '1px solid #22d3ee', background: 'rgba(34, 211, 238, 0.05)' }}>
                 <h2 style={{color: '#22d3ee', margin: '0 0 10px 0'}}>Join this Contest</h2>
@@ -436,7 +594,6 @@ export default function ContestRoomPage() {
               </section>
             )}
 
-            {/* 👉 ADDED: Unregister mid-contest visibility */}
             {canUnregister && (
               <section style={{ ...panel, marginBottom: 18, padding: 16 }}>
                 <p style={{ color: '#94a3b8', display: 'inline-block', marginRight: 15 }}>Not ready? You can unregister before half-time.</p>
@@ -459,6 +616,11 @@ export default function ContestRoomPage() {
                 <select value={newProblemPlatform} onChange={(e) => setNewProblemPlatform(e.target.value)} style={smallInput}><option>Codeforces</option><option>LeetCode</option><option>AtCoder</option><option>CodeChef</option></select>
                 <input value={newProblemCode} onChange={(e) => setNewProblemCode(e.target.value)} placeholder="1805A" style={smallInput} />
                 <button onClick={addProblem} style={primaryButton}>Add Problem</button>
+                
+                <button onClick={generateAIRecommendations} disabled={isRecommending} style={{ ...ghostButton, color: '#fbbf24', borderColor: 'rgba(251, 191, 36, 0.4)' }}>
+                  {isRecommending ? '✨ Curating...' : '✨ Suggest Missing Problems'}
+                </button>
+
                 <h2>Players</h2>
                 {(contest.participants || contest.members || []).map((m: any) => (
                   <p key={m.id} style={{ color: '#cbd5e1', marginBottom: '8px', lineHeight: '1.4' }}>
@@ -507,15 +669,15 @@ export default function ContestRoomPage() {
                         <a href={safeProblemHref} style={primaryLink}>
                           {isSolvedByTeam ? 'Review problem' : 'Open problem'}
                         </a>
-                       {isOwner && (
-  <>
-    <button onClick={() => generateAITestcases(p.problemId || p.id)} disabled={generatingTcFor === (p.problemId || p.id)} style={{...ghostButton, color: '#a5b4fc', borderColor: 'rgba(99, 102, 241, 0.4)'}}>
-      {generatingTcFor === (p.problemId || p.id) ? 'Generating...' : '🤖 Generate Hidden Test Cases'}
-    </button>
-    <button onClick={() => replaceProblem(p.id)} style={ghostButton}>Replace</button>
-    <button onClick={() => removeProblem(p.id)} style={ghostButton}>Remove</button>
-  </>
-)}
+                        {isOwner && (
+                          <>
+                            <button onClick={() => generateAITestcases(p.problemId || p.id)} disabled={generatingTcFor === (p.problemId || p.id)} style={{...ghostButton, color: '#a5b4fc', borderColor: 'rgba(99, 102, 241, 0.4)'}}>
+                              {generatingTcFor === (p.problemId || p.id) ? 'Generating...' : '🤖 Generate Hidden Test Cases'}
+                            </button>
+                            <button onClick={() => replaceProblem(p.id)} style={ghostButton}>Replace</button>
+                            <button onClick={() => removeProblem(p.id)} style={ghostButton}>Remove</button>
+                          </>
+                        )}
                       </div>}
                     </div>;
                   })}
@@ -524,52 +686,114 @@ export default function ContestRoomPage() {
             </div>
 
             <section style={{ ...panel, marginTop: 18 }}>
-              <h2>Team Standings</h2>
-              <div style={{ overflowX: 'auto' }}><table style={table}><thead><tr><th style={th}>Rank</th><th style={th}>Group</th><th style={th}>Solved</th><th style={th}>Penalty</th><th style={th}>Score</th></tr></thead><tbody>{teamStandings.map((team: any, i: number) => <Fragment key={team.team}><tr onClick={() => setOpenTeam(openTeam === team.team ? null : team.team)} style={clickRow}><td style={td}>#{i + 1}</td><td style={td}>{team.team}</td><td style={td}>{team.solved}</td><td style={td}>{team.penalty}</td><td style={{...td, color: '#fbbf24', fontWeight: 'bold'}}>{team.score}</td></tr>{openTeam === team.team && team.players.map((player: any, pi: number) => <tr key={player.memberId} onClick={() => canInspectMember(player.memberId) && setSelectedMember(player)} style={canInspectMember(player.memberId) ? subRow : mutedRow}><td style={td}>#{pi + 1}</td><td style={td}>{player.name}</td><td style={td}>{player.solved}</td><td style={td}>{player.penalty}</td><td style={td}>{player.score}</td></tr>)}</Fragment>)}</tbody></table></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h2 style={{ margin: 0 }}>Leaderboard</h2>
+                <div style={{ display: 'flex', background: '#020617', borderRadius: 8, padding: 4, border: '1px solid rgba(148,163,184,.22)' }}>
+                  <button onClick={() => setStandingsMode('team')} style={{ ...ghostButton, margin: 0, border: 'none', background: standingsMode === 'team' ? 'rgba(34, 211, 238, 0.1)' : 'transparent', color: standingsMode === 'team' ? '#67e8f9' : '#94a3b8' }}>Teams</button>
+                  <button onClick={() => setStandingsMode('individual')} style={{ ...ghostButton, margin: 0, border: 'none', background: standingsMode === 'individual' ? 'rgba(34, 211, 238, 0.1)' : 'transparent', color: standingsMode === 'individual' ? '#67e8f9' : '#94a3b8' }}>Individuals</button>
+                </div>
+              </div>
+
+              <div style={{ overflowX: 'auto' }}>
+                <table style={table}>
+                  <thead>
+                    <tr>
+                      <th style={th}>Rank</th>
+                      <th style={th}>{standingsMode === 'team' ? 'Group' : 'Player'}</th>
+                      <th style={th}>Solved</th>
+                      <th style={th}>Penalty</th>
+                      <th style={th}>Score</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Empty States */}
+                    {standingsMode === 'team' && teamStandings.length === 0 && (
+                      <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#94a3b8' }}>No teams on the board yet.</td></tr>
+                    )}
+                    {standingsMode === 'individual' && individualStandings.length === 0 && (
+                      <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#94a3b8' }}>No individuals on the board yet.</td></tr>
+                    )}
+
+                    {standingsMode === 'team' 
+                      ? teamStandings.map((team: any, i: number) => (
+                          <Fragment key={team.team}>
+                            <tr onClick={() => setOpenTeam(openTeam === team.team ? null : team.team)} style={clickRow}>
+                              <td style={td}>#{i + 1}</td>
+                              <td style={td}>{team.team}</td>
+                              <td style={td}>{team.solved}</td>
+                              <td style={td}>{team.penalty}</td>
+                              <td style={{...td, color: '#fbbf24', fontWeight: 'bold'}}>{team.score}</td>
+                            </tr>
+                            {openTeam === team.team && team.players.map((player: any, pi: number) => (
+                              <tr key={player.memberId} onClick={() => canInspectMember(player.memberId) && setSelectedMember(player)} style={canInspectMember(player.memberId) ? subRow : mutedRow}>
+                                <td style={td}>#{pi + 1}</td>
+                                <td style={td}>{player.name}</td>
+                                <td style={td}>{player.solved}</td>
+                                <td style={td}>{player.penalty}</td>
+                                <td style={td}>{player.score}</td>
+                              </tr>
+                            ))}
+                          </Fragment>
+                        ))
+                      : individualStandings.map((player: any) => (
+                          <tr key={player.memberId} onClick={() => canInspectMember(player.memberId) && setSelectedMember(player)} style={canInspectMember(player.memberId) ? clickRow : mutedRow}>
+                            <td style={td}>#{player.rank}</td>
+                            <td style={td}>{player.name} <span style={{ color: '#94a3b8', fontSize: 12 }}>({player.team})</span></td>
+                            <td style={td}>{player.solved || 0}</td>
+                            <td style={td}>{player.penalty || 0}</td>
+                            <td style={{...td, color: '#fbbf24', fontWeight: 'bold'}}>{player.score || 0}</td>
+                          </tr>
+                        ))
+                    }
+                  </tbody>
+                </table>
+              </div>
             </section>
             
             <section style={{ ...panel, marginTop: 18 }}>
               <h2>{isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}</h2>
               {submissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
-              <div style={{ overflowX: 'auto' }}>
-                <table style={table}>
-                  <thead>
-                    <tr>
-                      <th style={th}>Time</th>
-                      <th style={th}>User</th>
-                      <th style={th}>Problem</th>
-                      <th style={th}>Verdict</th>
-                      <th style={th}>Source</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {submissions.map((submission) => (
-                      <tr key={submission.id} style={clickRow}>
-                        <td style={td}>{new Date(submission.createdAt).toLocaleString()}</td>
-                        <td style={td}>{submission.userId}</td>
-                        <td style={td}>
-                          {problemById[submission.problemId]?.label || ''} 
-                          {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot : ''}
-                        </td>
-                        <td style={{...td, color: submission.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>
-                          {submission.verdict}
-                        </td>
-                        <td style={td}>
-                          <button 
-                            onClick={(e) => { 
-                              e.stopPropagation(); 
-                              setSelectedSubmission(submission); 
-                            }} 
-                            style={ghostButton}
-                          >
-                            View Details
-                          </button>
-                        </td>
+              {submissions.length > 0 && (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={table}>
+                    <thead>
+                      <tr>
+                        <th style={th}>Time</th>
+                        <th style={th}>User</th>
+                        <th style={th}>Problem</th>
+                        <th style={th}>Verdict</th>
+                        <th style={th}>Source</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {submissions.map((submission) => (
+                        <tr key={submission.id} style={clickRow}>
+                          <td style={td}>{new Date(submission.createdAt).toLocaleString()}</td>
+                          <td style={td}>{submission.userId}</td>
+                          <td style={td}>
+                            {problemById[submission.problemId]?.label || ''} 
+                            {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot : ''}
+                          </td>
+                          <td style={{...td, color: submission.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>
+                            {submission.verdict}
+                          </td>
+                          <td style={td}>
+                            <button 
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                setSelectedSubmission(submission); 
+                              }} 
+                              style={ghostButton}
+                            >
+                              View Details
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </section>
 
             {selectedSubmission && <section style={{ ...panel, marginTop: 18 }}>
@@ -581,12 +805,24 @@ export default function ContestRoomPage() {
                 <p><b>Verdict:</b> {selectedSubmission.verdict}</p>
                 <p><b>Language:</b> {selectedSubmission.language || 'Unknown'}</p>
                 
+                {/* 👉 Syntactic Highlighting Integration */}
                 {selectedSubmission.code && (
                   <div style={{marginTop: 12}}>
                     <strong style={{color: '#cbd5e1'}}>Source Code:</strong>
-                    <pre style={{background: '#020617', padding: 12, borderRadius: 8, maxHeight: 300, overflow: 'auto', marginTop: 8, color: '#e2e8f0', fontFamily: 'monospace'}}>
-                      {selectedSubmission.code}
-                    </pre>
+                    <div style={{ marginTop: 8, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(148,163,184,.2)' }}>
+                      <SyntaxHighlighter 
+                        language={
+                          selectedSubmission.language?.toLowerCase().includes('python') ? 'python' : 
+                          selectedSubmission.language?.toLowerCase().includes('java') ? 'java' : 
+                          'cpp'
+                        } 
+                        style={vscDarkPlus}
+                        customStyle={{ margin: 0, padding: 16, maxHeight: 400, background: '#020617' }}
+                        showLineNumbers={true}
+                      >
+                        {selectedSubmission.code}
+                      </SyntaxHighlighter>
+                    </div>
                   </div>
                 )}
                 
@@ -628,11 +864,64 @@ export default function ContestRoomPage() {
           </>
         )}
       </section>
+
+      {/* 👉 Floating Team Chat Panel (Now Real-Time & Auto-Scrolling) */}
+      {!isFinal && viewerMember && (
+        <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
+          {isChatOpen ? (
+            <div style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+              
+              {/* Header */}
+              <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
+                <strong style={{ color: '#a5b4fc' }}>Team Chat ({viewerMember.teamName || 'Solo'})</strong>
+                <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>
+              </div>
+              
+              {/* Messages Area */}
+              <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
+                {messages.length === 0 ? (
+                  <p style={{ textAlign: 'center', marginTop: '40%' }}>No messages yet. Say hi to your team!</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {messages.map(msg => (
+                      <div key={msg.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}>
+                          <strong style={{ color: '#67e8f9' }}>{msg.sender}</strong>
+                          <span style={{ color: '#64748b' }}>{new Date(msg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                        <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.text}</div>
+                      </div>
+                    ))}
+                    {/* 👉 Dummy Div for Auto-Scrolling */}
+                    <div ref={messagesEndRef} />
+                  </div>
+                )}
+              </div>
+              
+              {/* Input Area */}
+              <div style={{ padding: 12, borderTop: '1px solid #334155', display: 'flex', gap: 8 }}>
+                <input 
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+                  placeholder="Type a message..." 
+                  style={{ ...smallInput, margin: 0, flex: 1 }} 
+                />
+                <button onClick={handleSendMessage} style={{ ...primaryButton, width: 'auto', margin: 0 }}>Send</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setIsChatOpen(true)} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: '50%', width: 56, height: 56, cursor: 'pointer', boxShadow: '0 4px 12px rgba(99,102,241,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+            </button>
+          )}
+        </div>
+      )}
+
     </main>
   );
 }
 
-// RESTORED STYLES
 const page: CSSProperties = { minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.32), transparent 34rem), #070a16' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 };
 const userPill: CSSProperties = { padding: '10px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)' };

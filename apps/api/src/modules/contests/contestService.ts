@@ -9,7 +9,6 @@ import {
 import { fetchCodeforcesAccepted } from '../../externalSync';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
-
 export type MemberInput = {
   username?: string;
   userId?: string;

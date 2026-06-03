@@ -12,13 +12,11 @@ export default function JudgePage() {
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState('cpp');
   
-  // 👉 NEW: CPH Test Case Arrays
   const [activeTab, setActiveTab] = useState<'cph' | 'ai'>('cph');
   const [testcases, setTestcases] = useState<TestCase[]>([{ id: '1', input: '', expectedOutput: '', output: '', status: 'idle' }]);
   const [cfUrl, setCfUrl] = useState('');
   const [isFetchingSamples, setIsFetchingSamples] = useState(false);
 
-  // 👉 NEW: AI Tool States
   const [aiGenDesc, setAiGenDesc] = useState('');
   const [aiGenSolution, setAiGenSolution] = useState('');
   const [aiGenLoading, setAiGenLoading] = useState(false);
@@ -40,7 +38,6 @@ export default function JudgePage() {
     }
   };
 
-  // 👉 UPDATED: Runs a single CPH Testcase
   const runTestCase = async (index: number) => {
     if (!code.trim()) return alert("Code cannot be empty");
     
@@ -79,7 +76,6 @@ export default function JudgePage() {
     }
   };
 
-  // 👉 UPDATED: Extracts BOTH Inputs and Outputs
   const handleFetchCPHSamples = async () => {
     if (!cfUrl.includes('codeforces')) return alert('Please enter a valid Codeforces URL');
     setIsFetchingSamples(true);
@@ -149,7 +145,38 @@ export default function JudgePage() {
   };
 
   return (
-    <main style={page}>
+    <main style={{...page, minHeight: '100vh', height: 'auto'}}>
+      <style>{`
+        .responsive-split {
+          display: flex;
+          flex: 1;
+          overflow: hidden;
+          gap: 12px;
+          padding: 12px;
+          flex-direction: row;
+        }
+        .responsive-pane {
+          flex: 1;
+          background: #0f172a;
+          border-radius: 12px;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          border: 1px solid #1e293b;
+        }
+
+        @media (max-width: 768px) {
+          .responsive-split {
+            flex-direction: column !important;
+            overflow-y: auto !important;
+          }
+          .responsive-pane {
+            flex: none !important;
+            min-height: 500px !important;
+          }
+        }
+      `}</style>
+
       <Head><title>Universal Judge | DivineCode</title></Head>
 
       <header style={headerBar}>
@@ -167,8 +194,8 @@ export default function JudgePage() {
         </div>
       </header>
 
-      <div style={splitLayout}>
-        <section style={leftPane}>
+      <div className="responsive-split">
+        <section className="responsive-pane">
           <div style={paneHeader}>Code Editor</div>
           <div style={paneContent}>
             <textarea 
@@ -178,7 +205,7 @@ export default function JudgePage() {
           </div>
         </section>
 
-        <section style={rightPane}>
+        <section className="responsive-pane">
           <div style={tabsHeader}>
             <button style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('cph')}>CPH Runner</button>
             <button style={activeTab === 'ai' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('ai')}>AI Tools</button>
@@ -258,15 +285,11 @@ export default function JudgePage() {
   );
 }
 
-// 🎨 CSS Configurations
-const page: CSSProperties = { height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#020617', color: '#eef2ff', fontFamily: 'Inter, sans-serif' };
+const page: CSSProperties = { display: 'flex', flexDirection: 'column', backgroundColor: '#020617', color: '#eef2ff', fontFamily: 'Inter, sans-serif' };
 const headerBar: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', backgroundColor: '#0f172a', borderBottom: '1px solid #1e293b', zIndex: 10 };
 const brand: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 'bold' };
 const runBtn: CSSProperties = { background: '#3b82f6', border: 'none', color: '#fff', padding: '10px 20px', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' };
 const selectBox: CSSProperties = { background: '#1e293b', color: '#fff', border: '1px solid #334155', padding: '10px', borderRadius: 8, outline: 'none', fontWeight: 'bold' };
-const splitLayout: CSSProperties = { display: 'flex', flex: 1, overflow: 'hidden', gap: 12, padding: 12, flexDirection: 'row' };
-const leftPane: CSSProperties = { flex: 0.6, background: '#0f172a', borderRadius: 12, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid #1e293b' };
-const rightPane: CSSProperties = { flex: 0.4, background: '#0f172a', borderRadius: 12, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid #1e293b' };
 const paneHeader: CSSProperties = { padding: '12px 20px', background: '#1e293b', fontWeight: 'bold', fontSize: 14, color: '#94a3b8' };
 const paneContent: CSSProperties = { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' };
 const codeEditor: CSSProperties = { width: '100%', height: '100%', flex: 1, background: '#020617', color: '#a5b4fc', border: 'none', outline: 'none', fontFamily: 'monospace', fontSize: 15, resize: 'none', padding: 15 };
