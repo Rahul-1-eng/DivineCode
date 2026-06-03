@@ -34,13 +34,30 @@ function mapCfVerdictToPrisma(cfVerdict: string | undefined): Verdict {
 }
 
 // 👉 FIXED: Added SHA-512 API Key signing so you can fetch submissions from PRIVATE Mashups
+// Add this robust fetcher
+async function fetchWithRetry(url: string, retries = 3): Promise<any> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) DivineCode-Sync-Bot/1.0' }
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      if (payload.status !== 'OK') throw new Error(payload.comment || 'API rejected');
+      return payload.result;
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Backoff
+    }
+  }
+}
+
 async function fetchCodeforcesUserStatus(handle: string, count = 100) {
   const apiKey = process.env.CF_API_KEY;
   const apiSecret = process.env.CF_API_SECRET;
 
   let url = `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=${count}`;
 
-  // If environment variables are set, authorize the request to see private gym solves
   if (apiKey && apiSecret) {
     const time = Math.floor(Date.now() / 1000);
     const rand = Math.random().toString(36).substring(2, 8);
@@ -50,11 +67,7 @@ async function fetchCodeforcesUserStatus(handle: string, count = 100) {
     url = `https://codeforces.com/api/user.status?${params}&apiSig=${rand}${hash}`;
   }
 
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Codeforces API status ${response.status}`);
-  const payload = await response.json();
-  if (payload.status !== 'OK') throw new Error(payload.comment || 'Codeforces fetch failed');
-  return payload.result || [];
+  return fetchWithRetry(url);
 }
 
 export async function syncCodeforcesContest(contestId: string) {
