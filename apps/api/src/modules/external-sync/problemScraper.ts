@@ -3,7 +3,7 @@ import * as cheerio from 'cheerio';
 
 export interface ScrapedProblem {
   title: string;
-  descriptionHtml: string; // We keep HTML so images/MathJax render properly on the frontend
+  descriptionHtml: string; 
   testcases: { input: string; expectedOutput: string }[];
   platform: 'CODEFORCES' | 'LEETCODE' | 'OTHER';
   originalUrl: string;
@@ -13,7 +13,6 @@ export async function scrapeProblemFromUrl(url: string): Promise<ScrapedProblem>
   if (url.includes('codeforces.com')) {
     return await scrapeCodeforces(url);
   }
-  // Add Leetcode/Codechef routing here via Puppeteer if needed later
   throw new Error('Unsupported platform URL for direct scraping.');
 }
 
@@ -30,7 +29,7 @@ async function scrapeCodeforces(url: string): Promise<ScrapedProblem> {
     // Extract Title
     const title = $('.problem-statement .header .title').text().trim();
     
-    // Extract Problem Description HTML (so images and MathJax stay intact)
+    // Extract Problem Description HTML
     const descriptionHtml = $('.problem-statement > div:not(.header):not(.sample-tests)').html() || '';
 
     // Extract Test Cases
@@ -41,12 +40,15 @@ async function scrapeCodeforces(url: string): Promise<ScrapedProblem> {
       const outputs = $(element).find('.output pre');
       
       inputs.each((index, inputElem) => {
-        // CF formats inputs with <br> tags or divs inside the pre block
-        let rawInput = $(inputElem).html()?.replace(/<br\s*\/?>/gi, '\n') || '';
-        rawInput = cheerio.load(rawInput).text().trim(); // Strip remaining tags
+        // 👉 TS FIX: We load the HTML snippet, select the body, then extract text.
+        // This bypasses the TS2339 Root type error completely.
+        const rawInputHtml = $(inputElem).html()?.replace(/<br\s*\/?>/gi, '\n') || '';
+        const parsedInput$ = cheerio.load(rawInputHtml);
+        const rawInput = parsedInput$('body').text().trim();
 
-        let rawOutput = $(outputs[index]).html()?.replace(/<br\s*\/?>/gi, '\n') || '';
-        rawOutput = cheerio.load(rawOutput).text().trim();
+        const rawOutputHtml = $(outputs[index]).html()?.replace(/<br\s*\/?>/gi, '\n') || '';
+        const parsedOutput$ = cheerio.load(rawOutputHtml);
+        const rawOutput = parsedOutput$('body').text().trim();
 
         if (rawInput && rawOutput) {
           testcases.push({ input: rawInput, expectedOutput: rawOutput });

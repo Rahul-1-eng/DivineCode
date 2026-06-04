@@ -93,6 +93,7 @@ profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
 });
 
 // Proper Username Claim Logic with Collision Handling (Fixes the Mashup loop)
+// Proper Username Claim Logic with Manual Collision Handling
 profileRouter.post('/claim-username', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;
@@ -103,18 +104,31 @@ profileRouter.post('/claim-username', async (req, res) => {
       return res.status(400).json({ error: 'Username must be at least 3 characters long.' });
     }
 
+    const targetUsername = username.trim();
+
+    // 1. Verify the user actually exists in the DB first
+    const currentUser = await prisma.user.findUnique({ where: { email } });
+    if (!currentUser) {
+      return res.status(404).json({ error: 'User record not found in the database.' });
+    }
+
+    // 2. Manually check if the username is already taken by someone else
+    const existingUser = await prisma.user.findUnique({ where: { username: targetUsername } });
+    if (existingUser && existingUser.id !== currentUser.id) {
+      return res.status(400).json({ error: `The username "${targetUsername}" is already taken.` });
+    }
+
+    // 3. Perform the update using the user's ID
     const updatedUser = await prisma.user.update({
-      where: { email },
-      data: { username: username.trim() }
+      where: { id: currentUser.id },
+      data: { username: targetUsername }
     });
 
     return res.json({ success: true, username: updatedUser.username });
   } catch (err: any) {
-    // Catch Prisma's Unique Constraint Violation
-    if (err.code === 'P2002') {
-      return res.status(400).json({ error: `The username "${req.body.username}" is already taken.` });
-    }
-    return res.status(500).json({ error: 'Internal server error while updating username.' });
+    console.error('[Profile] Claim Username Error:', err);
+    // Return the EXACT error message to the frontend so we know what is failing
+    return res.status(500).json({ error: `Database Error: ${err.message}` });
   }
 });
 
@@ -164,4 +178,5 @@ profileRouter.post('/save-handles', async (req, res) => {
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
-});
+}
+)
