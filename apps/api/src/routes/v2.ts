@@ -66,7 +66,6 @@ async function requireJudgeAccess(submissionId: string, req: Request) {
   requireOwner(submission.contest, req);
 }
 
-// 👉 FIX: The Universal Crash Protector. Prevents 500 Errors if database payload is malformed.
 function safeSanitize(contest: any, req: Request) {
   try {
     return sanitizeContestForViewer(contest, viewerFromRequest(req));
@@ -79,12 +78,34 @@ function safeSanitize(contest: any, req: Request) {
 export function mountV2Routes(app: Express, io: Server) {
   const router = Router();
 
+  // 👉 TEAM COLLABORATION SOCKETS
   io.on('connection', (socket) => {
+    // Standard Global Contest Updates
     socket.on('joinContest', (contestId) => {
-      socket.join(contestId);
+      socket.join(`contest:${contestId}`);
     });
-    socket.on('sendChatMessage', (data) => {
-      socket.to(data.contestId).emit('chatMessage', data.message);
+
+    // Highly Isolated Team Rooms
+    socket.on('joinTeam', (teamId) => {
+      socket.join(`team:${teamId}`);
+    });
+
+    // Team Chat Routing
+    socket.on('sendTeamMessage', async (data) => {
+      try {
+        const message = await prisma.teamMessage.create({
+          data: {
+            contestId: data.contestId,
+            teamId: data.teamId,
+            senderId: data.senderId,
+            content: data.content
+          },
+          include: { sender: { select: { id: true, username: true, avatarUrl: true } } }
+        });
+        io.to(`team:${data.teamId}`).emit('teamMessage', message);
+      } catch (err) {
+        console.error('Failed to route team message', err);
+      }
     });
   });
 
@@ -94,7 +115,7 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
 
   // ==========================================
-  // CODEFORCES MIRROR PROXY
+  // CODEFORCES MIRROR PROXY (DARK MODE WRAPPER)
   // ==========================================
   router.get('/proxy/problem', asyncRoute(async (req, res) => {
     let url = String(req.query.url);
@@ -127,13 +148,35 @@ export function mountV2Routes(app: Express, io: Server) {
       const statementHtml = $('.problem-statement').html();
       if (!statementHtml) return res.status(404).send('Problem statement structure not found on the mirror page.');
 
+      // 👉 FIX: Native DivineCode styling wrapping
+      res.setHeader('Content-Type', 'text/html');
       res.send(`
-        <html><head>
-          <link rel="stylesheet" href="https://mirror.codeforces.com/css/font-awesome.min.css" />
-          <link rel="stylesheet" href="https://mirror.codeforces.com/css/default.css" />
+        <!DOCTYPE html>
+        <html>
+        <head>
           <script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML"></script>
-          <style>body { padding: 20px; background: #fff; color: #000; font-family: sans-serif; -webkit-font-smoothing: antialiased; } .problem-statement .header { margin-bottom: 2em; text-align: center; } .problem-statement .title { font-size: 150%; margin-bottom: 0.5em; }</style>
-        </head><body><div class="problem-statement" style="margin:0;">${statementHtml}</div></body></html>
+          <style>
+            body { 
+              background-color: #0f172a; color: #e2e8f0; 
+              font-family: 'Inter', sans-serif; padding: 20px; line-height: 1.6; margin: 0;
+            }
+            .header { text-align: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #1e293b; }
+            .title { font-size: 24px; color: #38bdf8; font-weight: bold; margin-bottom: 8px;}
+            .property-title { color: #94a3b8; }
+            .sample-test { background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 12px; margin-top: 15px;}
+            .sample-test .input, .sample-test .output { margin-bottom: 15px; }
+            .sample-test pre { background: transparent; color: #a5b4fc; margin: 0; font-family: monospace; white-space: pre-wrap; }
+            .section-title { font-size: 18px; color: #fff; margin-top: 20px; margin-bottom: 10px; font-weight: 600;}
+            .time-limit, .memory-limit, .input-file, .output-file { display: inline-block; margin: 5px 15px; font-size: 14px;}
+            p { margin: 10px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="problem-statement">
+            ${statementHtml}
+          </div>
+        </body>
+        </html>
       `);
     } catch (e: any) {
       res.status(500).send(`Failed to bypass anti-bot shields. Error: ${e.message}`);
@@ -284,7 +327,6 @@ export function mountV2Routes(app: Express, io: Server) {
     res.status(201).json(safeSanitize(contest, req));
   }));
 
-  // Sub-routes strictly placed BEFORE the wildcard '/contests/:id'
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contest = await registerForContestV2(req.params.id, {
@@ -447,7 +489,6 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(safeSanitize(updatedContest, req));
   }));
 
-  // 👉 WILDCARD ROUTES AT THE VERY BOTTOM
   router.get('/contests/:id', asyncRoute(async (req, res) => {
     const contest = await loadContestOrThrow(req.params.id);
     res.json(safeSanitize(contest, req));
@@ -469,7 +510,7 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
 
   // ==========================================
-  // JUDGE ROUTE
+  // JUDGE ROUTE (WITH SOCKET SYNC)
   // ==========================================
   router.post('/submissions/:id/judge', asyncRoute(async (req, res) => {
     await requireJudgeAccess(req.params.id, req);
@@ -480,13 +521,28 @@ export function mountV2Routes(app: Express, io: Server) {
     }
 
     const result = await judgeQueuedSubmission(req.params.id);
+    
+    // Broadcast Leaderboard Change Globally
     if (result.submission.contestId && result.standings) {
       io.to(`contest:${result.submission.contestId}`).emit('standings:update', {
         contestId: result.submission.contestId,
         standings: result.standings
       });
     }
+
+    // 👉 REAL-TIME TEAM SYNC: Broadcast Acceptance Event Directly to the Team
+    if (result.submission.verdict === 'ACCEPTED' && result.submission.teamId) {
+      io.to(`team:${result.submission.teamId}`).emit('team_problem_solved', {
+         problemId: result.submission.contestProblemId,
+         submissionId: result.submission.id,
+         userId: result.submission.userId,
+         teamId: result.submission.teamId
+      });
+    }
+
+    // Personal UI update
     io.to(`submission:${result.submission.id}`).emit('submission:judged', result.submission);
+    
     res.json({ ok: true, ...result });
   }));
 

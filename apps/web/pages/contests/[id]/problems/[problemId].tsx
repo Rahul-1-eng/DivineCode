@@ -2,10 +2,12 @@ import { CSSProperties, useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
+import { io, Socket } from 'socket.io-client';
+import toast, { Toaster } from 'react-hot-toast';
+import { motion, AnimatePresence } from 'framer-motion';
+
 export async function getServerSideProps() { return { props: {} }; }
 
-// export { default, getServerSideProps } from '../[id]';
-// Safely load Monaco editor on the client side only to avoid Next.js SSR errors
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -54,13 +56,18 @@ export default function ContestProblemWorkspace() {
   
   const [aiDebuggerLoading, setAiDebuggerLoading] = useState(false);
   const [aiDebugResult, setAiDebugResult] = useState<any>(null);
-  const [aiExplainerResult, setAiExplainerResult] = useState<string | null>(null);
 
   const [showCfModal, setShowCfModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Audio setup
+  // 👉 Team Chat States
+  const socketRef = useRef<Socket | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [messages, setMessages] = useState<any[]>([]);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -69,9 +76,7 @@ export default function ContestProblemWorkspace() {
   }, []);
 
   const playSuccessSound = () => {
-    if (audioRef.current) {
-      audioRef.current.play().catch(e => console.warn("Audio play blocked", e));
-    }
+    if (audioRef.current) audioRef.current.play().catch(e => console.warn("Audio play blocked", e));
   };
 
   useEffect(() => {
@@ -79,11 +84,64 @@ export default function ContestProblemWorkspace() {
     fetch(`${API_V2_BASE_URL}/contests/${id}?viewerEmail=${session.user.email}`)
       .then(res => res.json())
       .then(data => {
-        setContest(data.data || data);
+        const cData = data.data || data;
+        // Inject viewerMember logic if omitted
+        if (!cData.viewerMember && session?.user && (cData.participants || cData.members)) {
+          const arr = cData.participants || cData.members || [];
+          cData.viewerMember = arr.find((p: any) => 
+            (session.user?.email && p.user?.email === session.user?.email) || 
+            (session.user?.name && p.displayName === session.user?.name)
+          );
+        }
+        setContest(cData);
         setIsLoading(false);
       })
       .catch(() => setIsLoading(false));
   }, [id, session]);
+
+  // 👉 WebSocket Connection for Team Chat & Cross-Member AC Sync
+  useEffect(() => {
+    if (!id || !session || !contest?.viewerMember?.teamId) return;
+    
+    socketRef.current = io(API_BASE_URL, { transports: ['websocket'], reconnection: true });
+    const socket = socketRef.current;
+    
+    socket.on('connect', () => { 
+      socket.emit('joinContest', id); 
+      socket.emit('joinTeam', contest.viewerMember.teamId);
+    });
+
+    socket.on('teamMessage', (incomingMessage) => {
+      setMessages((prev) => {
+        if (prev.some(m => m.id === incomingMessage.id)) return prev;
+        return [...prev, incomingMessage];
+      });
+    });
+
+    socket.on('team_problem_solved', (data) => {
+      if (data.userId !== (session.user?.name || session.user?.email)) {
+        toast.success(`🎉 A teammate just solved a problem!`, { duration: 5000, icon: '🚀' });
+        playSuccessSound();
+      }
+    });
+
+    return () => { socket.disconnect(); socketRef.current = null; };
+  }, [id, session, contest?.viewerMember?.teamId]);
+
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  const handleSendMessage = () => {
+    if (!chatInput.trim() || !contest?.viewerMember?.teamId) return;
+    if (socketRef.current) {
+      socketRef.current.emit('sendTeamMessage', {
+        contestId: id,
+        teamId: contest.viewerMember.teamId,
+        senderId: contest.viewerMember.userId || contest.viewerMember.user?.id,
+        content: chatInput.trim()
+      });
+    }
+    setChatInput('');
+  };
 
   const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
@@ -241,16 +299,25 @@ export default function ContestProblemWorkspace() {
     ? `${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(problem.externalUrl)}` 
     : problem.externalUrl;
 
+  // 👉 Precise URL formatter to automatically select the problem in the Codeforces dropdown
   let cfSubmitUrl = problem.externalUrl || 'https://codeforces.com/problemset/submit';
   const psMatch = cfSubmitUrl.match(/problemset\/problem\/([0-9]+)\/([A-Za-z0-9]+)/i);
   const contestMatch = cfSubmitUrl.match(/contest\/([0-9]+)\/problem\/([A-Za-z0-9]+)/i);
-  if (psMatch) cfSubmitUrl = `https://codeforces.com/contest/${psMatch[1]}/submit/${psMatch[2]}`;
-  else if (contestMatch) cfSubmitUrl = `https://codeforces.com/contest/${contestMatch[1]}/submit/${contestMatch[2]}`;
+  const gymMatch = cfSubmitUrl.match(/gym\/([0-9]+)\/problem\/([A-Za-z0-9]+)/i);
+
+  if (psMatch) {
+    cfSubmitUrl = `https://codeforces.com/contest/${psMatch[1]}/submit/${psMatch[2].toUpperCase()}`;
+  } else if (contestMatch) {
+    cfSubmitUrl = `https://codeforces.com/contest/${contestMatch[1]}/submit/${contestMatch[2].toUpperCase()}`;
+  } else if (gymMatch) {
+    cfSubmitUrl = `https://codeforces.com/gym/${gymMatch[1]}/submit/${gymMatch[2].toUpperCase()}`;
+  }
   
   const monacoLanguage = language === 'cpp' ? 'cpp' : language === 'python' ? 'python' : 'java';
 
   return (
     <main style={{...page, minHeight: '100vh', height: '100vh', overflow: 'hidden'}}>
+      <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
       
       {submitting && (
         <div style={modalOverlay}>
@@ -292,10 +359,8 @@ export default function ContestProblemWorkspace() {
         </div>
       </header>
 
-      {/* LeetCode Style Split UI */}
       <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
         
-        {/* Left Pane: Problem */}
         <section style={{ width: '40%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #1e293b', background: '#0f172a' }}>
           <div style={paneHeader}>Problem Description</div>
           <div style={{ flex: 1, padding: 0 }}>
@@ -303,7 +368,6 @@ export default function ContestProblemWorkspace() {
           </div>
         </section>
 
-        {/* Right Pane: Code & Terminal */}
         <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#020617' }}>
           
           <div style={{ flex: 1, position: 'relative' }}>
@@ -313,7 +377,6 @@ export default function ContestProblemWorkspace() {
             />
           </div>
 
-          {/* Terminal / Testcases / AI Panel at Bottom */}
           <div style={{ height: '35%', display: 'flex', flexDirection: 'column', borderTop: '1px solid #1e293b', background: '#0f172a' }}>
             <div style={tabsHeader}>
               <button style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('cph')}>Test Cases</button>
@@ -386,7 +449,6 @@ export default function ContestProblemWorkspace() {
         </section>
       </div>
 
-      {/* Codeforces Submit Automator Modal */}
       {showCfModal && (
         <div style={modalOverlay}>
           <div style={modalContent}>
@@ -402,7 +464,7 @@ export default function ContestProblemWorkspace() {
             </ol>
             
             <div style={{ display: 'flex', gap: 10, marginBottom: 25 }}>
-              <button onClick={() => navigator.clipboard.writeText(code).then(() => alert('Code copied!'))} style={secondaryBtn}>📋 Copy Code</button>
+              <button onClick={() => navigator.clipboard.writeText(code).then(() => toast.success('Code copied!'))} style={secondaryBtn}>📋 Copy Code</button>
               <a href={cfSubmitUrl} target="_blank" rel="noreferrer" style={primaryBtn}>↗ Open CF Submit Page</a>
             </div>
 
@@ -411,6 +473,41 @@ export default function ContestProblemWorkspace() {
               <button onClick={handleSyncCodeforces} disabled={isSyncing} style={syncBtn}>{isSyncing ? 'Syncing via API...' : '🔄 Sync Verdict'}</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 👉 Global Team Chat Embedded in Workspace */}
+      {contest?.viewerMember?.teamId && (
+        <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
+          {isChatOpen ? (
+            <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+              <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
+                <strong style={{ color: '#a5b4fc' }}>Team Chat ({contest.viewerMember.teamName || 'Team'})</strong>
+                <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>
+              </div>
+              <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
+                {messages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No messages yet. Say hi!</p> : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {messages.map(msg => (
+                      <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}><strong style={{ color: '#67e8f9' }}>{msg.sender?.username || 'Teammate'}</strong><span style={{ color: '#64748b' }}>{new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+                        <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.content}</div>
+                      </motion.div>
+                    ))}
+                    <div ref={messagesEndRef} />
+                  </div>
+                )}
+              </div>
+              <div style={{ padding: 12, borderTop: '1px solid #334155', display: 'flex', gap: 8 }}>
+                <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ width: '100%', padding: 8, borderRadius: 6, background: '#1e293b', color: '#fff', border: '1px solid #334155' }} />
+                <button onClick={handleSendMessage} style={{ background: '#6366f1', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 6, cursor: 'pointer' }}>Send</button>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setIsChatOpen(true)} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: '50%', width: 56, height: 56, cursor: 'pointer', boxShadow: '0 4px 12px rgba(99,102,241,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+            </motion.button>
+          )}
         </div>
       )}
     </main>

@@ -40,7 +40,6 @@ export default function ContestRoomPage() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [error, setError] = useState('');
   
-  // 👉 Dynamic Loading Overlay States
   const [syncing, setSyncing] = useState(false);
   const [loadingText, setLoadingText] = useState('Loading...');
   
@@ -62,7 +61,7 @@ export default function ContestRoomPage() {
   const [generatingTcFor, setGeneratingTcFor] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
-  const [messages, setMessages] = useState<{id: number, text: string, sender: string, time: Date}[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
 
   const isOwner = Boolean(contest?.canManage);
   const viewerMember = contest?.viewerMember || null;
@@ -287,33 +286,61 @@ export default function ContestRoomPage() {
   }
 
   const handleSendMessage = () => {
-    if (!chatInput.trim()) return;
-    const newMsg = { id: Date.now(), text: chatInput.trim(), sender: viewerMember?.name || session?.user?.name || 'Me', time: new Date() };
-    setMessages(prev => [...prev, newMsg]); setChatInput('');
-    if (socketRef.current) socketRef.current.emit('sendChatMessage', { contestId: id, team: viewerMember?.teamName || viewerMember?.team || 'Solo', message: newMsg });
+    if (!chatInput.trim() || !contest?.viewerMember?.teamId) return;
+    if (socketRef.current) {
+      // Send the strict secure team socket event
+      socketRef.current.emit('sendTeamMessage', {
+        contestId: id,
+        teamId: contest.viewerMember.teamId,
+        senderId: contest.viewerMember.user?.id || contest.viewerMember.userId,
+        content: chatInput.trim()
+      });
+    }
+    setChatInput('');
   };
 
   useEffect(() => { loadContest(); loadSubmissions(); }, [id, session?.user?.email, session?.user?.name]);
   useEffect(() => { const timer = setInterval(() => setTimeLeft((prev) => Math.max(0, prev - 1)), 1000); return () => clearInterval(timer); }, []);
   
+  // 👉 Advanced Team Subscriptions and Sync 
   useEffect(() => {
-    if (!id || !session || isFinal) return;
+    if (!id || !session || isFinal || !contest) return;
+    
     socketRef.current = io(API_BASE_URL, { transports: ['websocket'], reconnection: true });
     const socket = socketRef.current;
-    socket.on('connect', () => { socket.emit('joinContest', id); });
+    
+    socket.on('connect', () => { 
+      socket.emit('joinContest', id); 
+      // Strictly Join Private Team Sub-channel
+      if (contest.viewerMember?.teamId) {
+        socket.emit('joinTeam', contest.viewerMember.teamId);
+      }
+    });
+
     socket.on('standings:update', () => { loadContest(); });
+    
     socket.on('submission:judged', (sub) => { 
       loadSubmissions();
       if (sub.verdict === 'ACCEPTED' && sub.userId === (session?.user?.name || session?.user?.email)) playSuccessSound();
     });
-    socket.on('chatMessage', (incomingMessage) => {
+
+    socket.on('teamMessage', (incomingMessage) => {
       setMessages((prev) => {
         if (prev.some(m => m.id === incomingMessage.id)) return prev;
-        return [...prev, { ...incomingMessage, time: new Date(incomingMessage.time) }];
+        return [...prev, incomingMessage];
       });
     });
+
+    socket.on('team_problem_solved', (data) => {
+      if (data.userId !== (session.user?.name || session.user?.email)) {
+        toast.success(`🎉 A teammate just solved a problem!`, { duration: 5000, icon: '🚀' });
+        playSuccessSound();
+      }
+      loadSubmissions();
+    });
+
     return () => { socket.disconnect(); socketRef.current = null; };
-  }, [id, session?.user?.email, session?.user?.name, isFinal]);
+  }, [id, session, isFinal, contest?.viewerMember?.teamId]);
   
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => { if (!id || !contest || isFinal) return; if (timeLeft === 0 && !isScheduledLockScreen) router.push(`/contests/${id}/final`); }, [timeLeft, id, contest, isFinal, isScheduledLockScreen]);
@@ -362,17 +389,17 @@ export default function ContestRoomPage() {
   const canInspectMember = (memberId: string) => {
     if (isOwner || isFinal || timeLeft === 0) return true;
     const member = memberById[memberId];
-    return Boolean(viewerMember && (viewerMember.id === memberId || (viewerMember.team && viewerMember.team !== 'Individuals' && member?.team === viewerMember.team)));
+    return Boolean(viewerMember && (viewerMember.id === memberId || (viewerMember.teamId && member?.teamId === viewerMember.teamId) || (viewerMember.team && viewerMember.team !== 'Individuals' && member?.team === viewerMember.team)));
   };
 
   const memberSubmissions = selectedMember ? submissions.filter((submission) => submission.memberId === selectedMember.memberId || submission.participantId === selectedMember.memberId) : [];
   const mySubmissions = viewerMember ? submissions.filter((s) => s.memberId === viewerMember.id || s.participantId === viewerMember.id || s.userId === (session?.user?.name || session?.user?.email)) : [];
   const myTotalAttempts = mySubmissions.length;
-  const myAccepted = mySubmissions.filter(s => s.verdict.includes('ACCEPT') || s.verdict === 'OK').length;
+
+  const myAccepted = mySubmissions.filter(s => String(s.verdict).includes('ACCEPT') || String(s.verdict) === 'OK').length;
   const myAccuracy = myTotalAttempts > 0 ? Math.round((myAccepted / myTotalAttempts) * 100) : 0;
   const myStanding = viewerMember ? individualStandings.find((s: any) => s.memberId === viewerMember.id || s.participantId === viewerMember.id) : null;
 
-  // 👉 Final Report Specific Data
   const ratingBefore = viewerMember?.ratingBefore || viewerMember?.user?.rating || 1200;
   const ratingAfter = viewerMember?.ratingAfter || ratingBefore;
   const ratingDelta = ratingAfter - ratingBefore;
@@ -380,7 +407,7 @@ export default function ContestRoomPage() {
 
   const performanceMatrix = (contest?.problems || []).map((p: any) => {
     const subs = mySubmissions.filter(s => s.problemId === (p.problemId || p.id) || s.contestProblemId === p.id);
-    const isAccepted = subs.some(s => s.verdict === 'ACCEPTED' || s.verdict === 'OK');
+    const isAccepted = subs.some(s => String(s.verdict) === 'ACCEPTED' || String(s.verdict) === 'OK');
     const isWrong = subs.length > 0 && !isAccepted;
     return { label: p.label, title: p.titleSnapshot || p.title, status: isAccepted ? 'Correct' : isWrong ? 'Wrong' : 'Unattempted' };
   });
@@ -401,7 +428,6 @@ export default function ContestRoomPage() {
     <main style={page}>
       <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
 
-      {/* 👉 Dynamic Centralized Loading Overlay */}
       <AnimatePresence>
         {syncing && (
           <motion.div 
@@ -464,7 +490,6 @@ export default function ContestRoomPage() {
           </div>
         </div>
 
-        {/* 👉 Enhanced Post-Contest Report */}
         {isFinal && viewerMember && (
           <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ ...panel, marginBottom: 18, background: 'linear-gradient(145deg, #0f172a, #1e1b4b)', border: '1px solid #6366f1' }}>
             <h2 style={{ color: '#a5b4fc', margin: '0 0 15px 0' }}>🏆 Post-Contest Performance Report</h2>
@@ -716,21 +741,21 @@ export default function ContestRoomPage() {
         )}
       </section>
 
-      {!isFinal && viewerMember && (
+      {!isFinal && contest?.viewerMember?.teamId && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
           {isChatOpen ? (
             <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
               <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
-                <strong style={{ color: '#a5b4fc' }}>Team Chat ({viewerMember.teamName || 'Solo'})</strong>
+                <strong style={{ color: '#a5b4fc' }}>Team Chat ({contest.viewerMember.teamName || 'Team'})</strong>
                 <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>
               </div>
               <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
-                {messages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No messages yet. Say hi to your team!</p> : (
+                {messages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No messages yet. Say hi!</p> : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {messages.map(msg => (
                       <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}><strong style={{ color: '#67e8f9' }}>{msg.sender}</strong><span style={{ color: '#64748b' }}>{new Date(msg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
-                        <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.text}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}><strong style={{ color: '#67e8f9' }}>{msg.sender?.username || 'Teammate'}</strong><span style={{ color: '#64748b' }}>{new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+                        <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.content}</div>
                       </motion.div>
                     ))}
                     <div ref={messagesEndRef} />

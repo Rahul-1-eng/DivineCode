@@ -6,26 +6,27 @@ const PISTON_URL = 'https://emkc.org/api/v2/piston';
 
 type JudgeLanguage = 'cpp' | 'c' | 'java' | 'python' | 'javascript';
 
-// Intelligent language normalizer
+// 👉 FIX 1: Locked versions ensure Piston hits its fast cache instantly instead of resolving '*'
 function getPistonConfig(language: string) {
   const normalized = String(language || '').toLowerCase().trim();
-  if (normalized.includes('c++') || normalized === 'cpp') return { language: 'c++', version: '*' };
-  if (normalized === 'c') return { language: 'c', version: '*' };
-  if (normalized.includes('java') && !normalized.includes('javascript')) return { language: 'java', version: '*' };
-  if (normalized.includes('py')) return { language: 'python', version: '*' };
-  if (normalized.includes('js') || normalized.includes('node') || normalized.includes('javascript')) return { language: 'javascript', version: '*' };
+  if (normalized.includes('c++') || normalized === 'cpp') return { language: 'c++', version: '10.2.0' };
+  if (normalized === 'c') return { language: 'c', version: '10.2.0' };
+  if (normalized.includes('java') && !normalized.includes('javascript')) return { language: 'java', version: '15.0.2' };
+  if (normalized.includes('py')) return { language: 'python', version: '3.10.0' };
+  if (normalized.includes('js') || normalized.includes('node') || normalized.includes('javascript')) return { language: 'javascript', version: '18.15.0' };
   
   return { language: normalized, version: '*' }; 
 }
 
-// 👉 FIX: Proper multi-line CP normalizer. Trims trailing spaces per line and trailing empty lines, but preserves structural line breaks!
+// 👉 FIX 2: Strict Codeforces-Style Output Normalization (prevents false WA verdicts)
 function normalizeOutput(value: string | null | undefined) {
   if (!value) return '';
-  const lines = String(value).split(/\r?\n/).map(l => l.trimEnd());
-  while (lines.length > 0 && lines[lines.length - 1] === '') {
-    lines.pop();
-  }
-  return lines.join('\n');
+  return String(value)
+    .replace(/\r/g, '') // Strip Windows carriage returns
+    .split('\n')
+    .map(line => line.trimEnd()) // Remove invisible trailing spaces on every line
+    .join('\n')
+    .trim(); // Remove trailing empty lines at the very end
 }
 
 function evaluateVerdict(status: string, stdout: string | null | undefined, expectedOutput: string, checkerType: CheckerType): Verdict {
@@ -64,7 +65,6 @@ async function submitToPiston(input: { sourceCode: string; language: JudgeLangua
   const langConfig = getPistonConfig(input.language);
   if (!langConfig) throw new Error(`Unsupported language: ${input.language}`);
   
-  // 👉 FIX: Assign appropriate extensions to prevent Piston internal errors
   let filename = 'main.txt';
   if (langConfig.language === 'c++') filename = 'main.cpp';
   else if (langConfig.language === 'c') filename = 'main.c';
@@ -116,7 +116,7 @@ async function submitToPiston(input: { sourceCode: string; language: JudgeLangua
 async function finalizeVerdict(submissionId: string, verdict: Verdict) {
   const submission = await prisma.submission.findUnique({
     where: { id: submissionId },
-    include: { participant: true }
+    include: { participant: true, team: true }
   });
 
   if (!submission) return;
@@ -126,36 +126,48 @@ async function finalizeVerdict(submissionId: string, verdict: Verdict) {
     data: { verdict }
   });
 
-  // 👉 50 Penalty Points applied directly inside the judge engine for Wrong Answers
-  if (verdict !== Verdict.ACCEPTED && verdict !== Verdict.COMPILATION_ERROR && submission.participantId) {
-    await prisma.contestStanding.updateMany({
-      where: { participantId: submission.participantId },
-      data: { penalty: { increment: 50 } }
-    });
-  }
-
-  if (verdict === Verdict.ACCEPTED && submission.participant?.teamId) {
-    const teamId = submission.participant.teamId;
-    const problemId = submission.contestProblemId;
-
-    const teamAlreadySolved = await prisma.submission.findFirst({
-      where: {
-        contestProblemId: problemId,
-        teamId: teamId,
-        verdict: Verdict.ACCEPTED,
-        id: { not: submissionId }
-      }
-    });
-
-    if (!teamAlreadySolved) {
-      await prisma.contestParticipant.updateMany({
-        where: { teamId: teamId },
-        data: { score: { increment: 100 } }
+  // Apply Team and Individual Penalties
+  if (verdict !== Verdict.ACCEPTED && verdict !== Verdict.COMPILATION_ERROR) {
+    if (submission.participantId) {
+      await prisma.contestStanding.updateMany({
+        where: { participantId: submission.participantId },
+        data: { penalty: { increment: 50 } }
       });
     }
+    if (submission.teamId) {
+      await prisma.contestTeam.update({
+        where: { id: submission.teamId },
+        data: { penalty: { increment: 50 } }
+      });
+    }
+  }
 
+  // Handle Successful Acceptances
+  if (verdict === Verdict.ACCEPTED && submission.participant) {
+    const teamId = submission.teamId;
+    const problemId = submission.contestProblemId;
+
+    if (teamId) {
+      const teamAlreadySolved = await prisma.submission.findFirst({
+        where: {
+          contestProblemId: problemId,
+          teamId: teamId,
+          verdict: Verdict.ACCEPTED,
+          id: { not: submissionId }
+        }
+      });
+
+      if (!teamAlreadySolved) {
+        await prisma.contestTeam.update({
+          where: { id: teamId },
+          data: { score: { increment: 100 } }
+        });
+      }
+    }
+
+    // Always reward individual participant
     await prisma.contestParticipant.update({
-      where: { id: submission.participantId },
+      where: { id: submission.participantId! },
       data: { score: { increment: 100 } }
     });
   }
@@ -193,14 +205,15 @@ export async function judgeQueuedSubmission(submissionId: string) {
     return { submission: judged, standings };
   }
 
-  if (submission.contestId && submission.participant?.teamId) {
+  // Anti-Cheat: Validate against the new ContestTeam structure
+  if (submission.contestId && submission.teamId) {
     const duplicate = await prisma.submission.findFirst({
       where: {
         contestId: submission.contestId,
         contestProblemId: submission.contestProblemId,
         code: submission.code,
         id: { not: submission.id },
-        participant: { teamId: submission.participant.teamId }
+        teamId: submission.teamId
       }
     });
 

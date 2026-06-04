@@ -23,9 +23,12 @@ async function handleJudgeJob(job: Job<JudgeSubmissionJob>) {
   const result = await judgeQueuedSubmission(job.data.submissionId);
   const io = activeIoInstance;
 
-  // 👉 UPDATED: Tell the frontend to fetch the new submission instantly
+  // 👉 UPDATED: Emitting securely to the V2 `contest:{id}` prefixed room
   if (io && result.submission.contestId && result.standings) {
-    io.to(result.submission.contestId).emit('submissionsUpdated');
+    io.to(`contest:${result.submission.contestId}`).emit('standings:update', {
+      contestId: result.submission.contestId,
+      standings: result.standings
+    });
   }
 
   if (io) {
@@ -43,9 +46,12 @@ async function handleCodeforcesSyncJob(job: Job<CodeforcesContestSyncJob>) {
   const result = await syncCodeforcesContest(job.data.contestId);
   const io = activeIoInstance;
 
-  // 👉 UPDATED: When background sync finishes, force the frontend to refresh the board!
+  // 👉 UPDATED: Utilizing the standard `standings:update` hook your React UI is already listening for
   if (io && result.standings) {
-    io.to(job.data.contestId).emit('submissionsUpdated');
+    io.to(`contest:${job.data.contestId}`).emit('standings:update', {
+      contestId: job.data.contestId,
+      standings: result.standings
+    });
   }
 
   return {
@@ -57,6 +63,9 @@ async function handleCodeforcesSyncJob(job: Job<CodeforcesContestSyncJob>) {
 
 async function handleRewardsJob(job: Job<ContestRewardsJob>) {
   const result = await processContestRewards(job.data.contestId);
+  
+  // Optional: You could emit a global "Rewards Processed" event here if you want users to get confetti on their screen!
+  
   return result;
 }
 

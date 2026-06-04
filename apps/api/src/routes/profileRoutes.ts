@@ -1,10 +1,12 @@
+// apps/api/src/routes/profileRoutes.ts
+
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { Platform } from '@prisma/client';
 
 export const profileRouter = Router();
 
-// Get current user profile
+// Get current user profile (Aggregated with Stats & Match History)
 profileRouter.get('/me', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;
@@ -12,11 +14,61 @@ profileRouter.get('/me', async (req, res) => {
 
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { externalHandles: true }
+      include: { 
+        externalHandles: true,
+        // Fetch Elo trajectory (including synced Codeforces rating updates and internal contests)
+        ratingHistory: { 
+          orderBy: { createdAt: 'asc' },
+          include: { contest: { select: { title: true } } }
+        },
+        // Fetch minimal submission data to calculate global accuracy
+        submissions: { select: { verdict: true } },
+        // Fetch detailed match history
+        contestParticipants: {
+          where: { standing: { isNot: null } },
+          include: {
+            contest: { select: { id: true, title: true, startTime: true, isRated: true } },
+            standing: true
+          },
+          orderBy: { joinedAt: 'desc' }
+        }
+      }
     });
     
     if (!user) return res.status(404).json({ error: 'User not found' });
-    return res.json(user);
+
+    // Aggregate Global Accuracy & Stats
+    const totalAttempts = user.submissions.length;
+    const totalAccepted = user.submissions.filter(s => s.verdict === 'ACCEPTED' || String(s.verdict) === 'OK').length;
+    const accuracy = totalAttempts > 0 ? Math.round((totalAccepted / totalAttempts) * 100) : 0;
+
+    // Transform Participants into a clean Match History feed
+    const matchHistory = user.contestParticipants.map(p => {
+      const rBefore = p.ratingBefore ?? user.rating;
+      const rAfter = p.ratingAfter ?? user.rating;
+      
+      return {
+        contestId: p.contest.id,
+        contestName: p.contest.title,
+        date: p.contest.startTime,
+        isRated: p.contest.isRated,
+        rank: p.standing?.rank || '-',
+        score: p.standing?.score || 0,
+        solved: p.standing?.solved || 0,
+        ratingDelta: rAfter - rBefore,
+        ratingAfter: rAfter
+      };
+    });
+
+    return res.json({
+      ...user,
+      stats: {
+        totalAttempts,
+        totalAccepted,
+        accuracy
+      },
+      matchHistory
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -30,7 +82,6 @@ profileRouter.post('/claim-username', async (req, res) => {
   // ... (Keep existing claim logic)
 });
 
-// 👉 FIX: Strict Handle Verification logic
 profileRouter.post('/save-handles', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;

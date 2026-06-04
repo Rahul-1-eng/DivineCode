@@ -1,4 +1,4 @@
-import { RatingEventType, Verdict, SubmissionStatus } from '@prisma/client';
+import { RatingEventType, SubmissionStatus } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 
 const K_FACTOR = 32;
@@ -32,7 +32,9 @@ export async function processContestRewards(contestId: string) {
 
       // 1. Calculate Multiplayer Elo Delta
       for (const pB of participants) {
+        // 👉 FIX: Don't compare against yourself, AND don't steal/lose Elo against your own teammates!
         if (pA.id === pB.id || !pB.user || !pB.standing) continue;
+        if (pA.teamId && pA.teamId === pB.teamId) continue;
 
         const ratingB = pB.ratingBefore || pB.user.rating || 1200;
         
@@ -40,26 +42,32 @@ export async function processContestRewards(contestId: string) {
         expectedWins += 1 / (1 + Math.pow(10, (ratingB - oldRating) / 400));
 
         // Actual score against pB (1 for win, 0.5 for tie, 0 for loss)
-        // Lower rank index = better score
         if (pA.standing.rank! < pB.standing.rank!) actualWins += 1;
         else if (pA.standing.rank === pB.standing.rank) actualWins += 0.5;
       }
 
-      const ratingDelta = Math.round(K_FACTOR * (actualWins - expectedWins));
-      const newRating = Math.max(100, oldRating + ratingDelta); // Floor at 100 rating
+      const rawDelta = Math.round(K_FACTOR * (actualWins - expectedWins));
+      // 👉 Gamification: Cap maximum rating loss at -100 to prevent user churn, uncapped upside.
+      const ratingDelta = Math.max(-100, rawDelta);
+      const newRating = Math.max(100, oldRating + ratingDelta); 
 
-      // 2. Calculate Coins (Personal + Group Contribution)
+      // 2. Calculate Coins (Personal + Group Contribution + Placement Bonuses)
       const groupSolves = pA.standing.solved || 0;
       
       const personalSolves = new Set(
         contest.submissions
-          .filter(s => s.participantId === pA.id && s.verdict === Verdict.ACCEPTED && s.status === SubmissionStatus.FINISHED)
-          // 👉 FIX: Codeforces/External problems lack a native problemId, use contestProblemId to accurately count user solves.
+          // 👉 FIX: Cast to String to handle both Prisma Enum ('ACCEPTED') and External Syncs ('OK')
+          .filter(s => s.participantId === pA.id && s.status === SubmissionStatus.FINISHED && (String(s.verdict).includes('ACCEPT') || String(s.verdict) === 'OK'))
           .map(s => s.contestProblemId)
       ).size;
 
-      // 👉 FIX: Added floor to ensure penalties/negative modifiers never pull coins below 0.
-      const earnedCoins = Math.max(0, BASE_PARTICIPATION_COINS + 
+      // 👉 FIX: Placement Bonuses
+      let rankBonus = 0;
+      if (pA.standing.rank === 1) rankBonus = 150;
+      else if (pA.standing.rank === 2) rankBonus = 100;
+      else if (pA.standing.rank === 3) rankBonus = 50;
+
+      const earnedCoins = Math.max(0, BASE_PARTICIPATION_COINS + rankBonus + 
                                       (personalSolves * COINS_PER_PERSONAL_SOLVE) + 
                                       (groupSolves * COINS_PER_GROUP_SOLVE));
 
@@ -79,7 +87,7 @@ export async function processContestRewards(contestId: string) {
         tx.ratingHistory.create({
           data: {
             userId: pA.userId!,
-            eventType: RatingEventType.CONTEST,
+            eventType: 'CONTEST',
             oldRating,
             newRating,
             delta: ratingDelta,

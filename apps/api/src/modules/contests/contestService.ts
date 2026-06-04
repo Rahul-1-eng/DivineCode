@@ -227,7 +227,8 @@ export async function loadContestForViewer(contestId: string) {
       include: {
         createdBy: true,
         participants: {
-          include: { user: true, externalHandle: true },
+          // 👉 NEW: Include the official ContestTeam relation for all participants
+          include: { user: true, externalHandle: true, team: true },
           orderBy: { joinedAt: 'asc' }
         },
         problems: {
@@ -240,7 +241,6 @@ export async function loadContestForViewer(contestId: string) {
         },
         standings: {
           include: { participant: true }
-          // Removing strict orderBy array to prevent PrismaClientValidationError. The frontend re-sorts this locally.
         }
       }
     });
@@ -277,14 +277,28 @@ export async function registerForContestV2(contestId: string, input: MemberInput
     });
     if (existing) throw new Error('User is already registered for this contest.');
 
-    const isTeam = memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo';
-    const teamId = isTeam ? slugify(`${contest.id}_${memberInput.teamName}`) : user.id;
+    // 👉 NEW: Proper relational ContestTeam resolution
+    let teamId = null;
+    const isRealTeam = memberInput.teamName && memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo';
+
+    if (isRealTeam) {
+      let team = await tx.contestTeam.findFirst({
+        where: { contestId, name: memberInput.teamName }
+      });
+      if (!team) {
+        team = await tx.contestTeam.create({
+          data: { contestId, name: memberInput.teamName! }
+        });
+      }
+      teamId = team.id;
+    }
 
     await tx.contestParticipant.create({
       data: {
         contestId: contest.id, userId: user.id, externalHandleId: externalHandle?.id || null,
-        displayName: memberInput.displayName!, teamName: memberInput.teamName,
-        teamId: teamId, role: ContestParticipantRole.PARTICIPANT, isOfficial: true
+        displayName: memberInput.displayName!, teamName: memberInput.teamName, // Deprecating soon
+        teamId: teamId, // The true relational link
+        role: ContestParticipantRole.PARTICIPANT, isOfficial: true
       }
     });
   });
@@ -344,6 +358,17 @@ export async function createContestV2(input: CreateContestInput) {
       }
     });
 
+    // 👉 NEW: Pre-register all ContestTeams natively
+    const uniqueTeamNames = [...new Set(members.map(m => m.teamName).filter(n => n && n !== 'Individuals' && n !== 'Solo'))];
+    const teamRecordMap = new Map<string, string>();
+
+    for (const tName of uniqueTeamNames) {
+      const team = await tx.contestTeam.create({
+        data: { contestId: created.id, name: tName! }
+      });
+      teamRecordMap.set(tName!, team.id);
+    }
+
     for (const member of members) {
       const user = await ensureParticipantUser(tx, member);
       let externalHandle = null;
@@ -353,13 +378,12 @@ export async function createContestV2(input: CreateContestInput) {
         externalHandle = await tx.externalHandle.findFirst({ where: { userId: user.id, platform: Platform.CODEFORCES } });
       }
 
-      const isTeam = member.teamName !== 'Individuals' && member.teamName !== 'Solo';
-      const teamId = isTeam ? slugify(`${created.id}_${member.teamName}`) : user.id;
+      const teamId = (member.teamName && teamRecordMap.has(member.teamName)) ? teamRecordMap.get(member.teamName) : null;
 
       await tx.contestParticipant.create({
         data: {
           contestId: created.id, userId: user.id, externalHandleId: externalHandle?.id || null,
-          displayName: member.displayName!, teamName: member.teamName, teamId: teamId, 
+          displayName: member.displayName!, teamName: member.teamName, teamId: teamId || null, 
           role: ContestParticipantRole.PARTICIPANT, isOfficial: true, ratingBefore: member.ratingBefore
         }
       });
@@ -543,6 +567,7 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
     const isOwner = contest.createdById === resolvedUserId;
     let allowedParticipantIds: string[] | null = null; 
 
+    // 👉 NEW: Privacy checking relies strictly on the structured teamId constraint
     if (isOwner || isContestOver) {
       allowedParticipantIds = null;
     } else {
@@ -551,9 +576,8 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
       );
 
       if (viewerParticipant) {
-        const team = viewerParticipant.teamName?.trim() || 'Individuals';
-        if (contest.allowTeamSubmissionView && team !== 'Individuals' && team !== 'Solo') {
-          allowedParticipantIds = contest.participants.filter(p => (p.teamName?.trim() || 'Individuals') === team).map(p => p.id);
+        if (contest.allowTeamSubmissionView && viewerParticipant.teamId) {
+          allowedParticipantIds = contest.participants.filter(p => p.teamId === viewerParticipant.teamId).map(p => p.id);
         } else {
           allowedParticipantIds = [viewerParticipant.id];
         }

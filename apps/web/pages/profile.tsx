@@ -1,3 +1,5 @@
+// apps/web/pages/profile.tsx
+
 import { CSSProperties, useEffect, useState } from 'react';
 import { signOut, useSession } from 'next-auth/react';
 
@@ -11,9 +13,44 @@ function viewerHeaders(session: any) {
   };
 }
 
+// Custom dependency-free SVG Line Chart for the Elo Trajectory
+const EloGraph = ({ history }: { history: any[] }) => {
+  if (!history || history.length < 1) {
+    return <div style={{ color: '#64748b', padding: 40, textAlign: 'center', background: 'rgba(2,6,23,.5)', borderRadius: 16, border: '1px solid rgba(148,163,184,.1)' }}>No rated history yet. Compete to get your initial rating!</div>;
+  }
+
+  const points = history.map(h => h.newRating);
+  if (points.length === 1) points.unshift(1200); // Pad initial baseline if only one contest played
+
+  const min = Math.min(...points) - 50;
+  const max = Math.max(...points) + 50;
+  const range = max - min;
+  const width = 800;
+  const height = 250;
+  const stepX = width / (points.length - 1);
+
+  const pathData = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${i * stepX} ${height - ((p - min) / range) * height}`).join(' ');
+
+  return (
+    <div style={{ width: '100%', overflowX: 'auto', background: 'rgba(2,6,23,.5)', padding: '30px 20px', borderRadius: 16, border: '1px solid rgba(148,163,184,.16)' }}>
+      <svg viewBox={`-20 -20 ${width + 40} ${height + 40}`} style={{ minWidth: 600, width: '100%', height: 'auto', display: 'block' }}>
+        {[0, 0.25, 0.5, 0.75, 1].map(pct => (
+          <line key={pct} x1="0" y1={height * pct} x2={width} y2={height * pct} stroke="rgba(148,163,184,.1)" strokeWidth="1" />
+        ))}
+        <path d={pathData} fill="none" stroke="#22d3ee" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 4px 6px rgba(34,211,238,0.4))' }} />
+        {points.map((p, i) => (
+          <g key={i}>
+            <circle cx={i * stepX} cy={height - ((p - min) / range) * height} r="6" fill="#0f172a" stroke="#22d3ee" strokeWidth="3" />
+            <text x={i * stepX} y={height - ((p - min) / range) * height - 16} fill="#e2e8f0" fontSize="13" fontWeight="bold" textAnchor="middle">{p}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+};
+
 export default function ProfilePage() {
   const { data: session, status } = useSession();
-  const [contests, setContests] = useState<any[]>([]);
   const [userData, setUserData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
@@ -39,10 +76,6 @@ export default function ProfilePage() {
         if (lc) setLcHandle(lc.handle);
         setLoading(false);
       });
-
-    fetch(`${API_BASE_URL}/api/v2/contests`)
-      .then((r) => r.json())
-      .then((d) => setContests(Array.isArray(d) ? d : [])); 
   }, [status, session]);
 
   async function handleClaimUsername() {
@@ -113,7 +146,7 @@ export default function ProfilePage() {
     </main>
   );
 
-  const name = session.user?.name || session.user?.email || 'DivineCode user';
+  const name = session.user?.name || userData?.name || session.user?.email || 'DivineCode user';
   
   return (
     <main style={page}>
@@ -129,16 +162,37 @@ export default function ProfilePage() {
             <p style={eyebrow}>Global Profile</p>
             <h1 style={{ fontSize: 'clamp(28px, 6vw, 48px)', margin: '10px 0', wordBreak: 'break-word', lineHeight: 1.1 }}>{name}</h1>
             <p style={{ color: '#a8b3c7', margin: 0, wordBreak: 'break-word' }}>{session.user?.email}</p>
-            {userData?.rating && (
-              <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <span style={badge}>🏆 Rating: {userData.rating}</span>
-                <span style={badge}>🪙 Coins: {userData.coins || 0}</span>
-              </div>
-            )}
           </div>
           {session.user?.image && <img src={session.user.image} alt="Profile" style={avatar} />}
         </section>
-        
+
+        {/* Aggregate Stats Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 15, marginTop: 18 }}>
+          <div style={{ ...card, textAlign: 'center', padding: '24px 15px' }}>
+            <div style={{ color: '#94a3b8', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Global Rating</div>
+            <div style={{ color: '#22d3ee', fontSize: 38, fontWeight: 900 }}>{userData?.rating || 1200}</div>
+          </div>
+          <div style={{ ...card, textAlign: 'center', padding: '24px 15px' }}>
+            <div style={{ color: '#94a3b8', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Problems Solved</div>
+            <div style={{ color: '#4ade80', fontSize: 38, fontWeight: 900 }}>{userData?.stats?.totalAccepted || 0}</div>
+          </div>
+          <div style={{ ...card, textAlign: 'center', padding: '24px 15px' }}>
+            <div style={{ color: '#94a3b8', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Accuracy</div>
+            <div style={{ color: userData?.stats?.accuracy >= 50 ? '#4ade80' : '#fbbf24', fontSize: 38, fontWeight: 900 }}>{userData?.stats?.accuracy || 0}%</div>
+          </div>
+          <div style={{ ...card, textAlign: 'center', padding: '24px 15px' }}>
+            <div style={{ color: '#94a3b8', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Total Coins</div>
+            <div style={{ color: '#fcd34d', fontSize: 38, fontWeight: 900 }}>{userData?.coins || 0}</div>
+          </div>
+        </div>
+
+        {/* The Elo Graph */}
+        <section style={{ ...card, marginTop: 18 }}>
+          <h2 style={{ margin: '0 0 16px 0', fontSize: 20 }}>Rating Trajectory</h2>
+          <EloGraph history={userData?.ratingHistory || []} />
+        </section>
+
+        {/* Identity & External Connections */}
         <div style={grid}>
           <section style={card}>
             <h2 style={{ margin: '0 0 10px 0', fontSize: 20 }}>DivineCode Identity</h2>
@@ -184,17 +238,49 @@ export default function ProfilePage() {
           </section>
         </div>
         
+        {/* Unified Match History Feed */}
         <section style={{ ...card, marginTop: 18 }}>
-          <h2 style={{ margin: '0 0 16px 0', fontSize: 20 }}>Your contest rooms</h2>
-          {contests.length === 0 && <p style={{ color: '#94a3b8' }}>No contests visible yet.</p>}
-          <div style={{ display: 'grid', gap: 12 }}>
-            {contests.map((c) => (
-              <a key={c.id} href={`/contests/${c.id}`} style={contestRow}>
-                <strong style={{ fontSize: 16 }}>{c.title}</strong>
-                <span style={{ fontSize: 13, color: '#94a3b8' }}>{c.membersCount} members · {c.problemsCount} problems</span>
-              </a>
-            ))}
-          </div>
+          <h2 style={{ margin: '0 0 16px 0', fontSize: 20 }}>Match History</h2>
+          {(!userData?.matchHistory || userData.matchHistory.length === 0) && (
+            <p style={{ color: '#94a3b8' }}>No rated contest history found.</p>
+          )}
+          
+          {userData?.matchHistory && userData.matchHistory.length > 0 && (
+            <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid rgba(148,163,184,.16)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                <thead style={{ background: 'rgba(2,6,23,.5)' }}>
+                  <tr>
+                    <th style={th}>Contest</th>
+                    <th style={th}>Date</th>
+                    <th style={th}>Rank</th>
+                    <th style={th}>Solved</th>
+                    <th style={th}>Score</th>
+                    <th style={th}>Rating Update</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {userData.matchHistory.map((match: any, i: number) => (
+                    <tr key={i} style={{ borderBottom: '1px solid rgba(148,163,184,.12)', transition: 'background 0.2s', cursor: 'pointer' }} onClick={() => window.location.href = `/contests/${match.contestId}/final`}>
+                      <td style={td}>
+                        <div style={{ color: '#eef2ff', fontWeight: 'bold' }}>{match.contestName}</div>
+                        {!match.isRated && <span style={{ fontSize: 11, color: '#94a3b8', background: '#1e293b', padding: '2px 6px', borderRadius: 4 }}>Unrated Practice</span>}
+                      </td>
+                      <td style={td}>{new Date(match.date).toLocaleDateString()}</td>
+                      <td style={{...td, color: '#e2e8f0', fontWeight: 'bold' }}>{match.rank !== '-' ? `#${match.rank}` : '-'}</td>
+                      <td style={td}>{match.solved}</td>
+                      <td style={{...td, color: '#fbbf24', fontWeight: 'bold' }}>{match.score}</td>
+                      <td style={td}>
+                        <span style={{ fontWeight: 'bold', color: match.ratingDelta > 0 ? '#4ade80' : match.ratingDelta < 0 ? '#f87171' : '#94a3b8' }}>
+                          {match.ratingDelta > 0 ? `+${match.ratingDelta}` : match.ratingDelta}
+                        </span>
+                        <span style={{ marginLeft: 8, color: '#64748b' }}>→ {match.ratingAfter}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
       </section>
@@ -214,5 +300,6 @@ const avatar: CSSProperties = { width: 'clamp(80px, 20vw, 110px)', height: 'clam
 const grid: CSSProperties = { marginTop: 18, display: 'flex', flexWrap: 'wrap', gap: 18 };
 const card: CSSProperties = { flex: '1 1 300px', minWidth: 0, padding: 'clamp(16px, 4vw, 24px)', borderRadius: 26, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)', boxShadow: '0 24px 70px rgba(0,0,0,.28)', boxSizing: 'border-box', overflow: 'hidden' };
 const input: CSSProperties = { width: '100%', padding: 14, borderRadius: 14, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', outline: 'none', boxSizing: 'border-box' };
-const contestRow: CSSProperties = { color: '#eef2ff', textDecoration: 'none', padding: 18, borderRadius: 18, background: 'rgba(2,6,23,.55)', border: '1px solid rgba(148,163,184,.16)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', transition: 'background 0.2s', wordBreak: 'break-word' };
+const th: CSSProperties = { padding: '16px 20px', color: '#94a3b8', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 };
+const td: CSSProperties = { padding: '16px 20px', fontSize: 14 };
 const badge: CSSProperties = { padding: '6px 12px', background: 'rgba(34,211,238,.1)', color: '#67e8f9', borderRadius: 12, fontSize: 14, fontWeight: 'bold' };

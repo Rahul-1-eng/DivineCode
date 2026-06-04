@@ -36,6 +36,7 @@ model User {
   topicMastery              TopicMastery[]
   submissionReports         SubmissionReport[]
   submittedInterviewQuestions InterviewQuestion[] 
+  teamMessages              TeamMessage[]            // Added for team chat
 }
 
 model ExternalHandle {
@@ -123,7 +124,7 @@ model Submission {
   participantId        String?
   problemId            String?
   contestId            String?
-  teamId               String?
+  teamId               String?                // Now relationally mapped below
   contestProblemId     String?
   source               SubmissionSource       @default(INTERNAL_JUDGE)
   status               SubmissionStatus       @default(QUEUED)
@@ -137,11 +138,13 @@ model Submission {
   judgeMessage         String?
   createdAt            DateTime               @default(now())
   judgedAt             DateTime?
+  
   contest              Contest?               @relation(fields: [contestId], references: [id], onDelete: Cascade)
   contestProblem       ContestProblem?        @relation(fields: [contestProblemId], references: [id])
   participant          ContestParticipant?    @relation(fields: [participantId], references: [id])
   problem              Problem?               @relation(fields: [problemId], references: [id])
   user                 User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team                 ContestTeam?           @relation(fields: [teamId], references: [id]) // Added relational mapping
   testResults          SubmissionTestResult[]
   isFlagged            Boolean                @default(false)
   manualPoints         Int? 
@@ -201,6 +204,43 @@ model Editorial {
   problem      Problem   @relation(fields: [problemId], references: [id], onDelete: Cascade)
 }
 
+// -----------------------------------------------------------------------------
+// NEW COLLABORATION MODELS (Team & Chat)
+// -----------------------------------------------------------------------------
+model ContestTeam {
+  id          String               @id @default(cuid())
+  contestId   String
+  name        String
+  inviteCode  String               @unique @default(cuid())
+  score       Int                  @default(0)
+  penalty     Int                  @default(0)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  contest       Contest              @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  participants  ContestParticipant[]
+  submissions   Submission[]
+  messages      TeamMessage[]
+
+  @@index([contestId])
+}
+
+model TeamMessage {
+  id          String       @id @default(cuid())
+  contestId   String
+  teamId      String
+  senderId    String
+  content     String       @db.Text
+  createdAt   DateTime     @default(now())
+
+  contest     Contest      @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  team        ContestTeam  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  sender      User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, createdAt])
+}
+// -----------------------------------------------------------------------------
+
 model Contest {
   id                           String               @id @default(cuid())
   inviteCode                   String               @unique
@@ -227,6 +267,8 @@ model Contest {
   syncJobs                     ExternalSyncJob[]
   ratingEvents                 RatingHistory[]
   submissions                  Submission[]
+  teams                        ContestTeam[]        // Added to track teams belonging to this contest
+  teamMessages                 TeamMessage[]        // Added for real-time group chat routing
 
   @@index([status, startTime])
   @@index([createdById])
@@ -238,19 +280,21 @@ model ContestParticipant {
   userId           String?
   externalHandleId String?
   displayName      String
-  teamName         String?
+  teamName         String?                // Deprecating soon in favor of ContestTeam name
+  teamId           String?                // Now mapping to actual ContestTeam model
   role             ContestParticipantRole @default(PARTICIPANT)
   isOfficial       Boolean                @default(true)
   ratingBefore     Int?
   ratingAfter      Int?
   joinedAt         DateTime               @default(now())
-  contest          Contest                @relation(fields: [contestId], references: [id], onDelete: Cascade)
-  externalHandle   ExternalHandle?        @relation(fields: [externalHandleId], references: [id])
-  user             User?                  @relation(fields: [userId], references: [id])
-  standing         ContestStanding?
-  submissions      Submission[]
-  teamId           String?
   score            Int                    @default(0)
+
+  contest        Contest          @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  team           ContestTeam?     @relation(fields: [teamId], references: [id]) // Added relational mapping
+  externalHandle ExternalHandle?  @relation(fields: [externalHandleId], references: [id])
+  user           User?            @relation(fields: [userId], references: [id])
+  standing       ContestStanding?
+  submissions    Submission[]
 
   @@unique([contestId, userId])
   @@index([contestId, teamName])

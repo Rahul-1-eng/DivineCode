@@ -6,21 +6,25 @@ envVarGroups:
       - key: JUDGE_WORKER_SECRET
         generateValue: true
       - key: CRON_SECRET
-        value: "my-secret-password-123" # Change this string to a secure token in your Render dashboard panel later
+        generateValue: true
+      - key: FRONTEND_URL
+        value: "https://your-vercel-frontend-url.vercel.app" # 👉 IMPORTANT: Update this in your Render dashboard after Vercel deployment
 
 services:
+  # 1. Managed Redis (Handles Socket.io scaling and BullMQ jobs)
   - type: keyvalue
     name: divinecode-redis
     plan: starter
     maxmemoryPolicy: noeviction
     ipAllowList: []
 
+  # 2. Main API & WebSocket Server
   - type: web
     name: divinecode-api
     runtime: node
     plan: starter
-    buildCommand: npm install && npm run prisma:generate && npm run build --workspace apps/api
-    preDeployCommand: npm run prisma:deploy
+    buildCommand: npm install && npx turbo run build --filter=api
+    preDeployCommand: npx prisma migrate deploy
     startCommand: npm run start --workspace apps/api
     envVars:
       - fromGroup: divinecode-shared-secrets
@@ -35,16 +39,16 @@ services:
           type: keyvalue
           name: divinecode-redis
           property: connectionString
-      - key: JUDGE0_URL
-        value: https://emkc.org/api/v2/piston/execute
+      # 👉 FIXED: Pointing to the root API, the service appends /execute natively
       - key: PISTON_URL
-        value: https://emkc.org/api/v2/piston/execute
+        value: https://emkc.org/api/v2/piston
 
+  # 3. Background Worker (Processes standard judgements & external syncs off the main thread)
   - type: worker
     name: divinecode-worker
     runtime: node
     plan: starter
-    buildCommand: npm install && npm run prisma:generate && npm run build --workspace apps/api
+    buildCommand: npm install && npx turbo run build --filter=api
     startCommand: npm run worker:start --workspace apps/api
     envVars:
       - fromGroup: divinecode-shared-secrets
@@ -59,12 +63,11 @@ services:
           type: keyvalue
           name: divinecode-redis
           property: connectionString
-      - key: JUDGE0_URL
-        value: https://emkc.org/api/v2/piston/execute
       - key: PISTON_URL
-        value: https://emkc.org/api/v2/piston/execute
+        value: https://emkc.org/api/v2/piston
 
 databases:
+  # 4. Managed PostgreSQL Database
   - name: divinecode-postgres
     databaseName: divinecode
     user: divinecode

@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   # --- MAIN APP DATABASES ---
   postgres:
@@ -17,6 +19,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # --- SOCKET.IO & BULLMQ CACHE ---
   redis:
     image: redis:7-alpine
     container_name: divinecode-redis
@@ -27,54 +30,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # --- JUDGE0 EXECUTION ENGINE ---
-  judge0-redis:
-    image: redis:7-alpine
-    container_name: judge0-redis
-    restart: always
-
-  judge0-db:
-    image: postgres:13
-    container_name: judge0-db
-    environment:
-      - POSTGRES_USER=judge0
-      - POSTGRES_PASSWORD=judge0
-      - POSTGRES_DB=judge0
-    restart: always
-
-  judge0-server:
-    image: judge0/judge0:1.13.1
-    container_name: judge0-server
-    command: ["./scripts/server"]
-    ports:
-      - "2358:2358"
-    environment:
-      - REDIS_HOST=judge0-redis
-      - POSTGRES_HOST=judge0-db
-      - POSTGRES_USER=judge0
-      - POSTGRES_PASSWORD=judge0
-      - POSTGRES_DB=judge0
-    depends_on:
-      - judge0-db
-      - judge0-redis
-    restart: always
-
-  judge0-worker:
-    image: judge0/judge0:1.13.1
-    container_name: judge0-worker
-    command: ["./scripts/worker"]
-    privileged: true
-    environment:
-      - REDIS_HOST=judge0-redis
-      - POSTGRES_HOST=judge0-db
-      - POSTGRES_USER=judge0
-      - POSTGRES_PASSWORD=judge0
-      - POSTGRES_DB=judge0
-    depends_on:
-      - judge0-db
-      - judge0-redis
-    restart: always
 
 volumes:
   divinecode_postgres:
