@@ -15,13 +15,19 @@ const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
 type TestCase = { id: string; input: string; expectedOutput: string; output: string; status: 'idle' | 'running' | 'passed' | 'failed' | 'error' };
 
-function useContestTimer(startTime: Date, endTime: Date) {
-  const [timeLeft, setTimeLeft] = useState({ state: 'loading', text: '...' });
+function useContestTimer(startTime?: string | Date, endTime?: string | Date) {
+  const [timeLeft, setTimeLeft] = useState({ state: 'loading', text: 'Syncing chronometer...' });
+  
   useEffect(() => {
+    if (!startTime || !endTime) return;
+    
+    const start = new Date(startTime).getTime();
+    const end = new Date(endTime).getTime();
+    
+    if (isNaN(start) || isNaN(end)) return;
+
     const interval = setInterval(() => {
       const now = Date.now();
-      const start = startTime.getTime();
-      const end = endTime.getTime();
       if (now < start) {
         const diff = Math.floor((start - now) / 1000);
         setTimeLeft({ state: 'scheduled', text: `Starts in: ${Math.floor(diff/3600)}h ${Math.floor((diff%3600)/60)}m ${diff%60}s` });
@@ -32,8 +38,10 @@ function useContestTimer(startTime: Date, endTime: Date) {
         setTimeLeft({ state: 'running', text: `Time left: ${Math.floor(diff/3600)}h ${Math.floor((diff%3600)/60)}m ${diff%60}s` });
       }
     }, 1000);
+    
     return () => clearInterval(interval);
   }, [startTime, endTime]);
+  
   return timeLeft;
 }
 
@@ -47,7 +55,7 @@ export default function ContestProblemWorkspace() {
   const [language, setLanguage] = useState('cpp');
   
   // 👉 UPDATED: 4-Tab Workspace including Terminal and AI Explorer
-  const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'ai' | 'testcases'>('cph');
+const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cph');
   
   // Terminal State
   const [terminalOutput, setTerminalOutput] = useState<string>('Welcome to DivineCode Integrated Terminal.\nReady to compile and run...\n');
@@ -409,12 +417,21 @@ export default function ContestProblemWorkspace() {
 
       <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
         
-        <section style={{ width: '40%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #1e293b', background: '#0f172a' }}>
-          <div style={paneHeader}>Problem Description</div>
-          <div style={{ flex: 1, padding: 0 }}>
-            <iframe src={problemIframeUrl} style={iframeStyle} title="Problem Statement" />
-          </div>
-        </section>
+       <section style={{ width: '40%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #1e293b', background: '#0f172a' }}>
+  <div style={paneHeader}>Problem Description</div>
+  <div style={{ flex: 1, padding: 0, display: 'flex', flexDirection: 'column' }}>
+    <iframe src={problemIframeUrl} style={{...iframeStyle, flex: 1}} title="Problem Statement" sandbox="allow-scripts allow-same-origin" />
+    
+    {/* Permanent Fallback Link */}
+    {problem.externalUrl && (
+       <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center', borderTop: '1px solid #334155' }}>
+          <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontSize: 13, fontWeight: 'bold' }}>
+             🔗 Having trouble viewing? Open Original Problem Here
+          </a>
+       </div>
+    )}
+  </div>
+</section>
 
         <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
           
@@ -429,7 +446,7 @@ export default function ContestProblemWorkspace() {
             <div style={tabsHeader}>
               <button style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('cph')}>CPH TESTCASES</button>
               <button style={activeTab === 'terminal' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('terminal')}>TERMINAL</button>
-              <button style={activeTab === 'ai' ? activeTabStyle : inactiveTabStyle} onClick={() => { setActiveTab('ai'); loadAiProblems(); }}>AI PROBLEM EXPLORER</button>
+
               <button style={activeTab === 'testcases' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('testcases')}>DEBUG / HIDDEN</button>
             </div>
             
@@ -473,22 +490,6 @@ export default function ContestProblemWorkspace() {
               )}
 
               {/* AI EXPLORER TAB */}
-              {activeTab === 'ai' && (
-                <div style={{ padding: 20, background: '#0f172a', minHeight: '100%' }}>
-                  <h3 style={{ color: '#38bdf8', marginTop: 0 }}>Codeforces Problem Catalog (All Topics & Ratings)</h3>
-                  {fetchingAi ? <p style={{color: '#94a3b8'}}>Fetching massive problemset from Codeforces API...</p> : (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                      {aiProblems.map(p => (
-                        <div key={p.id} style={{ background: '#1e293b', padding: '10px 14px', borderRadius: 8, border: '1px solid #334155', flex: '1 1 250px' }}>
-                          <strong style={{ color: '#eef2ff', display: 'block', marginBottom: 4 }}>{p.id} - {p.name}</strong>
-                          <span style={{ fontSize: 12, color: '#fcd34d', marginRight: 10, fontWeight: 'bold' }}>Rating: {p.rating}</span>
-                          <span style={{ fontSize: 11, color: '#94a3b8' }}>{p.tags.slice(0,3).join(', ')}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* DEBUG / HIDDEN TAB */}
               {activeTab === 'testcases' && (

@@ -13,7 +13,9 @@ export async function scrapeProblemFromUrl(url: string): Promise<ScrapedProblem>
   if (url.includes('codeforces.com')) {
     return await scrapeCodeforces(url);
   }
-  throw new Error('Unsupported platform URL for direct scraping.');
+  
+  // 👉 NEW: If it's not Codeforces, try the Universal Generic Scraper
+  return await scrapeGenericPlatform(url);
 }
 
 async function scrapeCodeforces(url: string): Promise<ScrapedProblem> {
@@ -66,5 +68,49 @@ async function scrapeCodeforces(url: string): Promise<ScrapedProblem> {
   } catch (error) {
     console.error('[Scraper] Codeforces extraction failed:', error);
     throw new Error('Failed to parse the Codeforces problem. Ensure the URL is accessible.');
+  }
+}
+
+// 👉 NEW FUNCTION: Universal Fetcher for ANY website
+async function scrapeGenericPlatform(url: string): Promise<ScrapedProblem> {
+  try {
+    const { data } = await axios.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0' }
+    });
+
+    const $ = cheerio.load(data);
+    
+    // 1. Extract Title
+    const title = $('h1').first().text().trim() || $('title').text().trim() || 'External Problem';
+    
+    // 2. Clean and Extract Main Content
+    // Remove useless elements before extracting HTML
+    $('script, style, nav, footer, header, aside, .sidebar').remove();
+    const descriptionHtml = $('article').html() || $('main').html() || $('body').html() || `<p>View original problem: <a href="${url}">${url}</a></p>`;
+
+    // 3. Fallback Test Cases (Hunt for <pre> tags. Assume even indexes are input, odds are output)
+    const testcases: { input: string; expectedOutput: string }[] = [];
+    const preTags = $('pre');
+    
+    if (preTags.length >= 2) {
+      for (let i = 0; i < preTags.length - 1; i += 2) {
+        const input = $(preTags[i]).text().trim();
+        const output = $(preTags[i+1]).text().trim();
+        if (input && output) {
+          testcases.push({ input, expectedOutput: output });
+        }
+      }
+    }
+
+    return {
+      title,
+      descriptionHtml: `<h3>${title}</h3><div style="margin-top: 15px;">${descriptionHtml}</div>`,
+      testcases,
+      platform: 'OTHER',
+      originalUrl: url
+    };
+  } catch (error) {
+    console.warn(`[Scraper] Generic extraction failed for ${url}. Throwing to trigger URL Fallback.`);
+    throw new Error('Failed to parse external URL.');
   }
 }

@@ -95,3 +95,32 @@ export async function generateSolutionExplanationWithAI(problemDescription: stri
     throw new Error("Failed to generate AI explanation.");
   }
 }
+// Add this export to apps/api/src/modules/ai/aiService.ts
+export async function generateToughTestCases(problemDescriptionHtml: string) {
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
+
+  const prompt = `
+    You are an expert competitive programming judge. 
+    Read the following problem description:
+    ${problemDescriptionHtml}
+
+    Generate exactly 3 tricky, edge-case system test cases for this problem (e.g., maximum constraints, zeroes, empty inputs).
+    Respond strictly with a JSON array of objects. Do not include markdown formatting.
+    Format: [{"input": "...", "expectedOutput": "..."}]
+  `;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const { data } = await axios.post(url, {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json" }
+    });
+
+    const jsonString = data.candidates[0].content.parts[0].text;
+    return JSON.parse(jsonString);
+  } catch (error: any) {
+    console.error("AI Generation Error from Google:", error.response?.data || error.message);
+    return []; // Return empty array so it doesn't crash the problem insertion
+  }
+}

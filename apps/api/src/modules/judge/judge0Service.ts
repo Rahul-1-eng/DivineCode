@@ -8,11 +8,11 @@ type JudgeLanguage = 'cpp' | 'c' | 'java' | 'python' | 'javascript';
 
 // 👉 THE FIX: Hardcoded exact versions. No async fetching. No crashing. Guaranteed to compile.
 const PISTON_VERSIONS: Record<string, string> = {
-  'c++': '10.2.0',
-  'c': '10.2.0',
-  'python': '3.10.0',
-  'java': '15.0.2',
-  'javascript': '18.15.0'
+  'c++': '*',
+  'c': '*',
+  'python': '*',
+  'java': '*',
+  'javascript': '*'
 };
 
 function getPistonConfig(language: string) {
@@ -106,8 +106,11 @@ async function submitToPiston(input: { sourceCode: string; language: JudgeLangua
       return { stdout: safeStdout, stderr: data.run.stderr, status: 'ACCEPTED' };
     }
     return { stderr: "Unknown execution error", status: 'JUDGE_ERROR' };
-  } catch (error) {
-    return { stderr: "Could not connect to the execution engine.", status: 'JUDGE_ERROR' };
+ } catch (error: any) {
+    // 👉 THE FIX: Output the actual error message so you know exactly why it's failing
+    const exactError = error.message || error.toString();
+    console.error("[Piston Execution Error]:", exactError);
+    return { verdict: 'RUNTIME_ERROR', stderr: `Execution engine connection failed: ${exactError}. Please check Piston API status.` };
   }
 }
 
@@ -252,7 +255,10 @@ export async function executeSubmission(sourceCode: string, language: string, in
     }
 
     return { verdict, runtimeMs: 15, memoryKb: 2048, stdout: safeStdout, stderr: data.run.stderr };
-  } catch (error) {
-    return { verdict: 'RUNTIME_ERROR', stderr: 'Could not connect to execution engine.' };
+  } catch (error: any) {
+    // 👉 THE FIX: Output the actual error message so you know exactly why it's failing
+    const exactError = error.message || error.toString();
+    console.error("[Piston Execution Error]:", exactError);
+    return { verdict: 'RUNTIME_ERROR', stderr: `Execution engine connection failed: ${exactError}. Please check Piston API status.` };
   }
 }

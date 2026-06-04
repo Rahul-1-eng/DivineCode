@@ -9,7 +9,8 @@ import {
 import { fetchCodeforcesAccepted } from '../../externalSync';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
-
+import { scrapeProblemFromUrl } from '../external-sync/problemScraper';
+import { generateToughTestCases } from '../ai/aiService';
 export type MemberInput = {
   username?: string; userId?: string; email?: string;
   name?: string; displayName?: string; teamName?: string;
@@ -490,17 +491,55 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
   });
   if (!contest) throw new Error('Contest not found');
 
-  await assertUnsolvedByAll(
-    contest.participants.map((participant) => ({
-      userId: participant.userId || undefined, email: participant.user?.email || undefined,
-      displayName: participant.displayName, codeforcesHandle: participant.externalHandle?.handle || undefined
-    })),
-    [problem]
-  );
+  let enrichedProblem = { ...problem };
+  let newTestcases: any[] = [];
+  let finalDescription = problem.title || 'External Problem';
+
+  if (problem.url && !problem.id) {
+    try {
+      // 1. Attempt to Scrape
+      const scraped = await scrapeProblemFromUrl(problem.url);
+      enrichedProblem.title = scraped.title;
+      enrichedProblem.platform = scraped.platform;
+      finalDescription = scraped.descriptionHtml;
+      
+      // 2. Attempt AI Generation
+      const aiGeneratedCases = await generateToughTestCases(scraped.descriptionHtml);
+      newTestcases = [...scraped.testcases, ...aiGeneratedCases];
+    } catch (err) {
+      console.warn("Scraping or AI failed, applying URL fallback.");
+      // 👉 FALLBACK: If fetch fails, replace description with a clickable link
+      finalDescription = `<h3>External Problem</h3><p>Please view the problem description here: <a href="${problem.url}" target="_blank" style="color: #38bdf8;">${problem.url}</a></p>`;
+      enrichedProblem.title = problem.title || 'Imported Problem';
+    }
+  }
 
   await prisma.$transaction(async (tx) => {
-    const created = await createContestProblemRow(tx, { contestId, problem, index: contest.problems.length, addedById: actorId || null });
-    await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_ADD', entityType: 'ContestProblem', entityId: created.id, after: created as any } });
+    // Note: ensure createContestProblemRow is updated to accept/save the finalDescription 
+    // if your ContestProblem table supports a description override.
+    const created = await createContestProblemRow(tx, { 
+      contestId, 
+      problem: enrichedProblem, 
+      index: contest.problems.length, 
+      addedById: actorId || null 
+    });
+
+    if (newTestcases.length > 0) {
+       // 👉 THE FIX: Changed tx.testCase to tx.testcase to match schema.prisma
+       await tx.testcase.createMany({
+         data: newTestcases.map((tc, idx) => ({
+           problemId: created.problemId || '', // Ensure this links correctly based on your schema
+           input: tc.input,
+           expectedOutput: tc.expectedOutput,
+           order: idx + 1,
+           type: idx >= 2 ? 'HIDDEN' : 'SAMPLE' 
+         }))
+       });
+    }
+
+    await tx.auditLog.create({ 
+      data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_ADD', entityType: 'ContestProblem', entityId: created.id, after: created as any } 
+    });
   });
 
   await recomputeContestStandings(contestId);
@@ -600,14 +639,23 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
       orderBy: { judgedAt: 'desc' }, take: 250
     });
 
-    return submissions.map(sub => ({
-      id: sub.id, contestId: sub.contestId, memberId: sub.participantId,
-      userId: sub.participant?.displayName || sub.participant?.user?.name || 'Unknown',
-      problemId: sub.contestProblemId, verdict: sub.verdict, language: sub.language,
-      source: sub.source, externalSubmissionId: sub.externalSubmissionId,
-      createdAt: sub.externalCreatedAt || sub.judgedAt || sub.createdAt,
-      platform: sub.contestProblem?.platform || 'Codeforces', code: sub.code
-    }));
+  // Update the return mapping in getContestSubmissionsV2:
+return submissions.map(sub => {
+  const contestCode = sub.contestProblem?.externalId?.match(/^\d+/)?.[0];
+  const externalSubmissionUrl = sub.externalSubmissionId && contestCode 
+    ? `https://codeforces.com/contest/${contestCode}/submission/${sub.externalSubmissionId}`
+    : null;
+
+  return {
+    id: sub.id, contestId: sub.contestId, memberId: sub.participantId,
+    userId: sub.participant?.displayName || sub.participant?.user?.name || 'Unknown',
+    problemId: sub.contestProblemId, verdict: sub.verdict, language: sub.language,
+    source: sub.source, externalSubmissionId: sub.externalSubmissionId,
+    externalSubmissionUrl, // <-- Add this to frontend payload
+    createdAt: sub.externalCreatedAt || sub.judgedAt || sub.createdAt,
+    platform: sub.contestProblem?.platform || 'Codeforces', code: sub.code
+  };
+});
   } catch (error) {
     console.error(`[FATAL] getContestSubmissionsV2 Failed for ID ${contestId}:`, error);
     throw error;

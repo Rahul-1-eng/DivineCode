@@ -669,17 +669,52 @@ export default function ContestRoomPage() {
               </div>
             </section>
             
-            <section style={{ ...panel, marginTop: 18 }}>
-              <h2>{isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}</h2>
+<section style={{ ...panel, marginTop: 18 }}>
+              <h2>
+                {isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}
+              </h2>
               {submissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
               {submissions.length > 0 && (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={table}>
-                    <thead><tr><th style={th}>Time</th><th style={th}>User</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Source</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th style={th}>Time</th>
+                        <th style={th}>User</th>
+                        <th style={th}>Problem</th>
+                        <th style={th}>Verdict</th>
+                        <th style={th}>Source</th>
+                      </tr>
+                    </thead>
                     <tbody>
-                      {submissions.map((submission) => (
-                        <tr key={submission.id} style={clickRow}>
-                          <td style={td}>{new Date(submission.createdAt).toLocaleString()}</td><td style={td}>{submission.userId}</td><td style={td}>{problemById[submission.problemId]?.label || ''} {canSeeProblemMeta ? problemById[submission.problemId]?.titleSnapshot : ''}</td><td style={{...td, color: submission.verdict.includes('ACCEPT') ? '#4ade80' : '#f87171'}}>{submission.verdict}</td><td style={td}><button onClick={(e) => { e.stopPropagation(); setSelectedSubmission(submission); }} style={ghostButton}>View Details</button></td>
+                      {/* Loop through the array to create a row for each individual submission */}
+                      {submissions.map((sub: any, index: number) => (
+                        <tr key={sub.id || index} style={{ borderBottom: '1px solid #334155' }}>
+                          <td style={td}>{new Date(sub.createdAt).toLocaleTimeString()}</td>
+                          <td style={td}>{sub.userId}</td>
+                          <td style={td}>{sub.problemId}</td>
+                          <td style={td}>
+                            <strong style={{ color: String(sub.verdict).includes('ACCEPT') ? '#4ade80' : '#f87171' }}>
+                              {sub.verdict}
+                            </strong>
+                          </td>
+                          <td style={td}>
+                            <div>{sub.source}</div>
+                            
+                            {/* Check for the URL on the INDIVIDUAL submission (sub) inside a table cell */}
+                            {sub.externalSubmissionUrl && (
+                              <div style={{ marginTop: '8px' }}>
+                                <a 
+                                  href={sub.externalSubmissionUrl} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  style={{ color: '#38bdf8', textDecoration: 'underline', fontSize: '12px' }}
+                                >
+                                  👉 View original
+                                </a>
+                              </div>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

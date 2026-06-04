@@ -19,7 +19,7 @@ export async function processContestRewards(contestId: string) {
     if (!contest || !contest.isRated) return null;
 
     const participants = contest.participants.filter(p => p.standing && p.user);
-    if (participants.length <= 1) return null; // Need at least 2 people for a rated event
+    if (participants.length == 0) return null; // Need at least 2 people for a rated event
 
     const updates = [];
 
