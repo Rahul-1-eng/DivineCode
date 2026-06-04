@@ -46,7 +46,18 @@ export default function ContestProblemWorkspace() {
   const [code, setCode] = useState('// Write your solution here...');
   const [language, setLanguage] = useState('cpp');
   
-  const [activeTab, setActiveTab] = useState<'cph' | 'testcases' | 'ai'>('cph');
+  // 👉 UPDATED: 4-Tab Workspace including Terminal and AI Explorer
+  const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'ai' | 'testcases'>('cph');
+  
+  // Terminal State
+  const [terminalOutput, setTerminalOutput] = useState<string>('Welcome to DivineCode Integrated Terminal.\nReady to compile and run...\n');
+  const [customInput, setCustomInput] = useState<string>('');
+  
+  // AI Catalog State
+  const [aiProblems, setAiProblems] = useState<any[]>([]);
+  const [fetchingAi, setFetchingAi] = useState(false);
+
+  // CPH State
   const [testcases, setTestcases] = useState<TestCase[]>([{ id: '1', input: '', expectedOutput: '', output: '', status: 'idle' }]);
   const [isFetchingSamples, setIsFetchingSamples] = useState(false);
   
@@ -61,7 +72,7 @@ export default function ContestProblemWorkspace() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 👉 Team Chat States
+  // Team Chat States
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -85,7 +96,6 @@ export default function ContestProblemWorkspace() {
       .then(res => res.json())
       .then(data => {
         const cData = data.data || data;
-        // Inject viewerMember logic if omitted
         if (!cData.viewerMember && session?.user && (cData.participants || cData.members)) {
           const arr = cData.participants || cData.members || [];
           cData.viewerMember = arr.find((p: any) => 
@@ -99,7 +109,7 @@ export default function ContestProblemWorkspace() {
       .catch(() => setIsLoading(false));
   }, [id, session]);
 
-  // 👉 WebSocket Connection for Team Chat & Cross-Member AC Sync
+  // WebSocket Connection
   useEffect(() => {
     if (!id || !session || !contest?.viewerMember?.teamId) return;
     
@@ -134,8 +144,7 @@ export default function ContestProblemWorkspace() {
     if (!chatInput.trim() || !contest?.viewerMember?.teamId) return;
     if (socketRef.current) {
       socketRef.current.emit('sendTeamMessage', {
-        contestId: id,
-        teamId: contest.viewerMember.teamId,
+        contestId: id, teamId: contest.viewerMember.teamId,
         senderId: contest.viewerMember.userId || contest.viewerMember.user?.id,
         content: chatInput.trim()
       });
@@ -146,23 +155,17 @@ export default function ContestProblemWorkspace() {
   const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
 
-  // 👉 UPDATED: Smart DB check before scraping
+  // Smart DB check before scraping
   useEffect(() => {
-    // If test cases are already in DB (because we scraped via URL on creation), use them directly
     if (problem?.problem?.testcases && problem.problem.testcases.length > 0) {
       setTestcases(
         problem.problem.testcases.map((tc: any) => ({
-          id: tc.id,
-          input: tc.input,
-          expectedOutput: tc.expectedOutput,
-          output: '',
-          status: 'idle'
+          id: tc.id, input: tc.input, expectedOutput: tc.expectedOutput, output: '', status: 'idle'
         }))
       );
       return; 
     }
 
-    // Fallback: If not in DB, attempt proxy fetch for external codeforces platforms
     if (!problem?.externalUrl?.includes('codeforces') || testcases[0]?.input !== '') return;
     
     const fetchSamples = async () => {
@@ -185,6 +188,26 @@ export default function ContestProblemWorkspace() {
     };
     fetchSamples();
   }, [problem]);
+
+  // 👉 NEW: VS Code Terminal Execution
+  const runCustomCode = async () => {
+    if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
+    setActiveTab('terminal');
+    setTerminalOutput(`> Compiling and running...\n`);
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/execute`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceCode: code, language, input: customInput })
+      });
+      const data = await res.json();
+      if (!res.ok) setTerminalOutput(`> Error: ${data.error || 'Server connection failed.'}`);
+      else if (data.verdict === 'COMPILATION_ERROR') setTerminalOutput(`> COMPILATION ERROR:\n\n${data.compileError}`);
+      else if (data.verdict === 'RUNTIME_ERROR' || data.verdict === 'TIME_LIMIT_EXCEEDED') setTerminalOutput(`> ${data.verdict}:\n\n${data.stderr || ''}`);
+      else setTerminalOutput(`> EXECUTED SUCCESSFULLY:\n\n${data.stdout || '[No Output]'}`);
+    } catch (e) {
+      setTerminalOutput('> Network error. Execution engine unreachable.');
+    }
+  };
 
   const runTestCase = async (index: number) => {
     if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
@@ -225,7 +248,19 @@ export default function ContestProblemWorkspace() {
   };
 
   const runAllTestcases = async () => {
+    setActiveTab('cph');
     for (let i = 0; i < testcases.length; i++) await runTestCase(i);
+  };
+
+  // 👉 NEW: Fetch Real AI Problems
+  const loadAiProblems = async () => {
+    if (aiProblems.length > 0) return; // Already loaded
+    setFetchingAi(true);
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/recommend-problems`, { method: 'POST' });
+      const data = await res.json();
+      setAiProblems(data.recommendations || []);
+    } catch (e) {} finally { setFetchingAi(false); }
   };
 
   const handleSubmitCode = async () => {
@@ -316,19 +351,14 @@ export default function ContestProblemWorkspace() {
     ? `${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(problem.externalUrl)}` 
     : problem.externalUrl;
 
-  // 👉 Precise URL formatter to automatically select the problem in the Codeforces dropdown
   let cfSubmitUrl = problem.externalUrl || 'https://codeforces.com/problemset/submit';
   const psMatch = cfSubmitUrl.match(/problemset\/problem\/([0-9]+)\/([A-Za-z0-9]+)/i);
   const contestMatch = cfSubmitUrl.match(/contest\/([0-9]+)\/problem\/([A-Za-z0-9]+)/i);
   const gymMatch = cfSubmitUrl.match(/gym\/([0-9]+)\/problem\/([A-Za-z0-9]+)/i);
 
-  if (psMatch) {
-    cfSubmitUrl = `https://codeforces.com/contest/${psMatch[1]}/submit/${psMatch[2].toUpperCase()}`;
-  } else if (contestMatch) {
-    cfSubmitUrl = `https://codeforces.com/contest/${contestMatch[1]}/submit/${contestMatch[2].toUpperCase()}`;
-  } else if (gymMatch) {
-    cfSubmitUrl = `https://codeforces.com/gym/${gymMatch[1]}/submit/${gymMatch[2].toUpperCase()}`;
-  }
+  if (psMatch) cfSubmitUrl = `https://codeforces.com/contest/${psMatch[1]}/submit/${psMatch[2].toUpperCase()}`;
+  else if (contestMatch) cfSubmitUrl = `https://codeforces.com/contest/${contestMatch[1]}/submit/${contestMatch[2].toUpperCase()}`;
+  else if (gymMatch) cfSubmitUrl = `https://codeforces.com/gym/${gymMatch[1]}/submit/${gymMatch[2].toUpperCase()}`;
   
   const monacoLanguage = language === 'cpp' ? 'cpp' : language === 'python' ? 'python' : 'java';
 
@@ -371,7 +401,8 @@ export default function ContestProblemWorkspace() {
             <option value="python">Python 3</option>
             <option value="java">Java</option>
           </select>
-          <button onClick={runAllTestcases} style={runBtn}>Run Code ▶</button>
+          <button onClick={runAllTestcases} style={ghostBtn}>Run Test Cases</button>
+          <button onClick={runCustomCode} style={runBtn}>Terminal ▶</button>
           <button onClick={handleSubmitCode} disabled={submitting} style={submitBtn}>{submitting ? 'Judging...' : 'Submit 🚀'}</button>
         </div>
       </header>
@@ -385,25 +416,28 @@ export default function ContestProblemWorkspace() {
           </div>
         </section>
 
-        <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#020617' }}>
+        <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
           
-          <div style={{ flex: 1, position: 'relative' }}>
+          <div style={{ flex: 1, position: 'relative', paddingTop: 10 }}>
             <Editor
               height="100%" theme="vs-dark" language={monacoLanguage} value={code} onChange={(val) => setCode(val || '')}
-              options={{ minimap: { enabled: false }, fontSize: 15, padding: { top: 16 } }}
+              options={{ minimap: { enabled: false }, fontSize: 16 }}
             />
           </div>
 
-          <div style={{ height: '35%', display: 'flex', flexDirection: 'column', borderTop: '1px solid #1e293b', background: '#0f172a' }}>
+          <div style={{ height: '35%', display: 'flex', flexDirection: 'column', borderTop: '1px solid #333', background: '#1e1e1e' }}>
             <div style={tabsHeader}>
-              <button style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('cph')}>Test Cases</button>
-              <button style={activeTab === 'ai' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('ai')}>AI Avatar Explainer</button>
-              <button style={activeTab === 'testcases' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('testcases')}>Hidden / Debug</button>
+              <button style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('cph')}>CPH TESTCASES</button>
+              <button style={activeTab === 'terminal' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('terminal')}>TERMINAL</button>
+              <button style={activeTab === 'ai' ? activeTabStyle : inactiveTabStyle} onClick={() => { setActiveTab('ai'); loadAiProblems(); }}>AI PROBLEM EXPLORER</button>
+              <button style={activeTab === 'testcases' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('testcases')}>DEBUG / HIDDEN</button>
             </div>
             
-            <div style={{ flex: 1, overflowY: 'auto', padding: 15 }}>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              
+              {/* CPH TAB */}
               {activeTab === 'cph' && (
-                <div>
+                <div style={{ padding: 15, background: '#0f172a', minHeight: '100%' }}>
                   {testcases.map((tc, idx) => (
                     <div key={tc.id} style={tcCard}>
                       <div style={tcHeader}>
@@ -424,16 +458,41 @@ export default function ContestProblemWorkspace() {
                 </div>
               )}
 
-              {activeTab === 'ai' && (
-                <div style={{ textAlign: 'center', padding: 20 }}>
-                  <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>🤖 AI Animated Explainer</h3>
-                  <p style={{ color: '#cbd5e1' }}>Get a fully interactive, step-by-step breakdown of the optimal logic.</p>
-                  <button style={aiTriggerBtn} onClick={() => alert("AI Animation Engine is initializing. Stay tuned!")}>Generate AI Explanation</button>
+              {/* TERMINAL TAB */}
+              {activeTab === 'terminal' && (
+                <div style={{ display: 'flex', height: '100%', padding: 10, gap: 10, background: '#1e1e1e' }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ color: '#ccc', fontSize: 12, marginBottom: 5, fontWeight: 'bold' }}>STDIN (Custom Input)</div>
+                    <textarea value={customInput} onChange={(e) => setCustomInput(e.target.value)} style={{ flex: 1, background: '#2d2d2d', color: '#fff', border: '1px solid #444', fontFamily: 'monospace', padding: 8, outline: 'none', resize: 'none' }} placeholder="Enter custom input here..." />
+                  </div>
+                  <div style={{ flex: 2, display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ color: '#ccc', fontSize: 12, marginBottom: 5, fontWeight: 'bold' }}>TERMINAL OUTPUT</div>
+                    <pre style={{ flex: 1, background: '#000', color: '#4ade80', margin: 0, padding: 10, border: '1px solid #444', fontFamily: 'monospace', overflowY: 'auto' }}>{terminalOutput}</pre>
+                  </div>
                 </div>
               )}
 
+              {/* AI EXPLORER TAB */}
+              {activeTab === 'ai' && (
+                <div style={{ padding: 20, background: '#0f172a', minHeight: '100%' }}>
+                  <h3 style={{ color: '#38bdf8', marginTop: 0 }}>Codeforces Problem Catalog (All Topics & Ratings)</h3>
+                  {fetchingAi ? <p style={{color: '#94a3b8'}}>Fetching massive problemset from Codeforces API...</p> : (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                      {aiProblems.map(p => (
+                        <div key={p.id} style={{ background: '#1e293b', padding: '10px 14px', borderRadius: 8, border: '1px solid #334155', flex: '1 1 250px' }}>
+                          <strong style={{ color: '#eef2ff', display: 'block', marginBottom: 4 }}>{p.id} - {p.name}</strong>
+                          <span style={{ fontSize: 12, color: '#fcd34d', marginRight: 10, fontWeight: 'bold' }}>Rating: {p.rating}</span>
+                          <span style={{ fontSize: 11, color: '#94a3b8' }}>{p.tags.slice(0,3).join(', ')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* DEBUG / HIDDEN TAB */}
               {activeTab === 'testcases' && (
-                <div>
+                <div style={{ padding: 15, background: '#0f172a', minHeight: '100%' }}>
                   <div style={aiTutorCard}>
                     <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>🤖 AI Contest Tutor</h3>
                     {!aiDebugResult ? (
@@ -493,7 +552,7 @@ export default function ContestProblemWorkspace() {
         </div>
       )}
 
-      {/* 👉 Global Team Chat Embedded in Workspace */}
+      {/* Global Team Chat Embedded in Workspace */}
       {contest?.viewerMember?.teamId && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
           {isChatOpen ? (
@@ -533,17 +592,18 @@ export default function ContestProblemWorkspace() {
 
 // Styles
 const page: CSSProperties = { display: 'flex', flexDirection: 'column', backgroundColor: '#020617', color: '#eef2ff', fontFamily: 'Inter, sans-serif' };
-const headerBar: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', backgroundColor: '#0f172a', borderBottom: '1px solid #1e293b', height: 60 };
-const btnDark: CSSProperties = { background: '#1e293b', border: 'none', color: '#cbd5e1', padding: '8px 14px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold' };
+const headerBar: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', backgroundColor: '#1e1e1e', borderBottom: '1px solid #333', height: 60 };
+const btnDark: CSSProperties = { background: '#333', border: 'none', color: '#ccc', padding: '8px 14px', cursor: 'pointer', fontWeight: 'bold', borderRadius: 4 };
 const timerBox: CSSProperties = { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold' };
-const submitBtn: CSSProperties = { background: '#10b981', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' };
-const runBtn: CSSProperties = { background: '#3b82f6', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' };
-const selectBox: CSSProperties = { background: '#1e293b', color: '#fff', border: '1px solid #334155', padding: '8px', borderRadius: 6, outline: 'none' };
+const submitBtn: CSSProperties = { background: '#10b981', border: 'none', color: '#fff', padding: '8px 16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: 4 };
+const runBtn: CSSProperties = { background: '#3b82f6', border: 'none', color: '#fff', padding: '8px 16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: 4 };
+const ghostBtn: CSSProperties = { background: 'transparent', border: '1px solid #444', color: '#ccc', padding: '8px 16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: 4 };
+const selectBox: CSSProperties = { background: '#333', color: '#fff', border: 'none', padding: '8px', outline: 'none', borderRadius: 4 };
 const paneHeader: CSSProperties = { padding: '12px 16px', background: '#1e293b', fontWeight: 'bold', fontSize: 14, color: '#94a3b8' };
 const iframeStyle: CSSProperties = { width: '100%', height: '100%', border: 'none', background: '#fff' };
-const tabsHeader: CSSProperties = { display: 'flex', background: '#020617', borderBottom: '1px solid #1e293b' };
-const activeTabStyle: CSSProperties = { flex: 1, background: '#0f172a', border: 'none', color: '#38bdf8', padding: '10px', borderTop: '2px solid #38bdf8', cursor: 'pointer', fontWeight: 'bold' };
-const inactiveTabStyle: CSSProperties = { flex: 1, background: 'transparent', border: 'none', color: '#94a3b8', padding: '10px', cursor: 'pointer' };
+const tabsHeader: CSSProperties = { display: 'flex', borderBottom: '1px solid #333', background: '#1e1e1e' };
+const activeTabStyle: CSSProperties = { flex: 1, background: '#1e1e1e', border: 'none', borderTop: '2px solid #38bdf8', color: '#fff', padding: '10px', cursor: 'pointer', fontWeight: 'bold', fontSize: 12, letterSpacing: 1 };
+const inactiveTabStyle: CSSProperties = { flex: 1, background: '#2d2d2d', border: 'none', color: '#888', padding: '10px', cursor: 'pointer', fontSize: 12, letterSpacing: 1, borderTop: '2px solid transparent' };
 const btnDanger: CSSProperties = { background: '#ef4444', color: '#fff', padding: '8px 16px', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold' };
 const aiTutorCard: CSSProperties = { padding: 16, background: 'rgba(99, 102, 241, 0.05)', border: '1px solid rgba(99, 102, 241, 0.3)', borderRadius: 10 };
 const aiTriggerBtn: CSSProperties = { background: '#5356ff', color: '#fff', padding: '8px 16px', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 13 };

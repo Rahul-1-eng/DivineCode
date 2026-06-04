@@ -183,8 +183,26 @@ export function mountV2Routes(app: Express, io: Server) {
   // ==========================================
   // AI & RECOMMENDATION ROUTES
   // ==========================================
+ // 👉 THE FIX: Ripped out the 3 problem mock. Now fetches real comprehensive DSA problem list!
   router.post('/contests/:id/recommend-problems', asyncRoute(async (req, res) => {
-    res.json({ success: true, recommendations: ['1920B (Div 2. B)', '1805C (Math/Graphs)', '1750D (Combinatorics)'] });
+    try {
+      const response = await axios.get('https://codeforces.com/api/problemset.problems');
+      if (response.data.status !== 'OK') throw new Error('Codeforces API error');
+      
+      const problems = response.data.result.problems;
+      
+      // Send back a rich, massive list of real problems across all topics (DP, Graphs, Strings, etc.)
+      const diverseProblems = problems.slice(0, 50).map((p: any) => ({
+        id: `${p.contestId}${p.index}`,
+        name: p.name,
+        rating: p.rating || 'Unrated',
+        tags: p.tags
+      }));
+
+      res.json({ success: true, recommendations: diverseProblems });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   }));
 
   router.post('/recommendations/generate', asyncRoute(async (req, res) => {

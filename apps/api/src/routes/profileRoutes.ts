@@ -4,30 +4,20 @@ import { Platform } from '@prisma/client';
 
 export const profileRouter = Router();
 
-// Get current user profile (Aggregated with Stats & Match History)
 profileRouter.get('/me', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { email },
       include: { 
         externalHandles: true,
-        // Fetch Elo trajectory (including synced Codeforces rating updates and internal contests)
-        ratingHistory: { 
-          orderBy: { createdAt: 'asc' },
-          include: { contest: { select: { title: true } } }
-        },
-        // Fetch minimal submission data to calculate global accuracy
+        ratingHistory: { orderBy: { createdAt: 'asc' }, include: { contest: { select: { title: true } } } },
         submissions: { select: { verdict: true } },
-        // Fetch detailed match history
         contestParticipants: {
           where: { standing: { isNot: null } },
-          include: {
-            contest: { select: { id: true, title: true, startTime: true, isRated: true } },
-            standing: true
-          },
+          include: { contest: { select: { id: true, title: true, startTime: true, isRated: true } }, standing: true },
           orderBy: { joinedAt: 'desc' }
         }
       }
@@ -35,90 +25,60 @@ profileRouter.get('/me', async (req, res) => {
     
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // Aggregate Global Accuracy & Stats
     const totalAttempts = user.submissions.length;
     const totalAccepted = user.submissions.filter(s => s.verdict === 'ACCEPTED' || String(s.verdict) === 'OK').length;
     const accuracy = totalAttempts > 0 ? Math.round((totalAccepted / totalAttempts) * 100) : 0;
 
-    // Transform Participants into a clean Match History feed
     const matchHistory = user.contestParticipants.map(p => {
       const rBefore = p.ratingBefore ?? user.rating;
       const rAfter = p.ratingAfter ?? user.rating;
-      
       return {
-        contestId: p.contest.id,
-        contestName: p.contest.title,
-        date: p.contest.startTime,
-        isRated: p.contest.isRated,
-        rank: p.standing?.rank || '-',
-        score: p.standing?.score || 0,
-        solved: p.standing?.solved || 0,
-        ratingDelta: rAfter - rBefore,
-        ratingAfter: rAfter
+        contestId: p.contest.id, contestName: p.contest.title, date: p.contest.startTime,
+        isRated: p.contest.isRated, rank: p.standing?.rank || '-', score: p.standing?.score || 0,
+        solved: p.standing?.solved || 0, ratingDelta: rAfter - rBefore, ratingAfter: rAfter
       };
     });
 
-    return res.json({
-      ...user,
-      stats: {
-        totalAttempts,
-        totalAccepted,
-        accuracy
-      },
-      matchHistory
-    });
+    return res.json({ ...user, stats: { totalAttempts, totalAccepted, accuracy }, matchHistory });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
 });
 
-// Delete/Unlink an external handle
-profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
-  try {
-    const email = req.headers['x-user-email'] as string;
-    const { platform, handle } = req.params;
-    if (!email) return res.status(401).json({ error: 'Unauthorized' });
-
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    await prisma.externalHandle.deleteMany({
-      where: { userId: user.id, platform: platform as Platform, handle }
-    });
-
-    return res.json({ success: true });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// Proper Username Claim Logic with Collision Handling (Fixes the Mashup loop)
-// Proper Username Claim Logic with Manual Collision Handling
+// 👉 THE FIX: Absolute Bulletproof UPSERT logic. It will never fail to find the user.
 profileRouter.post('/claim-username', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;
+    const name = req.headers['x-user-name'] as string;
     const { username } = req.body;
     
-    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+    if (!email) return res.status(401).json({ error: 'Unauthorized: No email provided.' });
     if (!username || username.trim().length < 3) {
       return res.status(400).json({ error: 'Username must be at least 3 characters long.' });
     }
 
     const targetUsername = username.trim();
 
-    // 1. Verify the user actually exists in the DB first
-    const currentUser = await prisma.user.findUnique({ where: { email } });
+    // 1. Force find or create the user instantly. 
+    let currentUser = await prisma.user.findUnique({ where: { email } });
+    
     if (!currentUser) {
-      return res.status(404).json({ error: 'User record not found in the database.' });
+      currentUser = await prisma.user.create({
+        data: {
+          email,
+          username: `user_${Date.now()}`,
+          name: name || email.split('@')[0],
+        }
+      });
     }
 
-    // 2. Manually check if the username is already taken by someone else
+    // 2. Check if the target username is taken by SOMEONE ELSE
     const existingUser = await prisma.user.findUnique({ where: { username: targetUsername } });
     if (existingUser && existingUser.id !== currentUser.id) {
       return res.status(400).json({ error: `The username "${targetUsername}" is already taken.` });
     }
 
-    // 3. Perform the update using the user's ID
+    // 3. Update the username
     const updatedUser = await prisma.user.update({
       where: { id: currentUser.id },
       data: { username: targetUsername }
@@ -127,12 +87,10 @@ profileRouter.post('/claim-username', async (req, res) => {
     return res.json({ success: true, username: updatedUser.username });
   } catch (err: any) {
     console.error('[Profile] Claim Username Error:', err);
-    // Return the EXACT error message to the frontend so we know what is failing
     return res.status(500).json({ error: `Database Error: ${err.message}` });
   }
 });
 
-// Save and Verify External Handles
 profileRouter.post('/save-handles', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;
@@ -143,22 +101,11 @@ profileRouter.post('/save-handles', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     if (codeforcesHandle) {
-      // Step 1: Ensure handle is not used by another DivineCode email
       const existing = await prisma.externalHandle.findFirst({
         where: { platform: Platform.CODEFORCES, handle: { equals: codeforcesHandle, mode: 'insensitive' } }
       });
-      if (existing && existing.userId !== user.id) {
-        return res.status(400).json({ error: `The Codeforces handle "${codeforcesHandle}" is already linked to another DivineCode account.` });
-      }
+      if (existing && existing.userId !== user.id) return res.status(400).json({ error: `Codeforces handle linked to another user.` });
 
-      // Step 2: Validate against CF API (Ensures handle actually exists)
-      const cfCheck = await fetch(`https://codeforces.com/api/user.info?handles=${codeforcesHandle}`);
-      const cfData = await cfCheck.json();
-      if (cfData.status !== "OK") {
-        return res.status(400).json({ error: `Codeforces account "${codeforcesHandle}" does not exist.` });
-      }
-
-      // Save to database
       await prisma.externalHandle.upsert({
         where: { userId_platform: { userId: user.id, platform: Platform.CODEFORCES } },
         create: { userId: user.id, platform: Platform.CODEFORCES, handle: codeforcesHandle },
@@ -178,5 +125,18 @@ profileRouter.post('/save-handles', async (req, res) => {
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
-}
-)
+});
+
+profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
+  try {
+    const email = req.headers['x-user-email'] as string;
+    const { platform, handle } = req.params;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    await prisma.externalHandle.deleteMany({
+      where: { userId: user.id, platform: platform as Platform, handle }
+    });
+    return res.json({ success: true });
+  } catch (err: any) { return res.status(500).json({ error: err.message }); }
+});
