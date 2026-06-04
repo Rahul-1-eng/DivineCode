@@ -8,52 +8,52 @@ datasource db {
 }
 
 model User {
-  id                      String                   @id @default(cuid())
-  username                String                   @unique
-  email                   String                   @unique
-  passwordHash            String?
-  name                    String?
-  avatarUrl               String?
-  role                    UserRole                 @default(USER)
-  rating                  Int                      @default(1200)
-  duelRating              Int                      @default(1200)
-  globalRating            Int                      @default(1200)
-  coins                   Int                      @default(0)
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
-  auditLogs               AuditLog[]
-  createdContests         Contest[]
-  contestParticipants     ContestParticipant[]
-  contestProblemsAdded    ContestProblem[]
-  duelMatchesCreated      DuelMatch[]
-  duelPlayers             DuelPlayer[]
-  externalHandles         ExternalHandle[]
-  interviewProgress       InterviewProgress[]
-  authoredProblems        Problem[]
-  ratingHistory           RatingHistory[]
-  recommendationSnapshots RecommendationSnapshot[]
-  submissions             Submission[]
-  topicMastery            TopicMastery[]
-  submissionReports       SubmissionReport[]
-  submittedInterviewQuestions InterviewQuestion[] // ADDED: Back-relation
+  id                        String                   @id @default(cuid())
+  username                  String                   @unique
+  email                     String                   @unique
+  passwordHash              String?
+  name                      String?
+  avatarUrl                 String?
+  role                      UserRole                 @default(USER)
+  rating                    Int                      @default(1200)
+  duelRating                Int                      @default(1200)
+  globalRating              Int                      @default(1200)
+  coins                     Int                      @default(0)
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  auditLogs                 AuditLog[]
+  createdContests           Contest[]
+  contestParticipants       ContestParticipant[]
+  contestProblemsAdded      ContestProblem[]
+  duelMatchesCreated        DuelMatch[]
+  duelPlayers               DuelPlayer[]
+  externalHandles           ExternalHandle[]
+  interviewProgress         InterviewProgress[]
+  authoredProblems          Problem[]
+  ratingHistory             RatingHistory[]
+  recommendationSnapshots   RecommendationSnapshot[]
+  submissions               Submission[]
+  topicMastery              TopicMastery[]
+  submissionReports         SubmissionReport[]
+  submittedInterviewQuestions InterviewQuestion[] 
 }
 
 model ExternalHandle {
-  id                  String                   @id @default(cuid())
-  userId              String
-  platform            Platform
-  handle              String
-  externalUserId      String?
-  rating              Int?
-  maxRating           Int?
-  status              HandleVerificationStatus @default(PENDING)
-  verifiedAt          DateTime?
-  lastSyncAt          DateTime?
-  rawProfile          Json?
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
+  id                 String                   @id @default(cuid())
+  userId             String
+  platform           Platform
+  handle             String
+  externalUserId     String?
+  rating             Int?
+  maxRating          Int?
+  status             HandleVerificationStatus @default(PENDING)
+  verifiedAt         DateTime?
+  lastSyncAt         DateTime?
+  rawProfile         Json?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
   contestParticipants ContestParticipant[]
-  user                User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([platform, handle])
   @@unique([userId, platform])
@@ -144,8 +144,8 @@ model Submission {
   user                 User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   testResults          SubmissionTestResult[]
   isFlagged            Boolean                @default(false)
-  manualPoints         Int? // Owner can override the points here
-  reports              SubmissionReport[] // Link to new reports model
+  manualPoints         Int? 
+  reports              SubmissionReport[] 
 
   @@unique([source, externalSubmissionId])
   @@index([contestId, createdAt]) 
@@ -156,15 +156,15 @@ model SubmissionReport {
   id           String       @id @default(cuid())
   submissionId String
   reporterId   String
-  reason       String       @db.Text // e.g., "Suspected AI generation", "Hardcoded outputs"
+  reason       String       @db.Text 
   status       ReportStatus @default(PENDING)
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
-  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  reporter   User       @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  submission   Submission   @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  reporter     User         @relation(fields: [reporterId], references: [id], onDelete: Cascade)
 
-  @@unique([submissionId, reporterId]) // A user can only report a specific submission once
+  @@unique([submissionId, reporterId]) 
 }
 
 enum ReportStatus {
@@ -258,25 +258,25 @@ model ContestParticipant {
 }
 
 model ContestProblem {
-  id            String       @id @default(cuid())
-  contestId     String
-  problemId     String?
+  id                  String             @id @default(cuid())
+  contestId           String
+  problemId           String?
   interviewQuestionId String?
-  titleSnapshot String
-  platform      Platform     @default(DIVINECODE)
-  externalId    String?
-  externalUrl   String?
-  index         Int
-  label         String
-  points        Int          @default(1000)
-  isLocked      Boolean      @default(false)
-  addedById     String?
-  addedAt       DateTime     @default(now())
-  addedBy       User?        @relation(fields: [addedById], references: [id])
-  contest       Contest      @relation(fields: [contestId], references: [id], onDelete: Cascade)
-  problem       Problem?     @relation(fields: [problemId], references: [id])
-  interviewQuestion InterviewQuestion? @relation(fields: [interviewQuestionId], references: [id])
-  submissions   Submission[]
+  titleSnapshot       String
+  platform            Platform           @default(DIVINECODE)
+  externalId          String?
+  externalUrl         String?
+  index               Int
+  label               String
+  points              Int                @default(1000)
+  isLocked            Boolean            @default(false)
+  addedById           String?
+  addedAt             DateTime           @default(now())
+  addedBy             User?              @relation(fields: [addedById], references: [id])
+  contest             Contest            @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  problem             Problem?           @relation(fields: [problemId], references: [id])
+  interviewQuestion   InterviewQuestion? @relation(fields: [interviewQuestionId], references: [id])
+  submissions         Submission[]
 
   @@unique([contestId, index])
   @@unique([contestId, label])
@@ -319,10 +319,9 @@ model ContestStanding {
   solved           Int                @default(0)
   penalty          Int                @default(0)
   score            Int                @default(0)
-  // 👉 FIX: Track individual vs team performance
   individualScore  Int                @default(0) 
   individualSolved Int                @default(0)
-  testcasePenalty  Int                @default(0) // Tracks penalty for viewing testcases
+  testcasePenalty  Int                @default(0) 
   solvedProblemIds String[]
   lastAcceptedAt   DateTime?
   updatedAt        DateTime           @updatedAt
@@ -505,20 +504,21 @@ model InterviewQuestion {
   trackId         String
   title           String
   prompt          String
-  options         Json?               // ADDED: To store the MCQ array ["A", "B", "C", "D"]
-  correctIndex    Int?                // ADDED: To store the correct answer index
+  options         Json?               
+  correctIndex    Int?                
   difficultyLabel String?
   expectedAnswer  String?
   tags            String[]
   sourceCompany   String?
-  isApproved      Boolean             @default(true) // False if submitted by a user
+  isApproved      Boolean             @default(true) 
   submittedById   String?
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
   progress        InterviewProgress[]
   track           InterviewTrack      @relation(fields: [trackId], references: [id], onDelete: Cascade)
   submittedBy     User?               @relation(fields: [submittedById], references: [id])
-  contestProblems ContestProblem[]    // ADDED: Relation for Mashups
+  contestProblems ContestProblem[]    
+
   @@index([trackId])
 }
 

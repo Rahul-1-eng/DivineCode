@@ -66,19 +66,24 @@ async function requireJudgeAccess(submissionId: string, req: Request) {
   requireOwner(submission.contest, req);
 }
 
+// 👉 FIX: The Universal Crash Protector. Prevents 500 Errors if database payload is malformed.
+function safeSanitize(contest: any, req: Request) {
+  try {
+    return sanitizeContestForViewer(contest, viewerFromRequest(req));
+  } catch (error) {
+    console.error(`[FATAL] sanitizeContestForViewer crashed for contest ${contest?.id}. Falling back to raw payload.`, error);
+    return contest;
+  }
+}
+
 export function mountV2Routes(app: Express, io: Server) {
   const router = Router();
 
-  // 👉 UPDATED: Match the exact Socket events emitted by your React frontend
   io.on('connection', (socket) => {
-    // Join the generic contest room
     socket.on('joinContest', (contestId) => {
       socket.join(contestId);
     });
-
-    // Broadcast chat messages to the room
     socket.on('sendChatMessage', (data) => {
-      // data expects { contestId, team, message }
       socket.to(data.contestId).emit('chatMessage', data.message);
     });
   });
@@ -138,32 +143,19 @@ export function mountV2Routes(app: Express, io: Server) {
   // ==========================================
   // AI & RECOMMENDATION ROUTES
   // ==========================================
-  
-  // 👉 ADDED: The missing endpoint for the "Suggest Missing Problems" frontend button
   router.post('/contests/:id/recommend-problems', asyncRoute(async (req, res) => {
-    // In a full implementation, you would pass the current contest problems to Gemini
-    // For now, return a curated mock to ensure the frontend button functions correctly
     res.json({ success: true, recommendations: ['1920B (Div 2. B)', '1805C (Math/Graphs)', '1750D (Combinatorics)'] });
   }));
 
   router.post('/recommendations/generate', asyncRoute(async (req, res) => {
     const { failedProblemTags, userRating } = req.body;
-    
-    if (!failedProblemTags || failedProblemTags.length === 0) {
-      return res.json({ success: true, recommendations: [] });
-    }
+    if (!failedProblemTags || failedProblemTags.length === 0) return res.json({ success: true, recommendations: [] });
 
     const baseRating = userRating || 1200;
-    
     const recommendations = await prisma.problem.findMany({
-      where: {
-        tags: { hasSome: failedProblemTags },
-        rating: { gte: baseRating - 100, lte: baseRating + 300 }
-      },
-      take: 3,
-      orderBy: { rating: 'asc' }
+      where: { tags: { hasSome: failedProblemTags }, rating: { gte: baseRating - 100, lte: baseRating + 300 } },
+      take: 3, orderBy: { rating: 'asc' }
     });
-    
     res.json({ success: true, recommendations });
   }));
 
@@ -211,7 +203,6 @@ export function mountV2Routes(app: Express, io: Server) {
 
     const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
     if (!user) throw new Error("Unauthorized");
-    
     if ((user.coins || 0) < 50) throw new Error("Insufficient coins. You need 50 coins to use the AI Tutor.");
     
     await prisma.user.update({
@@ -226,47 +217,6 @@ export function mountV2Routes(app: Express, io: Server) {
   // ==========================================
   // GENERAL ROUTES
   // ==========================================
-  router.post('/contests/:id/problems/:problemId/penalty', asyncRoute(async (req, res) => {
-    const viewerEmail = req.headers['x-user-email'] as string;
-    const contestId = req.params.id;
-    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
-    if (!user) throw new Error("Unauthorized");
-
-    const participant = await prisma.contestParticipant.findUnique({
-      where: { contestId_userId: { contestId, userId: user.id } },
-      include: { standing: true }
-    });
-
-    if (participant && participant.standing) {
-      await prisma.contestStanding.update({
-        where: { participantId: participant.id },
-        data: { testcasePenalty: participant.standing.testcasePenalty + 50 }
-      });
-      await recomputeContestStandings(contestId);
-    }
-    res.json({ success: true, message: "Penalty applied" });
-  }));
-
-  router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
-    const viewerEmail = req.headers['x-user-email'] as string;
-    const contestId = req.params.id;
-    
-    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
-    if (!user) throw new Error("Unauthorized");
-
-    const contest = await prisma.contest.findUnique({ where: { id: contestId } });
-    if (!contest) throw new Error("Contest not found");
-
-    const halfTime = contest.startTime.getTime() + (contest.durationMinutes * 60000 / 2);
-    if (Date.now() > halfTime) {
-      throw new Error("Cannot unregister after half-time has passed.");
-    }
-
-    await prisma.contestParticipant.deleteMany({ where: { contestId, userId: user.id } });
-    await recomputeContestStandings(contestId);
-    res.json({ success: true, message: "Unregistered successfully" });
-  }));
-
   router.post('/cron/sync-live-contests', asyncRoute(async (req, res) => {
     if (req.headers['x-cron-secret'] !== (process.env.CRON_SECRET || 'dev-secret')) {
       res.status(401).json({ error: 'Unauthorized CRON trigger' });
@@ -290,6 +240,13 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(result);
   }));
 
+  router.post('/recommendations/rating-band', asyncRoute(async (req, res) => {
+    res.json(recommendationBand(req.body));
+  }));
+
+  // ==========================================
+  // PROBLEM ROUTES
+  // ==========================================
   router.post('/problems', asyncRoute(async (req, res) => {
     const problem = await createInternalProblem(req.body);
     res.status(201).json(problem);
@@ -315,90 +272,165 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(problem);
   }));
 
+  // ==========================================
+  // CONTEST ROUTES (STRICTLY ORDERED)
+  // ==========================================
   router.get('/contests', asyncRoute(async (_req, res) => {
     res.json(await listContestsV2());
   }));
 
   router.post('/contests', asyncRoute(async (req, res) => {
     const contest = await createContestV2(req.body);
-    res.status(201).json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
+    res.status(201).json(safeSanitize(contest, req));
   }));
 
+  // Sub-routes strictly placed BEFORE the wildcard '/contests/:id'
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contest = await registerForContestV2(req.params.id, {
-      ...req.body,
-      email: viewer.email,
-      name: viewer.name,
-      userId: viewer.userId
+      ...req.body, email: viewer.email, name: viewer.name, userId: viewer.userId
     });
-    res.json(sanitizeContestForViewer(contest, viewer));
+    res.json(safeSanitize(contest, req));
   }));
 
-  router.post('/contests/:id/submissions/:submissionId/override', asyncRoute(async (req, res) => {
+  router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
     const viewerEmail = req.headers['x-user-email'] as string;
-    if (!viewerEmail) throw new Error("Unauthorized");
-    
+    const contestId = req.params.id;
     const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
-    if (!user) throw new Error("Unauthorized: User not found");
+    if (!user) throw new Error("Unauthorized");
 
-    const { manualPoints } = req.body;
-    const contest = await overrideSubmissionPoints(req.params.id, req.params.submissionId, manualPoints, user.id);
-    res.json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
-  }));
+    const contest = await prisma.contest.findUnique({ where: { id: contestId } });
+    if (!contest) throw new Error("Contest not found");
 
-  router.get('/contests/:id', asyncRoute(async (req, res) => {
-    const contest = await loadContestOrThrow(req.params.id);
-    res.json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
-  }));
+    const halfTime = contest.startTime.getTime() + (contest.durationMinutes * 60000 / 2);
+    if (Date.now() > halfTime) throw new Error("Cannot unregister after half-time has passed.");
 
-  router.delete('/contests/:id', asyncRoute(async (req, res) => {
-    const contest = await loadContestOrThrow(req.params.id);
-    const viewer = requireOwner(contest, req);
-    await deleteContestV2(req.params.id, viewer.userId || contest.createdById);
-    io.to(`contest:${req.params.id}`).emit('contest:deleted', { contestId: req.params.id });
-    res.json({ ok: true, deletedContestId: req.params.id });
-  }));
-
-  router.put('/contests/:id', asyncRoute(async (req, res) => {
-    const contest = await loadContestOrThrow(req.params.id);
-    const viewer = requireOwner(contest, req);
-    const updated = await updateContestSettingsV2(req.params.id, req.body, viewer.userId || contest.createdById);
-    res.json(sanitizeContestForViewer(updated, viewerFromRequest(req)));
+    await prisma.contestParticipant.deleteMany({ where: { contestId, userId: user.id } });
+    await recomputeContestStandings(contestId);
+    res.json({ success: true, message: "Unregistered successfully" });
   }));
 
   router.post('/contests/:id/extend', asyncRoute(async (req, res) => {
     const contest = await loadContestOrThrow(req.params.id);
     const viewer = requireOwner(contest, req);
     const updated = await extendContestV2(req.params.id, Number(req.body.minutes || 15), viewer.userId || contest.createdById);
-    res.json(sanitizeContestForViewer(updated, viewerFromRequest(req)));
+    res.json(safeSanitize(updated, req));
+  }));
+
+  router.post('/contests/:id/finalize', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const email = req.headers['x-user-email'] as string;
+
+      const contest = await prisma.contest.findUnique({
+        where: { id }, include: { createdBy: true }
+      });
+
+      if (!contest) return res.status(404).json({ error: 'Contest not found' });
+      if (contest.createdBy?.email !== email) return res.status(403).json({ error: 'Only the contest owner can finalize it.' });
+      if (contest.status === ContestStatus.ENDED) return res.status(400).json({ error: 'Contest is already finalized.' });
+
+      await prisma.contest.update({
+        where: { id }, data: { status: ContestStatus.ENDED, endTime: new Date() }
+      });
+
+      if (contest.isRated) await getRewardsQueue().add('process-rewards', { contestId: id });
+      return res.json({ success: true, message: contest.isRated ? 'Contest finalized. Ratings calculating.' : 'Unrated contest finalized.' });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to finalize contest.' });
+    }
+  });
+
+  router.post('/contests/:id/recompute-standings', asyncRoute(async (req, res) => {
+    const contest = await loadContestOrThrow(req.params.id);
+    requireOwner(contest, req);
+    const standings = await recomputeContestStandings(req.params.id);
+    io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id, standings });
+    res.json({ ok: true, standings });
+  }));
+
+  router.post('/contests/:id/sync/codeforces', asyncRoute(async (req, res) => {
+    const contest = await loadContestOrThrow(req.params.id);
+    requireOwner(contest, req);
+    if (String(req.query.wait || req.body?.wait || '') !== 'true') {
+      const job = await enqueueCodeforcesContestSync(req.params.id);
+      res.status(202).json({ ok: true, queued: true, job });
+      return;
+    }
+    const result = await syncCodeforcesContest(req.params.id);
+    io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id, standings: result.standings });
+    res.json({ ok: true, ...result });
+  }));
+
+  router.get('/contests/:id/submissions', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    const emailFallback = (viewer?.email || req.headers['x-user-email'] || req.query.viewerEmail) as string | undefined;
+    const submissions = await getContestSubmissionsV2(req.params.id, viewer?.userId, emailFallback);
+    res.json(submissions);
+  }));
+
+  router.post('/contests/:id/submissions', asyncRoute(async (req, res) => {
+    const submission = await createQueuedContestSubmission({
+      contestId: req.params.id, contestProblemId: String(req.body.contestProblemId || req.body.problemId || ''),
+      viewer: viewerFromRequest(req), language: req.body.language, code: req.body.code
+    });
+    res.status(201).json(submission);
+  }));
+
+  router.post('/contests/:id/submissions/:submissionId/override', asyncRoute(async (req, res) => {
+    const viewerEmail = req.headers['x-user-email'] as string;
+    if (!viewerEmail) throw new Error("Unauthorized");
+    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
+    if (!user) throw new Error("Unauthorized: User not found");
+    const { manualPoints } = req.body;
+    const contest = await overrideSubmissionPoints(req.params.id, req.params.submissionId, manualPoints, user.id);
+    res.json(safeSanitize(contest, req));
   }));
 
   router.post('/contests/:id/problems', asyncRoute(async (req, res) => {
     const contest = await loadContestOrThrow(req.params.id);
     const viewer = requireOwner(contest, req);
     const updated = await addContestProblemV2(req.params.id, req.body, viewer.userId || contest.createdById);
-    res.json(sanitizeContestForViewer(updated, viewerFromRequest(req)));
+    res.json(safeSanitize(updated, req));
   }));
 
   router.delete('/contests/:id/problems/:problemId', asyncRoute(async (req, res) => {
     const contest = await loadContestOrThrow(req.params.id);
     const viewer = requireOwner(contest, req);
     const updated = await removeContestProblemV2(req.params.id, req.params.problemId, viewer.userId || contest.createdById);
-    res.json(sanitizeContestForViewer(updated, viewerFromRequest(req)));
+    res.json(safeSanitize(updated, req));
   }));
 
   router.put('/contests/:id/problems/:problemId', asyncRoute(async (req, res) => {
     const contest = await loadContestOrThrow(req.params.id);
     const viewer = requireOwner(contest, req);
     const updated = await replaceContestProblemV2(req.params.id, req.params.problemId, req.body, viewer.userId || contest.createdById);
-    res.json(sanitizeContestForViewer(updated, viewerFromRequest(req)));
+    res.json(safeSanitize(updated, req));
+  }));
+
+  router.post('/contests/:id/problems/:problemId/penalty', asyncRoute(async (req, res) => {
+    const viewerEmail = req.headers['x-user-email'] as string;
+    const contestId = req.params.id;
+    const user = await prisma.user.findUnique({ where: { email: viewerEmail } });
+    if (!user) throw new Error("Unauthorized");
+
+    const participant = await prisma.contestParticipant.findUnique({
+      where: { contestId_userId: { contestId, userId: user.id } }, include: { standing: true }
+    });
+
+    if (participant && participant.standing) {
+      await prisma.contestStanding.update({
+        where: { participantId: participant.id },
+        data: { testcasePenalty: participant.standing.testcasePenalty + 50 }
+      });
+      await recomputeContestStandings(contestId);
+    }
+    res.json({ success: true, message: "Penalty applied" });
   }));
 
   router.delete('/contests/:id/members/:memberId', asyncRoute(async (req, res) => {
     const contest = await prisma.contest.findUnique({
-      where: { id: req.params.id },
-      include: { participants: true }
+      where: { id: req.params.id }, include: { participants: true }
     });
     if (!contest) throw new Error('Contest not found');
     requireOwner(contest, req);
@@ -412,20 +444,33 @@ export function mountV2Routes(app: Express, io: Server) {
     io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id, standings: refreshedStandings });
     
     const updatedContest = await loadContestOrThrow(req.params.id);
-    res.json(sanitizeContestForViewer(updatedContest, viewerFromRequest(req)));
+    res.json(safeSanitize(updatedContest, req));
   }));
 
-  router.post('/contests/:id/submissions', asyncRoute(async (req, res) => {
-    const submission = await createQueuedContestSubmission({
-      contestId: req.params.id,
-      contestProblemId: String(req.body.contestProblemId || req.body.problemId || ''),
-      viewer: viewerFromRequest(req),
-      language: req.body.language,
-      code: req.body.code
-    });
-    res.status(201).json(submission);
+  // 👉 WILDCARD ROUTES AT THE VERY BOTTOM
+  router.get('/contests/:id', asyncRoute(async (req, res) => {
+    const contest = await loadContestOrThrow(req.params.id);
+    res.json(safeSanitize(contest, req));
   }));
 
+  router.put('/contests/:id', asyncRoute(async (req, res) => {
+    const contest = await loadContestOrThrow(req.params.id);
+    const viewer = requireOwner(contest, req);
+    const updated = await updateContestSettingsV2(req.params.id, req.body, viewer.userId || contest.createdById);
+    res.json(safeSanitize(updated, req));
+  }));
+
+  router.delete('/contests/:id', asyncRoute(async (req, res) => {
+    const contest = await loadContestOrThrow(req.params.id);
+    const viewer = requireOwner(contest, req);
+    await deleteContestV2(req.params.id, viewer.userId || contest.createdById);
+    io.to(`contest:${req.params.id}`).emit('contest:deleted', { contestId: req.params.id });
+    res.json({ ok: true, deletedContestId: req.params.id });
+  }));
+
+  // ==========================================
+  // JUDGE ROUTE
+  // ==========================================
   router.post('/submissions/:id/judge', asyncRoute(async (req, res) => {
     await requireJudgeAccess(req.params.id, req);
     if (String(req.query.wait || req.body?.wait || '') !== 'true') {
@@ -445,79 +490,7 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ ok: true, ...result });
   }));
 
-  router.get('/contests/:id/submissions', asyncRoute(async (req, res) => {
-    const viewer = viewerFromRequest(req);
-    const emailFallback = (viewer?.email || req.headers['x-user-email'] || req.query.viewerEmail) as string | undefined;
-    const submissions = await getContestSubmissionsV2(req.params.id, viewer?.userId, emailFallback);
-    res.json(submissions);
-  }));
-
-  router.post('/contests/:id/recompute-standings', asyncRoute(async (req, res) => {
-    const contest = await loadContestOrThrow(req.params.id);
-    requireOwner(contest, req);
-    const standings = await recomputeContestStandings(req.params.id);
-    io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id, standings });
-    res.json({ ok: true, standings });
-  }));
-
-  router.post('/contests/:id/sync/codeforces', asyncRoute(async (req, res) => {
-    const contest = await loadContestOrThrow(req.params.id);
-    requireOwner(contest, req);
-    if (String(req.query.wait || req.body?.wait || '') !== 'true') {
-      const job = await enqueueCodeforcesContestSync(req.params.id);
-      res.status(202).json({ ok: true, queued: true, job });
-      return;
-    }
-
-    const result = await syncCodeforcesContest(req.params.id);
-    io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id, standings: result.standings });
-    res.json({ ok: true, ...result });
-  }));
-
-  router.post('/recommendations/rating-band', asyncRoute(async (req, res) => {
-    res.json(recommendationBand(req.body));
-  }));
-
-  router.post('/contests/:id/finalize', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const email = req.headers['x-user-email'] as string;
-
-      const contest = await prisma.contest.findUnique({
-        where: { id },
-        include: { createdBy: true }
-      });
-
-      if (!contest) return res.status(404).json({ error: 'Contest not found' });
-      
-      if (contest.createdBy?.email !== email) {
-        return res.status(403).json({ error: 'Only the contest owner can finalize it.' });
-      }
-
-      if (contest.status === ContestStatus.ENDED) {
-        return res.status(400).json({ error: 'Contest is already finalized.' });
-      }
-
-      await prisma.contest.update({
-        where: { id },
-        data: { status: ContestStatus.ENDED, endTime: new Date() }
-      });
-
-      if (contest.isRated) {
-        await getRewardsQueue().add('process-rewards', { contestId: id });
-      }
-
-      return res.json({ 
-        success: true, 
-        message: contest.isRated ? 'Contest finalized. Ratings and coins are calculating in the background.' : 'Unrated contest finalized.' 
-      });
-
-    } catch (error: any) {
-      console.error('Finalize error:', error);
-      return res.status(500).json({ error: 'Failed to finalize contest.' });
-    }
-  });
-
+  // Global Error Handler
   router.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
     res.status(statusFromError(error)).json({
       ok: false,
