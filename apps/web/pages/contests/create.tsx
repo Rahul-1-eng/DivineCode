@@ -1,8 +1,6 @@
 import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
 
-export async function getServerSideProps() { return { props: {} }; }
-
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
@@ -111,7 +109,7 @@ export default function CreateContestPage() {
           freezeMinutes: freezeMinutes > 0 ? freezeMinutes : undefined,
           allowTeamSubmissionView,
           hideProblemMetaDuringContest,
-          isRated, // 👉 ADDED: Sends rating status
+          isRated,
           ownerEmail: session.user.email, 
           members: cleanedMembers,
           problems: contestProblems 
@@ -183,7 +181,6 @@ export default function CreateContestPage() {
           </div>
 
           <div style={{ marginBottom: 24, display: 'flex', gap: 24, flexWrap: 'wrap', padding: '16px', background: 'rgba(2,6,23,.45)', borderRadius: '12px', border: '1px solid rgba(148,163,184,.18)' }}>
-            {/* 👉 ADDED: Rated Toggle UI */}
             <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 'bold', color: '#eef2ff' }}>
               <input type="checkbox" checked={isRated} onChange={e => setIsRated(e.target.checked)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
               Rated Contest (Affects Elo Profile Rating)

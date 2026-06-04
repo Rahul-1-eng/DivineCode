@@ -189,7 +189,6 @@ async function assertUnsolvedByAll(members: MemberInput[], problems: ProblemInpu
         throw new Error(`CF MISSING: Participant ${member.displayName || 'Unnamed'} needs a Codeforces handle.`);
       }
       try {
-        // 👉 FIX: If CF is down during creation, do not completely 500 error out. Log it and bypass.
         const accepted = await fetchCodeforcesAccepted(member.codeforcesHandle, parsed.contestCode, parsed.problemIndex);
         if (accepted) {
           throw new Error(`Cannot add ${parsed.contestCode}${parsed.problemIndex}. ${member.codeforcesHandle} has already solved it.`);
@@ -240,9 +239,8 @@ export async function loadContestForViewer(contestId: string) {
           orderBy: { index: 'asc' }
         },
         standings: {
-          include: { participant: true },
-          // Relies on nullable rank/penalty which Prisma safely handles
-          orderBy: [{ rank: 'asc' }, { solved: 'desc' }, { penalty: 'asc' }]
+          include: { participant: true }
+          // Removing strict orderBy array to prevent PrismaClientValidationError. The frontend re-sorts this locally.
         }
       }
     });
