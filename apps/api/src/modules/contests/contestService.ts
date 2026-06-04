@@ -17,6 +17,7 @@ export type MemberInput = {
 };
 
 export type ProblemInput = {
+  id?: string; // 👉 ADDED: To correctly catch the native problem ID when passed from the scraper
   problemId?: string; interviewQuestionId?: string; title?: string;
   platform?: string; code?: string; contestCode?: string;
   problemIndex?: string; externalId?: string; url?: string; points?: number;
@@ -72,7 +73,7 @@ function parseCodeforcesCode(problem: ProblemInput) {
 }
 
 function externalUrl(problem: ProblemInput, platform: Platform) {
-  if (problem.url) return problem.url;
+  if (problem.url) return problem.url; // Prefer direct URL if scraped
   if (platform === Platform.CODEFORCES) {
     const parsed = parseCodeforcesCode(problem);
     if (parsed.contestCode && parsed.problemIndex) {
@@ -181,6 +182,10 @@ async function assertUnsolvedByAll(members: MemberInput[], problems: ProblemInpu
   for (const problem of problems) {
     const platform = toPlatform(problem.platform);
     if (platform !== Platform.CODEFORCES) continue;
+    
+    // 👉 FIX: Skip Unsolved check for scraped/custom URLs that don't match the strict ID format
+    if (problem.url || problem.id) continue;
+
     const parsed = parseCodeforcesCode(problem);
     if (!parsed.contestCode || !parsed.problemIndex) continue;
 
@@ -210,11 +215,15 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
   return tx.contestProblem.create({
     data: {
       contestId: input.contestId,
-      problemId: input.problem.problemId || null,
+      // 👉 FIX: Properly binds the newly scraped problem's database ID to the contest!
+      problemId: input.problem.problemId || input.problem.id || null,
       interviewQuestionId: input.problem.interviewQuestionId || null,
       titleSnapshot: String(input.problem.title || `Problem ${label}`).trim(),
-      platform, externalUrl: input.problem.url || '', index: input.index,
-      label, points: Math.max(1, Number(input.problem.points || 1000)),
+      platform, 
+      externalUrl: input.problem.url || externalUrl(input.problem, platform) || '', 
+      index: input.index,
+      label, 
+      points: Math.max(1, Number(input.problem.points || 1000)),
       addedById: input.addedById || null
     }
   });
@@ -227,14 +236,13 @@ export async function loadContestForViewer(contestId: string) {
       include: {
         createdBy: true,
         participants: {
-          // 👉 NEW: Include the official ContestTeam relation for all participants
           include: { user: true, externalHandle: true, team: true },
           orderBy: { joinedAt: 'asc' }
         },
         problems: {
           include: {
             problem: {
-              include: { editorial: true, officialSolutions: true }
+              include: { editorial: true, officialSolutions: true, testcases: true } // 👉 Load test cases instantly
             }
           },
           orderBy: { index: 'asc' }
@@ -277,7 +285,6 @@ export async function registerForContestV2(contestId: string, input: MemberInput
     });
     if (existing) throw new Error('User is already registered for this contest.');
 
-    // 👉 NEW: Proper relational ContestTeam resolution
     let teamId = null;
     const isRealTeam = memberInput.teamName && memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo';
 
@@ -296,8 +303,8 @@ export async function registerForContestV2(contestId: string, input: MemberInput
     await tx.contestParticipant.create({
       data: {
         contestId: contest.id, userId: user.id, externalHandleId: externalHandle?.id || null,
-        displayName: memberInput.displayName!, teamName: memberInput.teamName, // Deprecating soon
-        teamId: teamId, // The true relational link
+        displayName: memberInput.displayName!, teamName: memberInput.teamName,
+        teamId: teamId, 
         role: ContestParticipantRole.PARTICIPANT, isOfficial: true
       }
     });
@@ -358,7 +365,6 @@ export async function createContestV2(input: CreateContestInput) {
       }
     });
 
-    // 👉 NEW: Pre-register all ContestTeams natively
     const uniqueTeamNames = [...new Set(members.map(m => m.teamName).filter(n => n && n !== 'Individuals' && n !== 'Solo'))];
     const teamRecordMap = new Map<string, string>();
 
@@ -526,7 +532,7 @@ export async function replaceContestProblemV2(contestId: string, contestProblemI
     const updated = await tx.contestProblem.update({
       where: { id: contestProblemId },
       data: {
-        problemId: problem.problemId || null, titleSnapshot: String(problem.title || externalId || existing.titleSnapshot).trim(),
+        problemId: problem.problemId || problem.id || null, titleSnapshot: String(problem.title || externalId || existing.titleSnapshot).trim(),
         platform, externalId, externalUrl: externalUrl(problem, platform),
         points: Math.max(1, Number(problem.points || existing.points)), addedById: actorId || existing.addedById
       }
@@ -567,7 +573,6 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
     const isOwner = contest.createdById === resolvedUserId;
     let allowedParticipantIds: string[] | null = null; 
 
-    // 👉 NEW: Privacy checking relies strictly on the structured teamId constraint
     if (isOwner || isContestOver) {
       allowedParticipantIds = null;
     } else {

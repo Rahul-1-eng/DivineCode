@@ -146,8 +146,25 @@ export default function ContestProblemWorkspace() {
   const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
 
+  // 👉 UPDATED: Smart DB check before scraping
   useEffect(() => {
+    // If test cases are already in DB (because we scraped via URL on creation), use them directly
+    if (problem?.problem?.testcases && problem.problem.testcases.length > 0) {
+      setTestcases(
+        problem.problem.testcases.map((tc: any) => ({
+          id: tc.id,
+          input: tc.input,
+          expectedOutput: tc.expectedOutput,
+          output: '',
+          status: 'idle'
+        }))
+      );
+      return; 
+    }
+
+    // Fallback: If not in DB, attempt proxy fetch for external codeforces platforms
     if (!problem?.externalUrl?.includes('codeforces') || testcases[0]?.input !== '') return;
+    
     const fetchSamples = async () => {
       setIsFetchingSamples(true);
       try {
@@ -167,7 +184,7 @@ export default function ContestProblemWorkspace() {
       } catch (err) {} finally { setIsFetchingSamples(false); }
     };
     fetchSamples();
-  }, [problem?.externalUrl]);
+  }, [problem]);
 
   const runTestCase = async (index: number) => {
     if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");

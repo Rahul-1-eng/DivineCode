@@ -1,5 +1,3 @@
-// apps/api/src/routes/profileRoutes.ts
-
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { Platform } from '@prisma/client';
@@ -74,14 +72,53 @@ profileRouter.get('/me', async (req, res) => {
   }
 });
 
+// Delete/Unlink an external handle
 profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
-  // ... (Keep existing delete logic)
+  try {
+    const email = req.headers['x-user-email'] as string;
+    const { platform, handle } = req.params;
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    await prisma.externalHandle.deleteMany({
+      where: { userId: user.id, platform: platform as Platform, handle }
+    });
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
+// Proper Username Claim Logic with Collision Handling (Fixes the Mashup loop)
 profileRouter.post('/claim-username', async (req, res) => {
-  // ... (Keep existing claim logic)
+  try {
+    const email = req.headers['x-user-email'] as string;
+    const { username } = req.body;
+    
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+    if (!username || username.trim().length < 3) {
+      return res.status(400).json({ error: 'Username must be at least 3 characters long.' });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { email },
+      data: { username: username.trim() }
+    });
+
+    return res.json({ success: true, username: updatedUser.username });
+  } catch (err: any) {
+    // Catch Prisma's Unique Constraint Violation
+    if (err.code === 'P2002') {
+      return res.status(400).json({ error: `The username "${req.body.username}" is already taken.` });
+    }
+    return res.status(500).json({ error: 'Internal server error while updating username.' });
+  }
 });
 
+// Save and Verify External Handles
 profileRouter.post('/save-handles', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;

@@ -6,27 +6,29 @@ const PISTON_URL = 'https://emkc.org/api/v2/piston';
 
 type JudgeLanguage = 'cpp' | 'c' | 'java' | 'python' | 'javascript';
 
-// 👉 FIX 1: Locked versions ensure Piston hits its fast cache instantly instead of resolving '*'
+// Use '*' to force Piston to auto-select the latest installed compiler version
+// Hardcoding versions causes COMPILATION_ERRORs if the Piston node updates.
 function getPistonConfig(language: string) {
   const normalized = String(language || '').toLowerCase().trim();
-  if (normalized.includes('c++') || normalized === 'cpp') return { language: 'c++', version: '10.2.0' };
-  if (normalized === 'c') return { language: 'c', version: '10.2.0' };
-  if (normalized.includes('java') && !normalized.includes('javascript')) return { language: 'java', version: '15.0.2' };
-  if (normalized.includes('py')) return { language: 'python', version: '3.10.0' };
-  if (normalized.includes('js') || normalized.includes('node') || normalized.includes('javascript')) return { language: 'javascript', version: '18.15.0' };
+  if (normalized.includes('c++') || normalized === 'cpp') return { language: 'c++', version: '*' };
+  if (normalized === 'c') return { language: 'c', version: '*' };
+  if (normalized.includes('java') && !normalized.includes('javascript')) return { language: 'java', version: '*' };
+  if (normalized.includes('py')) return { language: 'python', version: '*' };
+  if (normalized.includes('js') || normalized.includes('node') || normalized.includes('javascript')) return { language: 'javascript', version: '*' };
   
   return { language: normalized, version: '*' }; 
 }
 
-// 👉 FIX 2: Strict Codeforces-Style Output Normalization (prevents false WA verdicts)
+// Better whitespace normalization to prevent false Wrong Answers
 function normalizeOutput(value: string | null | undefined) {
   if (!value) return '';
   return String(value)
-    .replace(/\r/g, '') // Strip Windows carriage returns
+    .replace(/\r\n/g, '\n') // Standardize line endings
+    .replace(/\r/g, '')     
     .split('\n')
-    .map(line => line.trimEnd()) // Remove invisible trailing spaces on every line
+    .map(line => line.trimEnd()) 
     .join('\n')
-    .trim(); // Remove trailing empty lines at the very end
+    .trim(); 
 }
 
 function evaluateVerdict(status: string, stdout: string | null | undefined, expectedOutput: string, checkerType: CheckerType): Verdict {
@@ -65,13 +67,14 @@ async function submitToPiston(input: { sourceCode: string; language: JudgeLangua
   const langConfig = getPistonConfig(input.language);
   if (!langConfig) throw new Error(`Unsupported language: ${input.language}`);
   
+  // Set file extensions properly for Piston
   let filename = 'main.txt';
   if (langConfig.language === 'c++') filename = 'main.cpp';
   else if (langConfig.language === 'c') filename = 'main.c';
   else if (langConfig.language === 'python') filename = 'main.py';
   else if (langConfig.language === 'javascript') filename = 'main.js';
   
-  let files: { content: string; name?: string }[] = [{ name: filename, content: input.sourceCode }];
+  let files = [{ name: filename, content: input.sourceCode }];
   
   if (langConfig.language === 'java') {
     const match = input.sourceCode.match(/public\s+class\s+([A-Za-z0-9_]+)/);
@@ -88,7 +91,7 @@ async function submitToPiston(input: { sourceCode: string; language: JudgeLangua
         version: langConfig.version,
         files: files,
         stdin: input.stdin || '',
-        run_timeout: 3000, 
+        run_timeout: 5000, // Increased to 5s for slower languages like Python/Java
         compile_timeout: 10000
       })
     });
@@ -109,7 +112,7 @@ async function submitToPiston(input: { sourceCode: string; language: JudgeLangua
     return { stderr: "Unknown execution error", status: 'JUDGE_ERROR' };
   } catch (error) {
     console.error('[Judge] Execution Error:', error);
-    return { stderr: "Could not connect to the free execution engine.", status: 'JUDGE_ERROR' };
+    return { stderr: "Could not connect to the execution engine.", status: 'JUDGE_ERROR' };
   }
 }
 
@@ -318,7 +321,7 @@ export async function executeSubmission(sourceCode: string, language: string, in
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         language: langConfig.language, version: langConfig.version,
-        files: files, stdin: input || '', run_timeout: 3000, compile_timeout: 10000
+        files: files, stdin: input || '', run_timeout: 5000, compile_timeout: 10000
       })
     });
 

@@ -16,6 +16,7 @@ import { recommendationBand } from '../modules/ratings/recommendationMath';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
 import { syncUserRatings } from '../modules/external-sync/profileSyncService';
 import { findFailingTestCaseWithAI, generateTestCasesWithAI } from '../modules/ai/aiService';
+import { scrapeProblemFromUrl } from '../modules/external-sync/problemScraper'; // 👉 Added Scraper Import
 import { ContestStatus } from '@prisma/client';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
@@ -80,17 +81,14 @@ export function mountV2Routes(app: Express, io: Server) {
 
   // 👉 TEAM COLLABORATION SOCKETS
   io.on('connection', (socket) => {
-    // Standard Global Contest Updates
     socket.on('joinContest', (contestId) => {
       socket.join(`contest:${contestId}`);
     });
 
-    // Highly Isolated Team Rooms
     socket.on('joinTeam', (teamId) => {
       socket.join(`team:${teamId}`);
     });
 
-    // Team Chat Routing
     socket.on('sendTeamMessage', async (data) => {
       try {
         const message = await prisma.teamMessage.create({
@@ -148,7 +146,6 @@ export function mountV2Routes(app: Express, io: Server) {
       const statementHtml = $('.problem-statement').html();
       if (!statementHtml) return res.status(404).send('Problem statement structure not found on the mirror page.');
 
-      // 👉 FIX: Native DivineCode styling wrapping
       res.setHeader('Content-Type', 'text/html');
       res.send(`
         <!DOCTYPE html>
@@ -427,6 +424,44 @@ export function mountV2Routes(app: Express, io: Server) {
     const { manualPoints } = req.body;
     const contest = await overrideSubmissionPoints(req.params.id, req.params.submissionId, manualPoints, user.id);
     res.json(safeSanitize(contest, req));
+  }));
+
+  // 👉 ADDED: Smart Scrape Logic
+  router.post('/contests/:id/problems/scrape', asyncRoute(async (req, res) => {
+    const contest = await loadContestOrThrow(req.params.id);
+    const viewer = requireOwner(contest, req);
+    const { url } = req.body;
+
+    if (!url) throw new Error("URL is required");
+
+    // 1. Extract data using Cheerio scraper
+    const scrapedData = await scrapeProblemFromUrl(url);
+
+    // 2. Build the problem natively in the DB alongside the Testcases
+    const problem = await prisma.problem.create({
+      data: {
+        title: scrapedData.title,
+        description: scrapedData.descriptionHtml,
+        platform: scrapedData.platform,
+        source: 'EXTERNAL',
+        url: scrapedData.originalUrl,
+        problemCode: `SCRAPED-${Date.now()}`, 
+        visibility: 'PUBLIC',
+        testcases: {
+          create: scrapedData.testcases.map((tc, idx) => ({
+            input: tc.input,
+            expectedOutput: tc.expectedOutput,
+            order: idx,
+            isPublic: true, 
+            type: 'SAMPLE'
+          }))
+        }
+      }
+    });
+
+    // 3. Attach it to the contest
+    const updatedContest = await addContestProblemV2(req.params.id, problem, viewer.userId || contest.createdById);
+    res.json(safeSanitize(updatedContest, req));
   }));
 
   router.post('/contests/:id/problems', asyncRoute(async (req, res) => {
