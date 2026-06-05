@@ -1,37 +1,24 @@
-import { CSSProperties, useEffect, useMemo, useState } from 'react';
+import { CSSProperties, useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
+import toast, { Toaster } from 'react-hot-toast';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
+const API_V2 = process.env.NEXT_PUBLIC_API_BASE_URL + '/api/v2';
 
-type Mode = 'single' | 'group';
-type MemberRow = { username: string }; 
-type TeamRow = { name: string; players: MemberRow[] };
-
-const emptyMember = (): MemberRow => ({ username: '' });
-
-export default function CreateContestPage() {
-  const { data: session, status } = useSession();
-  const [mounted, setMounted] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-
-  const [mode, setMode] = useState<Mode>('group');
-  const [title, setTitle] = useState('DivineCode Team Mashup Round');
-  const [duration, setDuration] = useState(120);
-  const [startTimeStr, setStartTimeStr] = useState(''); 
-  const [freezeMinutes, setFreezeMinutes] = useState(0);
-  const [allowTeamSubmissionView, setAllowTeamSubmissionView] = useState(true);
-  const [hideProblemMetaDuringContest, setHideProblemMetaDuringContest] = useState(true);
-  const [isRated, setIsRated] = useState(true);
+export default function GlobalNavigationAndMashupCreator() {
+  const router = useRouter();
+  const { data: session } = useSession();
   
-  const [soloPlayer, setSoloPlayer] = useState<MemberRow>(emptyMember());
-  const [teams, setTeams] = useState<TeamRow[]>([
-    { name: 'Group A', players: [emptyMember(), emptyMember(), emptyMember()] },
-    { name: 'Group B', players: [emptyMember(), emptyMember(), emptyMember()] }
-  ]);
+  // Navigation Tabs state
+  const [navTab, setNavTab] = useState<'mashup' | 'duel' | 'interview'>('mashup');
 
-  // Mashup Builder States
+  // Creator forms state
   const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
+  const [title, setTitle] = useState('DivineCode Controlled Practice Set');
+  const [duration, setDuration] = useState(120);
+  const [startTimeStr, setStartTimeStr] = useState('');
+  const [usernameInput, setUsernameInput] = useState('');
+
   const [urlProblem, setUrlProblem] = useState('');
   const [customTitle, setCustomTitle] = useState('');
   const [customDesc, setCustomDesc] = useState('');
@@ -40,246 +27,167 @@ export default function CreateContestPage() {
   const [mcqOptions, setMcqOptions] = useState(['', '']);
   const [mcqCorrect, setMcqCorrect] = useState<number[]>([]);
   
-  // Accumulated Problems payload
   const [compiledProblems, setCompiledProblems] = useState<any[]>([]);
   const [aiBank, setAiBank] = useState<any[]>([]);
+  const [isCreating, setIsCreating] = useState(false);
 
-  useEffect(() => { 
-    setMounted(true); 
-    fetch(`${API_V2_BASE_URL}/ai-dataset`).then(r => r.json()).then(d => setAiBank(d.problems || []));
+  useEffect(() => {
+    fetch(`${API_V2}/ai-dataset`).then(r => r.json()).then(d => setAiBank(d.problems || []));
   }, []);
-
-  const cleanMemberCount = useMemo(() => {
-    if (mode === 'single') return soloPlayer.username.trim() ? 1 : 0;
-    return teams.flatMap((team) => team.players).filter((member) => member.username.trim()).length;
-  }, [mode, soloPlayer, teams]);
-
-  function addTeam() { setTeams([...teams, { name: `Group ${String.fromCharCode(65 + teams.length)}`, players: [emptyMember(), emptyMember(), emptyMember()] }]); }
-  function updateTeam(index: number, name: string) { const next = [...teams]; next[index] = { ...next[index], name }; setTeams(next); }
-  function addPlayer(teamIndex: number) { const next = [...teams]; next[teamIndex].players.push(emptyMember()); setTeams(next); }
-  function updatePlayer(teamIndex: number, playerIndex: number, value: string) { const next = [...teams]; next[teamIndex].players[playerIndex] = { username: value }; setTeams(next); }
 
   function queueProblem() {
     let payload: any = { type: activeTab };
     if (activeTab === 'URL') {
-      if (!urlProblem) return alert('Enter a URL');
+      if (!urlProblem) return toast.error('Enter URL');
       payload.url = urlProblem;
       payload.displayTitle = urlProblem.split('/').pop();
     } else if (activeTab === 'CUSTOM') {
-      if (!customTitle) return alert('Enter a title');
+      if (!customTitle) return toast.error('Enter custom title');
       payload.customData = { title: customTitle, description: customDesc, testcases: customCases };
       payload.displayTitle = customTitle;
     } else {
-      if (!mcqPrompt || mcqCorrect.length === 0) return alert('Enter prompt and select correct answers');
+      if (!mcqPrompt || mcqCorrect.length === 0) return toast.error('Enter question parameters');
       payload.mcqData = { prompt: mcqPrompt, options: mcqOptions, correctIndices: mcqCorrect };
-      payload.displayTitle = "MCQ: " + mcqPrompt.substring(0, 20) + "...";
+      payload.displayTitle = "Theory MCQ: " + mcqPrompt.substring(0, 20) + "...";
     }
-    
     setCompiledProblems([...compiledProblems, payload]);
-    // Reset forms
-    setUrlProblem(''); setCustomTitle(''); setCustomDesc(''); setMcqPrompt('');
+    setUrlProblem(''); setCustomTitle(''); setCustomDesc(''); setMcqPrompt(''); setMcqCorrect([]); setMcqOptions(['', '']);
+    toast.success("Problem appended to contest batch queue!");
   }
 
   async function createContest() {
-    if (!session?.user?.email) return alert('Sign in first.');
-    const cleanMember = (username: string, team: string) => ({ username: username.trim(), teamName: team });
-    const cleanedMembers = mode === 'single' ? (soloPlayer.username.trim() ? [cleanMember(soloPlayer.username, 'Solo')] : []) 
-      : teams.flatMap((team) => team.players.filter((m) => m.username.trim()).map((m) => cleanMember(m.username, team.name.trim() || 'Group')));
-    
-    if (cleanedMembers.length === 0) return alert('Add at least one player.');
-    if (compiledProblems.length === 0) return alert('Add at least one problem to the mashup.');
-    
+    if (compiledProblems.length === 0) return toast.error("Batch queue empty.");
     setIsCreating(true);
 
     try {
-      // 1. Create Empty Contest First
-      const res = await fetch(`${API_V2_BASE_URL}/contests`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': session.user.email },
+      const res = await fetch(`${API_V2}/contests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ 
-          title, description: `${mode === 'single' ? 'Solo' : 'Team'} mashup`, 
+          title, description: 'DivineCode Mashup Array', durationMinutes: duration, isRated: true,
           startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined,
-          durationMinutes: duration, freezeMinutes: freezeMinutes > 0 ? freezeMinutes : undefined,
-          allowTeamSubmissionView, hideProblemMetaDuringContest, isRated,
-          ownerEmail: session.user.email, members: cleanedMembers, problems: [] 
+          ownerEmail: session?.user?.email || '', members: [{ username: usernameInput.trim() || 'RKS_Rider', teamName: 'Solo' }], problems: [] 
         })
       });
-      const data = await res.json();
-      if (!data.id) throw new Error("Contest creation failed.");
+      const contest = await res.json();
+      if (!res.ok || !contest.id) throw new Error();
 
-      // 2. Hydrate with compiled problems sequentially
+      // Flawless synchronous dispatch orchestration sequence
       for (const prob of compiledProblems) {
-        await fetch(`${API_V2_BASE_URL}/contests/${data.id}/problems/mashup`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': session.user.email },
-          body: JSON.stringify(prob)
+        await fetch(`${API_V2}/contests/${contest.id}/problems/mashup`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' }, body: JSON.stringify(prob)
         });
       }
-
-      window.location.href = `/contests/${data.id}`;
-    } catch (error) {
-      alert('Error finalizing mashup');
+      toast.success("Mashup orchestrator finalized cleanly!");
+      router.push(`/contests/${contest.id}`);
+    } catch {
+      toast.error("Network error during mashup creation.");
+    } finally {
       setIsCreating(false);
     }
   }
 
-  if (!mounted) return null;
-  if (status === 'loading') return <main style={page}><div style={{textAlign:'center', marginTop:'20vh'}}><h1 style={{color: '#67e8f9'}}>Checking account...</h1></div></main>;
-  if (!session) return <main style={page}><section style={gate}><h1>Sign in required</h1><a href="/signin" style={primaryLink}>Sign in with Google</a></section></main>;
-
   return (
-    <main style={page}>
-      {isCreating && (
-        <div style={overlay}>
-          <div style={overlayModal}>
-            <h2 style={{ color: '#fff', margin: '0 0 10px 0' }}>Forging Mashup...</h2>
-            <p style={{ color: '#67e8f9', margin: 0, fontSize: 14 }}>Scraping URLs and synchronizing questions.</p>
+    <div style={page}>
+      <Toaster />
+      {isCreating && <div style={overlay}><div style={overlayModal}><h2>Forging Mashup array specifications...</h2></div></div>}
+
+      {/* 👉 TOP HOME PAGE COMPREHENSIVE HUB CHANNELS */}
+      <nav style={{ display: 'flex', gap: 15, background: '#1e293b', padding: '15px 30px', borderBottom: '1px solid #334155' }}>
+        <button onClick={() => setNavTab('mashup')} style={navTab === 'mashup' ? actNav : pasNav}>Mashup Control Room</button>
+        <button onClick={() => { setNavTab('duel'); router.push('/duel'); }} style={navTab === 'duel' ? actNav : pasNav}>1v1 Realtime Duel Matrix</button>
+        <button onClick={() => { setNavTab('interview'); router.push('/interview'); }} style={navTab === 'interview' ? actNav : pasNav}>Interview Coding Modules</button>
+      </nav>
+
+      {navTab === 'mashup' && (
+        <div style={{ display: 'flex', gap: '30px', padding: 40, maxWidth: 1300, margin: '0 auto', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 600px' }}>
+            <h1 style={{ color: '#38bdf8', marginTop: 0 }}>Create Live Practice Contest</h1>
+            
+            <div style={{ display: 'flex', gap: 20, marginBottom: 20 }}>
+              <div style={{ flex: 1 }}><label>Contest Title</label><input value={title} onChange={e => setTitle(e.target.value)} style={inputBox} /></div>
+              <div style={{ flex: 0.5 }}><label>Duration (mins)</label><input type="number" value={duration} onChange={e => setDuration(Number(e.target.value))} style={inputBox} /></div>
+            </div>
+
+            {/* 👉 CALENDAR BOX RESTRUCTURE: Fixed invisible picker icon by forcing color-scheme properties */}
+            <div style={{ marginBottom: 25 }}>
+              <label style={{ display: 'block', marginBottom: 8, fontWeight: 'bold' }}>Schedule Launch Calendar Time</label>
+              <input 
+                type="datetime-local" 
+                value={startTimeStr} 
+                onChange={e => setStartTimeStr(e.target.value)} 
+                style={{ ...inputBox, colorScheme: 'dark', backgroundColor: '#0f172a', color: '#fff' }} 
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginBottom: 20, borderBottom: '1px solid #1e293b', paddingBottom: 10 }}>
+              {['URL', 'CUSTOM', 'MCQ'].map(t => (
+                <button key={t} onClick={() => setActiveTab(t as any)} style={{ padding: '8px 16px', background: activeTab === t ? '#38bdf8' : '#1e293b', color: activeTab === t ? '#000' : '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}>{t}</button>
+              ))}
+            </div>
+
+            {activeTab === 'URL' && <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste External Problem Link..." />}
+            
+            {activeTab === 'CUSTOM' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <input value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} placeholder="Title" />
+                <textarea value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, height: 80, resize: 'none'}} placeholder="Markdown Statement Content" />
+              </div>
+            )}
+
+            {activeTab === 'MCQ' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <input value={mcqPrompt} onChange={e => setMcqPrompt(e.target.value)} style={inputBox} placeholder="Question Option Evaluation Prompt" />
+                <p style={{fontSize: 12, color: '#94a3b8', margin: 0}}>Check the box next to correct options.</p>
+                {mcqOptions.map((o, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <input type="checkbox" checked={mcqCorrect.includes(idx)} onChange={() => setMcqCorrect(prev => prev.includes(idx) ? prev.filter(x => x !== idx) : [...prev, idx])} style={{transform: 'scale(1.5)', cursor: 'pointer'}} />
+                    <input value={o} onChange={e => { const n = [...mcqOptions]; n[idx] = e.target.value; setMcqOptions(n); }} style={inputBox} placeholder={`Option ${String.fromCharCode(65+idx)}`} />
+                  </div>
+                ))}
+                <button onClick={() => setMcqOptions([...mcqOptions, ''])} style={{...ghostBtn, alignSelf: 'flex-start'}}>+ Option Item</button>
+              </div>
+            )}
+
+            <button onClick={queueProblem} style={{ ...primaryBtn, width: '100%', marginTop: 25, padding: 15 }}>Append Question to Dispatch Array</button>
+            <button onClick={createContest} style={{ background: '#10b981', color: '#fff', padding: 15, borderRadius: 8, width: '100%', marginTop: 15, fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>Deploy & Synchronize Mashup Suite</button>
+          </div>
+
+          {/* RIGHT SIDEBAR: Queued view & massive AI avatar catalogs */}
+          <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div style={{ background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid #1e293b' }}>
+              <h3 style={{ marginTop: 0, color: '#a5b4fc' }}>Queued Suite Batch ({compiledProblems.length})</h3>
+              {compiledProblems.length === 0 && <p style={{color: '#64748b'}}>No problems queued.</p>}
+              {compiledProblems.map((p, i) => <div key={i} style={{ padding: '10px', background: '#1e293b', borderRadius: 4, margin: '8px 0', border: '1px solid #334155' }}>{p.displayTitle}</div>)}
+            </div>
+
+            <div style={{ background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid #1e293b', flex: 1 }}>
+              <h3 style={{ marginTop: 0, color: '#a5b4fc' }}>🤖 Global Curation Catalog</h3>
+              <div style={{display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '600px', overflowY: 'auto', paddingRight: 10}}>
+                {aiBank.map(p => (
+                  <div key={p.id} style={{ padding: 12, background: '#1e293b', borderRadius: 8, border: '1px solid #334155' }}>
+                    <span style={{ fontSize: 13, fontWeight: 'bold', display: 'block', marginBottom: 8, color: '#eef2ff' }}>{p.title}</span>
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 10, background: '#3b82f633', color: '#38bdf8', padding: '2px 6px', borderRadius: 4 }}>{p.platform}</span>
+                      <span style={{ fontSize: 10, background: '#1e293b', color: '#94a3b8', padding: '2px 6px', borderRadius: 4 }}>{p.difficulty}</span>
+                    </div>
+                    <button onClick={() => setCompiledProblems([...compiledProblems, { type: 'URL', url: p.originalUrl, displayTitle: p.title }])} style={{ background: '#38bdf8', color: '#000', fontWeight: 'bold', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>+ Import to Mashup</button>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
-
-      <section style={{ maxWidth: 1180, margin: '0 auto' }}>
-        <a href="/" style={topLink}>← DivineCode Home</a>
-        
-        <div style={hero}>
-          <div style={{ flex: '1 1 400px' }}>
-            <p style={eyebrow}>Team mashup builder</p>
-            <h1 style={{ fontSize: 'clamp(32px, 5vw, 52px)', margin: '10px 0' }}>Create controlled contests.</h1>
-          </div>
-        </div>
-        
-        <div style={shell}>
-          <div style={modeGrid}>
-            <button onClick={() => setMode('single')} style={mode === 'single' ? activeMode : modeBtn}><strong>Solo Contest</strong></button>
-            <button onClick={() => setMode('group')} style={mode === 'group' ? activeMode : modeBtn}><strong>Team Mashup</strong></button>
-          </div>
-          
-          <label style={{ fontWeight: 'bold' }}>Contest Title</label>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
-          
-          <div style={memberRow}>
-            <div style={{ flex: 1 }}><label style={{ fontWeight: 'bold' }}>Duration (mins)</label><input type="number" value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={inputStyle} /></div>
-            <div style={{ flex: 1 }}><label style={{ fontWeight: 'bold' }}>Freeze Standings</label><input type="number" min="0" value={freezeMinutes} onChange={(e) => setFreezeMinutes(Number(e.target.value))} placeholder="e.g. 30" style={inputStyle} /></div>
-            <div style={{ flex: 1 }}><label style={{ fontWeight: 'bold' }}>Schedule Start</label><input type="datetime-local" value={startTimeStr} onChange={(e) => setStartTimeStr(e.target.value)} style={inputStyle} /></div>
-          </div>
-
-          <h2 style={{ marginTop: 24, marginBottom: 12 }}>Players <span style={{ color: '#67e8f9' }}>({cleanMemberCount})</span></h2>
-          
-          {mode === 'single' ? (
-            <section style={teamCard}>
-              <input value={soloPlayer.username} onChange={(e) => setSoloPlayer({ username: e.target.value })} placeholder="DivineCode Username" style={smallInput} />
-            </section>
-          ) : (
-            <>
-              {teams.map((team, ti) => (
-                <section key={ti} style={teamCard}>
-                  <input value={team.name} onChange={(e) => updateTeam(ti, e.target.value)} placeholder="Group name" style={{ ...inputStyle, fontWeight: 'bold' }} />
-                  <div style={memberRow}>
-                    {team.players.map((member, pi) => (
-                      <input key={pi} value={member.username} onChange={(e) => updatePlayer(ti, pi, e.target.value)} placeholder="Username" style={smallInput} />
-                    ))}
-                  </div>
-                  <button onClick={() => addPlayer(ti)} style={ghostBtn}>+ Add player</button>
-                </section>
-              ))}
-              <button onClick={addTeam} style={ghostBtn}>+ Add group/team</button>
-            </>
-          )}
-          
-          <h2 style={{ marginTop: 40, marginBottom: 16 }}>Advanced Mashup Builder</h2>
-          
-          <div style={{ display: 'flex', gap: 20 }}>
-            {/* Left Pane: Builder */}
-            <div style={{ flex: 2, background: '#020617', padding: 20, borderRadius: 12, border: '1px solid rgba(148,163,184,.16)' }}>
-              <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
-                {['URL', 'CUSTOM', 'MCQ'].map(tab => (
-                  <button key={tab} onClick={() => setActiveTab(tab as any)} style={{ padding: '8px 16px', background: activeTab === tab ? '#38bdf8' : '#1e293b', color: activeTab === tab ? '#000' : '#94a3b8', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}>
-                    {tab === 'URL' ? '🔗 URL Scrape' : tab === 'CUSTOM' ? '💻 Custom Code' : '📝 Theory MCQ'}
-                  </button>
-                ))}
-              </div>
-
-              {activeTab === 'URL' && <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputStyle} placeholder="Paste Codeforces / LeetCode URL" />}
-              
-              {activeTab === 'CUSTOM' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <input value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputStyle} placeholder="Problem Title" />
-                  <textarea value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputStyle, height: 100}} placeholder="Markdown Problem Description" />
-                  {customCases.map((tc, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 10 }}>
-                      <textarea value={tc.input} onChange={e => { const n = [...customCases]; n[i].input = e.target.value; setCustomCases(n); }} style={inputStyle} placeholder={`Input ${i+1}`} />
-                      <textarea value={tc.output} onChange={e => { const n = [...customCases]; n[i].output = e.target.value; setCustomCases(n); }} style={inputStyle} placeholder={`Output ${i+1}`} />
-                    </div>
-                  ))}
-                  <button onClick={() => setCustomCases([...customCases, { input: '', output: '' }])} style={ghostBtn}>+ Test Case</button>
-                </div>
-              )}
-
-              {activeTab === 'MCQ' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <textarea value={mcqPrompt} onChange={e => setMcqPrompt(e.target.value)} style={{...inputStyle, height: 80}} placeholder="Question Prompt" />
-                  <p style={{ fontSize: 12, color: '#94a3b8' }}>Check boxes for correct answers (Multi-correct supported).</p>
-                  {mcqOptions.map((opt, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#0f172a', padding: 8, borderRadius: 8 }}>
-                      <input type="checkbox" checked={mcqCorrect.includes(i)} onChange={() => setMcqCorrect(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i])} style={{ transform: 'scale(1.5)', cursor: 'pointer' }} />
-                      <input value={opt} onChange={e => { const n = [...mcqOptions]; n[i] = e.target.value; setMcqOptions(n); }} style={{...inputStyle, margin: 0}} placeholder={`Option ${String.fromCharCode(65+i)}`} />
-                    </div>
-                  ))}
-                  <button onClick={() => setMcqOptions([...mcqOptions, ''])} style={ghostBtn}>+ Option</button>
-                </div>
-              )}
-              <button onClick={queueProblem} style={{...primaryBtn, width: '100%', marginTop: 20}}>Queue Problem</button>
-            </div>
-
-            {/* Right Pane: Queued List & AI */}
-            <div style={{ flex: 1.5, display: 'flex', flexDirection: 'column', gap: 15 }}>
-              <div style={{ background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid rgba(148,163,184,.16)', minHeight: 150 }}>
-                <h3 style={{ marginTop: 0, color: '#a5b4fc' }}>Queued to Mashup ({compiledProblems.length})</h3>
-                {compiledProblems.map((p, idx) => (
-                  <div key={idx} style={{ background: '#1e293b', padding: '10px 15px', borderRadius: 6, marginBottom: 8, fontSize: 14 }}>
-                    <strong style={{ color: '#67e8f9', marginRight: 10 }}>{String.fromCharCode(65 + idx)}</strong>
-                    {p.displayTitle} <span style={{ color: '#64748b', fontSize: 12 }}>({p.type})</span>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid rgba(99,102,241,.3)', flex: 1 }}>
-                 <h3 style={{ marginTop: 0, color: '#a5b4fc' }}>🤖 AI Problem Bank</h3>
-                 {aiBank.length === 0 ? <p style={{ color: '#475569', fontSize: 14 }}>No curated problems found.</p> : 
-                   aiBank.map((prob) => (
-                     <div key={prob.id} style={{ background: '#1e293b', padding: 10, borderRadius: 6, marginBottom: 10, border: '1px solid #334155' }}>
-                       <strong style={{ fontSize: 14, display: 'block', color: '#e2e8f0', marginBottom: 5 }}>{prob.title}</strong>
-                       <button onClick={() => setCompiledProblems([...compiledProblems, { type: 'URL', url: prob.originalUrl, displayTitle: prob.title }])} style={{...ghostBtn, padding: '5px 10px', fontSize: 12}}>+ Add</button>
-                     </div>
-                   ))
-                 }
-              </div>
-            </div>
-          </div>
-          
-          <div style={{ marginTop: 40, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 24, textAlign: 'right' }}>
-            <button onClick={createContest} disabled={isCreating} style={primaryBtn}>Create {mode === 'single' ? 'Solo Contest' : 'Team Mashup'}</button>
-          </div>
-        </div>
-      </section>
-    </main>
+    </div>
   );
 }
 
-// STYLES
-const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.35), transparent 36rem), #070a16', boxSizing: 'border-box' };
-const gate: CSSProperties = { maxWidth: 620, margin: '15vh auto', padding: 34, borderRadius: 28, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', textAlign: 'center' };
-const topLink: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900 };
-const primaryLink: CSSProperties = { display: 'inline-block', padding: '12px 17px', borderRadius: 999, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', textDecoration: 'none', fontWeight: 900 };
-const hero: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24, flexWrap: 'wrap', margin: '24px 0 32px 0' };
-const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 900, letterSpacing: '.14em', textTransform: 'uppercase', margin: 0 };
-const shell: CSSProperties = { padding: 'clamp(20px, 4vw, 32px)', borderRadius: 30, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)', boxSizing: 'border-box' };
-const modeGrid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 14, marginBottom: 26 };
-const modeBtn: CSSProperties = { padding: 20, borderRadius: 22, border: '1px solid rgba(148,163,184,.24)', background: 'rgba(2,6,23,.45)', color: '#e2e8f0', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 8, cursor: 'pointer' };
-const activeMode: CSSProperties = { ...modeBtn, border: '1px solid rgba(34,211,238,.75)', background: 'rgba(34,211,238,.12)' };
-const inputStyle: CSSProperties = { width: '100%', padding: 14, margin: '8px 0 16px', border: '1px solid rgba(148,163,184,.25)', borderRadius: 14, background: 'rgba(2,6,23,.55)', color: '#eef2ff', outline: 'none', boxSizing: 'border-box' };
-const smallInput: CSSProperties = { width: '100%', padding: 12, border: '1px solid rgba(148,163,184,.25)', borderRadius: 12, background: 'rgba(15,23,42,.8)', color: '#eef2ff', outline: 'none', boxSizing: 'border-box' };
-const memberRow: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 12 };
-const teamCard: CSSProperties = { padding: 'clamp(16px, 3vw, 24px)', borderRadius: 20, background: 'rgba(2,6,23,.45)', border: '1px solid rgba(148,163,184,.18)', marginBottom: 16, boxSizing: 'border-box' };
-const ghostBtn: CSSProperties = { padding: '11px 18px', borderRadius: 999, border: '1px solid rgba(148,163,184,.28)', background: 'rgba(15,23,42,.72)', color: '#dbeafe', cursor: 'pointer', fontWeight: 'bold' };
-const primaryBtn: CSSProperties = { padding: '16px 28px', borderRadius: 999, border: 0, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', fontWeight: 900, cursor: 'pointer', fontSize: 16 };
-const overlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 50 };
-const overlayModal: CSSProperties = { padding: 30, backgroundColor: '#0f172a', border: '1px solid rgba(103,232,249,0.3)', borderRadius: 20, textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.5)' };
+const page: CSSProperties = { minHeight: '100vh', background: '#020617', color: '#e2e8f0', fontFamily: 'sans-serif' };
+const actNav: CSSProperties = { padding: '10px 15px', background: '#38bdf8', color: '#000', borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer' };
+const pasNav: CSSProperties = { padding: '10px 15px', background: 'transparent', color: '#94a3b8', borderRadius: 6, border: 'none', cursor: 'pointer' };
+const inputBox = { width: '100%', padding: '12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#fff', boxSizing: 'border-box' as const, marginTop: 5 };
+const primaryBtn = { background: '#38bdf8', color: '#000', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 'bold' as const, cursor: 'pointer' };
+const ghostBtn = { background: 'transparent', color: '#38bdf8', border: '1px solid #38bdf8', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' as const };
+const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 };
+const overlayModal = { background: '#0f172a', padding: 30, borderRadius: 12, border: '1px solid #38bdf8', textAlign: 'center' as const };
