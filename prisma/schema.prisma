@@ -321,7 +321,10 @@ model ContestProblem {
   problem             Problem?           @relation(fields: [problemId], references: [id])
   interviewQuestion   InterviewQuestion? @relation(fields: [interviewQuestionId], references: [id])
   submissions         Submission[]
-
+  customTitle         String?
+  customDescription   String?  @db.Text
+  customTestCases     Json?    // Array of { input: string, expectedOutput: string }
+  order               Int      @default(0)
   @@unique([contestId, index])
   @@unique([contestId, label])
   @@index([contestId])
@@ -548,9 +551,13 @@ model InterviewQuestion {
   trackId         String
   title           String
   prompt          String
-  options         Json?               
-  correctIndex    Int?                
-  difficultyLabel String?
+  
+  options         Json?               // Changed to handle arrays natively
+  correctIndex    Int?                // Legacy: For Single Correct
+  correctIndices  Int[]               // NEW: Array for Multiple Correct MCQs
+  isMultiple      Boolean             @default(false) 
+  difficulty      String              @default("Medium") // Replaced difficultyLabel
+  
   expectedAnswer  String?
   tags            String[]
   sourceCompany   String?
@@ -581,6 +588,17 @@ model InterviewProgress {
   @@unique([userId, questionId])
 }
 
+model AiProblemDataset {
+  id              String   @id @default(cuid())
+  title           String
+  descriptionHtml String   @db.Text
+  platform        String   
+  originalUrl     String?
+  tags            String[] 
+  difficulty      String
+  testcases       Json     
+  createdAt       DateTime @default(now())
+}
 model AuditLog {
   id         String   @id @default(cuid())
   actorId    String?

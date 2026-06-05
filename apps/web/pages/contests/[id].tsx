@@ -10,6 +10,69 @@ import { io, Socket } from 'socket.io-client';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
+// 👉 1. AI Recommendation Component
+export function PostContestAiRecommendations({ contestId, contestStatus }: { contestId: string, contestStatus: string }) {
+  const [recommendations, setRecommendations] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    // Only fetch recommendations if the contest is actually finished
+    if (contestStatus !== 'ENDED') return;
+
+    setLoading(true);
+    fetch(`${API_V2_BASE_URL}/contests/${contestId}/ai-recommendations`, { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) setRecommendations(data.recommendations || []);
+      })
+      .catch(err => console.error(err))
+      .finally(() => setLoading(false));
+  }, [contestId, contestStatus]);
+
+  if (contestStatus !== 'ENDED') return null;
+
+  return (
+    <div style={{ marginBottom: '18px', background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.3)', padding: '24px', borderRadius: '16px' }}>
+      <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#a5b4fc', margin: '0 0 10px 0' }}>
+        🤖 AI Tutor Recommendations
+      </h2>
+      <p style={{ color: '#94a3b8', marginBottom: '20px' }}>
+        The contest is over! Based on the mechanics of today's problems, the DivineCode AI suggests practicing these to level up your rating before the next round:
+      </p>
+
+      {loading ? (
+        <div style={{ color: '#64748b' }}>Analyzing contest data...</div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '15px' }}>
+          {recommendations.map((prob) => (
+            <a 
+              key={prob.id} 
+              href={prob.originalUrl || '#'} 
+              target="_blank" 
+              rel="noreferrer"
+              style={{ display: 'block', background: '#0f172a', border: '1px solid #1e293b', padding: '16px', borderRadius: '12px', textDecoration: 'none', transition: 'transform 0.2s' }}
+              onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+              onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+            >
+              <h3 style={{ margin: '0 0 8px 0', color: '#e2e8f0', fontSize: '16px' }}>{prob.title}</h3>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '11px', background: '#3b82f633', color: '#38bdf8', padding: '2px 8px', borderRadius: '12px', fontWeight: 'bold' }}>
+                  {prob.difficulty}
+                </span>
+                {prob.tags?.slice(0, 2).map((tag: string) => (
+                  <span key={tag} style={{ fontSize: '11px', background: '#1e293b', color: '#94a3b8', padding: '2px 8px', borderRadius: '12px' }}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function viewerQuery(session: any) {
   const query = new URLSearchParams();
   if (session?.user?.email) query.set('viewerEmail', session.user.email);
@@ -26,6 +89,7 @@ function viewerHeaders(session: any) {
   };
 }
 
+// 👉 2. Main Page Component
 export default function ContestRoomPage() {
   const router = useRouter();
   const { id } = router.query;
@@ -224,7 +288,7 @@ export default function ContestRoomPage() {
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/recommend-problems`, { method: 'POST', headers: viewerHeaders(session) });
       const data = await res.json();
-      if (res.ok) toast.success(`AI Recommended: ${data.recommendations.join(', ')}`);
+      if (res.ok) toast.success(`AI Recommended: ${data.recommendations.map((r: any) => r.name || r.title).join(', ')}`);
       else toast.error(data.error || 'Failed to fetch AI recommendations');
     } catch (e) { toast.error('Network error while generating recommendations.'); } 
     finally { setIsRecommending(false); setSyncing(false); }
@@ -527,6 +591,9 @@ export default function ContestRoomPage() {
           </motion.section>
         )}
 
+        {/* 👉 Post-Contest AI Recommendations automatically appear here when contest ends */}
+        <PostContestAiRecommendations contestId={id as string} contestStatus={contest.status || (isFinal ? 'ENDED' : 'RUNNING')} />
+
         {isScheduledLockScreen && !isOwner ? (
           <section style={{...panel, textAlign: 'center', padding: '60px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(251,191,36,0.05))'}}>
              <h2 style={{ fontSize: 32, marginBottom: 10, color: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>Contest has not started yet</h2>
@@ -669,7 +736,7 @@ export default function ContestRoomPage() {
               </div>
             </section>
             
-<section style={{ ...panel, marginTop: 18 }}>
+            <section style={{ ...panel, marginTop: 18 }}>
               <h2>
                 {isFinal || timeLeft === 0 ? 'All submissions' : isOwner ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}
               </h2>

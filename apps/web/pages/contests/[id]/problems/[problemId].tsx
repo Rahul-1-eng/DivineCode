@@ -54,31 +54,24 @@ export default function ContestProblemWorkspace() {
   const [code, setCode] = useState('// Write your solution here...');
   const [language, setLanguage] = useState('cpp');
   
-  // 👉 UPDATED: 4-Tab Workspace including Terminal and AI Explorer
-const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cph');
-  
-  // Terminal State
+  const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cph');
   const [terminalOutput, setTerminalOutput] = useState<string>('Welcome to DivineCode Integrated Terminal.\nReady to compile and run...\n');
   const [customInput, setCustomInput] = useState<string>('');
   
-  // AI Catalog State
-  const [aiProblems, setAiProblems] = useState<any[]>([]);
-  const [fetchingAi, setFetchingAi] = useState(false);
-
-  // CPH State
   const [testcases, setTestcases] = useState<TestCase[]>([{ id: '1', input: '', expectedOutput: '', output: '', status: 'idle' }]);
-  const [isFetchingSamples, setIsFetchingSamples] = useState(false);
-  
   const [penaltyViewed, setPenaltyViewed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [judgeVerdict, setJudgeVerdict] = useState<{ status: string, message: string } | null>(null);
   
   const [aiDebuggerLoading, setAiDebuggerLoading] = useState(false);
   const [aiDebugResult, setAiDebugResult] = useState<any>(null);
-
   const [showCfModal, setShowCfModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // 👉 NEW: MCQ Specific States
+  const [mcqData, setMcqData] = useState<any>(null);
+  const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
 
   // Team Chat States
   const socketRef = useRef<Socket | null>(null);
@@ -117,10 +110,26 @@ const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cp
       .catch(() => setIsLoading(false));
   }, [id, session]);
 
+  const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
+  const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
+  
+  // Identify if this is a theory question
+  const isMCQ = problem?.platform === 'Interview MCQ' || !!problem?.interviewQuestionId;
+
+  // 👉 Fetch MCQ Data if applicable
+  useEffect(() => {
+    if (isMCQ && problem?.interviewQuestionId) {
+      fetch(`${API_V2_BASE_URL}/interview/questions`)
+        .then(r => r.json())
+        .then(data => {
+          if (Array.isArray(data)) setMcqData(data.find(q => q.id === problem.interviewQuestionId));
+        });
+    }
+  }, [isMCQ, problem]);
+
   // WebSocket Connection
   useEffect(() => {
     if (!id || !session || !contest?.viewerMember?.teamId) return;
-    
     socketRef.current = io(API_BASE_URL, { transports: ['websocket'], reconnection: true });
     const socket = socketRef.current;
     
@@ -160,44 +169,6 @@ const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cp
     setChatInput('');
   };
 
-  const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
-  const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
-
-  // Smart DB check before scraping
-  useEffect(() => {
-    if (problem?.problem?.testcases && problem.problem.testcases.length > 0) {
-      setTestcases(
-        problem.problem.testcases.map((tc: any) => ({
-          id: tc.id, input: tc.input, expectedOutput: tc.expectedOutput, output: '', status: 'idle'
-        }))
-      );
-      return; 
-    }
-
-    if (!problem?.externalUrl?.includes('codeforces') || testcases[0]?.input !== '') return;
-    
-    const fetchSamples = async () => {
-      setIsFetchingSamples(true);
-      try {
-        const res = await fetch(`${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(problem.externalUrl)}`);
-        const html = await res.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        
-        const inputNodes = Array.from(doc.querySelectorAll('.input pre')).map(el => el.textContent?.trim() || '');
-        const outputNodes = Array.from(doc.querySelectorAll('.output pre')).map(el => el.textContent?.trim() || '');
-        
-        if (inputNodes.length > 0) {
-          setTestcases(inputNodes.map((inp, idx) => ({
-            id: Date.now().toString() + idx, input: inp, expectedOutput: outputNodes[idx] || '', output: '', status: 'idle'
-          })));
-        }
-      } catch (err) {} finally { setIsFetchingSamples(false); }
-    };
-    fetchSamples();
-  }, [problem]);
-
-  // 👉 NEW: VS Code Terminal Execution
   const runCustomCode = async () => {
     if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
     setActiveTab('terminal');
@@ -217,75 +188,68 @@ const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cp
     }
   };
 
-  const runTestCase = async (index: number) => {
-    if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
-    const newCases = [...testcases];
-    newCases[index].status = 'running';
-    newCases[index].output = '';
-    setTestcases(newCases);
-    setActiveTab('cph');
-
-    try {
-      const res = await fetch(`${API_V2_BASE_URL}/execute`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceCode: code, language, input: newCases[index].input })
-      });
-      const data = await res.json();
-      let actualOut = '';
-      
-      if (!res.ok) {
-        actualOut = data.error || 'Execution failed on server.';
-        newCases[index].status = 'error';
-      } else if (data.verdict === 'COMPILATION_ERROR') {
-        actualOut = data.compileError || 'Compilation Error';
-        newCases[index].status = 'error';
-      } else if (data.verdict === 'RUNTIME_ERROR' || data.verdict === 'TIME_LIMIT_EXCEEDED') {
-        actualOut = `[${data.verdict}]\n${data.stderr || ''}`;
-        newCases[index].status = 'error';
-      } else {
-        actualOut = data.stdout || '';
-        const expectedOut = newCases[index].expectedOutput.trim();
-        newCases[index].status = (actualOut.trim() === expectedOut || !expectedOut) ? 'passed' : 'failed';
-      }
-      newCases[index].output = actualOut.trim();
-    } catch (e) {
-      newCases[index].status = 'error';
-      newCases[index].output = 'Network error connecting to execution engine.';
-    }
-    setTestcases([...newCases]);
-  };
-
   const runAllTestcases = async () => {
     setActiveTab('cph');
-    for (let i = 0; i < testcases.length; i++) await runTestCase(i);
+    for (let i = 0; i < testcases.length; i++) {
+      if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
+      const newCases = [...testcases];
+      newCases[i].status = 'running';
+      newCases[i].output = '';
+      setTestcases(newCases);
+
+      try {
+        const res = await fetch(`${API_V2_BASE_URL}/execute`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceCode: code, language, input: newCases[i].input })
+        });
+        const data = await res.json();
+        let actualOut = '';
+        
+        if (!res.ok) {
+          actualOut = data.error || 'Execution failed on server.';
+          newCases[i].status = 'error';
+        } else if (data.verdict === 'COMPILATION_ERROR') {
+          actualOut = data.compileError || 'Compilation Error';
+          newCases[i].status = 'error';
+        } else if (data.verdict === 'RUNTIME_ERROR' || data.verdict === 'TIME_LIMIT_EXCEEDED') {
+          actualOut = `[${data.verdict}]\n${data.stderr || ''}`;
+          newCases[i].status = 'error';
+        } else {
+          actualOut = data.stdout || '';
+          const expectedOut = newCases[i].expectedOutput.trim();
+          newCases[i].status = (actualOut.trim() === expectedOut || !expectedOut) ? 'passed' : 'failed';
+        }
+        newCases[i].output = actualOut.trim();
+      } catch (e) {
+        newCases[i].status = 'error';
+        newCases[i].output = 'Network error connecting to execution engine.';
+      }
+      setTestcases([...newCases]);
+    }
   };
 
-  // 👉 NEW: Fetch Real AI Problems
-  const loadAiProblems = async () => {
-    if (aiProblems.length > 0) return; // Already loaded
-    setFetchingAi(true);
-    try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/recommend-problems`, { method: 'POST' });
-      const data = await res.json();
-      setAiProblems(data.recommendations || []);
-    } catch (e) {} finally { setFetchingAi(false); }
-  };
-
+  // 👉 UPDATED: Handles both Code string OR JSON MCQ Arrays dynamically
   const handleSubmitCode = async () => {
-    if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
-
-    if (problem?.platform === 'CODEFORCES' || problem?.externalUrl?.includes('codeforces')) {
-      setShowCfModal(true);
-      return;
+    if (isMCQ) {
+       if (selectedOptions.length === 0) return alert("Please select an answer before submitting.");
+    } else {
+       if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
+       if (problem?.platform === 'CODEFORCES' || problem?.externalUrl?.includes('codeforces')) {
+         setShowCfModal(true);
+         return;
+       }
     }
     
     setSubmitting(true);
     setJudgeVerdict(null);
 
+    const finalLanguage = isMCQ ? 'mcq' : language;
+    const finalCode = isMCQ ? JSON.stringify(selectedOptions) : code;
+
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
-        body: JSON.stringify({ contestProblemId: problemId, code, language })
+        body: JSON.stringify({ contestProblemId: problemId, code: finalCode, language: finalLanguage })
       });
       const submission = await res.json();
       if (!res.ok) throw new Error(submission.error || 'Could not create submission');
@@ -296,7 +260,7 @@ const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cp
 
       const sub = judgeData.submission;
       if (sub?.verdict === 'ACCEPTED' || sub?.verdict === 'Accepted') {
-        setJudgeVerdict({ status: 'Accepted', message: 'All hidden system tests passed!' });
+        setJudgeVerdict({ status: 'Accepted', message: isMCQ ? 'Correct Answer!' : 'All hidden system tests passed!' });
         playSuccessSound();
         setTimeout(() => router.push(`/contests/${id}`), 1500);
       } else {
@@ -359,15 +323,6 @@ const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cp
     ? `${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(problem.externalUrl)}` 
     : problem.externalUrl;
 
-  let cfSubmitUrl = problem.externalUrl || 'https://codeforces.com/problemset/submit';
-  const psMatch = cfSubmitUrl.match(/problemset\/problem\/([0-9]+)\/([A-Za-z0-9]+)/i);
-  const contestMatch = cfSubmitUrl.match(/contest\/([0-9]+)\/problem\/([A-Za-z0-9]+)/i);
-  const gymMatch = cfSubmitUrl.match(/gym\/([0-9]+)\/problem\/([A-Za-z0-9]+)/i);
-
-  if (psMatch) cfSubmitUrl = `https://codeforces.com/contest/${psMatch[1]}/submit/${psMatch[2].toUpperCase()}`;
-  else if (contestMatch) cfSubmitUrl = `https://codeforces.com/contest/${contestMatch[1]}/submit/${contestMatch[2].toUpperCase()}`;
-  else if (gymMatch) cfSubmitUrl = `https://codeforces.com/gym/${gymMatch[1]}/submit/${gymMatch[2].toUpperCase()}`;
-  
   const monacoLanguage = language === 'cpp' ? 'cpp' : language === 'python' ? 'python' : 'java';
 
   return (
@@ -377,8 +332,8 @@ const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cp
       {submitting && (
         <div style={modalOverlay}>
           <div style={{...modalContent, textAlign: 'center'}}>
-            <h2 style={{ color: '#fff', margin: '0 0 10px 0' }}>Judging Submission...</h2>
-            <p style={{ color: '#67e8f9' }}>Running tests against hidden system modules</p>
+            <h2 style={{ color: '#fff', margin: '0 0 10px 0' }}>{isMCQ ? 'Grading Answer...' : 'Judging Submission...'}</h2>
+            <p style={{ color: '#67e8f9' }}>Evaluating against hidden system modules</p>
           </div>
         </div>
       )}
@@ -404,172 +359,185 @@ const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cp
         </div>
         <div style={timerBox}>{timer.text}</div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <select value={language} onChange={(e) => setLanguage(e.target.value)} style={selectBox}>
-            <option value="cpp">C++ 17</option>
-            <option value="python">Python 3</option>
-            <option value="java">Java</option>
-          </select>
-          <button onClick={runAllTestcases} style={ghostBtn}>Run Test Cases</button>
-          <button onClick={runCustomCode} style={runBtn}>Terminal ▶</button>
+          {!isMCQ && (
+            <>
+              <select value={language} onChange={(e) => setLanguage(e.target.value)} style={selectBox}>
+                <option value="cpp">C++ 17</option>
+                <option value="python">Python 3</option>
+                <option value="java">Java</option>
+              </select>
+              <button onClick={runAllTestcases} style={ghostBtn}>Run Test Cases</button>
+              <button onClick={runCustomCode} style={runBtn}>Terminal ▶</button>
+            </>
+          )}
           <button onClick={handleSubmitCode} disabled={submitting} style={submitBtn}>{submitting ? 'Judging...' : 'Submit 🚀'}</button>
         </div>
       </header>
 
       <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
         
-       <section style={{ width: '40%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #1e293b', background: '#0f172a' }}>
-  <div style={paneHeader}>Problem Description</div>
-  <div style={{ flex: 1, padding: 0, display: 'flex', flexDirection: 'column' }}>
-    <iframe src={problemIframeUrl} style={{...iframeStyle, flex: 1}} title="Problem Statement" sandbox="allow-scripts allow-same-origin" />
-    
-    {/* Permanent Fallback Link */}
-    {problem.externalUrl && (
-       <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center', borderTop: '1px solid #334155' }}>
-          <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontSize: 13, fontWeight: 'bold' }}>
-             🔗 Having trouble viewing? Open Original Problem Here
-          </a>
-       </div>
-    )}
-  </div>
-</section>
-
-        <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
-          
-          <div style={{ flex: 1, position: 'relative', paddingTop: 10 }}>
-            <Editor
-              height="100%" theme="vs-dark" language={monacoLanguage} value={code} onChange={(val) => setCode(val || '')}
-              options={{ minimap: { enabled: false }, fontSize: 16 }}
-            />
-          </div>
-
-          <div style={{ height: '35%', display: 'flex', flexDirection: 'column', borderTop: '1px solid #333', background: '#1e1e1e' }}>
-            <div style={tabsHeader}>
-              <button style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('cph')}>CPH TESTCASES</button>
-              <button style={activeTab === 'terminal' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('terminal')}>TERMINAL</button>
-
-              <button style={activeTab === 'testcases' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('testcases')}>DEBUG / HIDDEN</button>
-            </div>
-            
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              
-              {/* CPH TAB */}
-             {/* CPH TAB */}
-              {activeTab === 'cph' && (
-                <div style={{ padding: 15, background: '#0f172a', minHeight: '100%' }}>
-                  
-                  {/* Graceful Fallback if testcases don't exist */}
-                  {testcases.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '40px 20px', background: '#020617', border: '1px dashed #334155', borderRadius: 8, marginBottom: 15 }}>
-                      <h3 style={{ color: '#94a3b8', margin: '0 0 10px' }}>No Pre-Loaded Test Cases</h3>
-                      <p style={{ color: '#64748b', fontSize: 13, marginBottom: 20 }}>
-                        Automatic scraping failed or was blocked by the platform. You can manually enter test cases below, or view the original problem.
-                      </p>
-                      {problem?.externalUrl && (
-                        <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{...primaryBtn, display: 'inline-block', marginBottom: 15}}>
-                          ↗ View Original Problem
-                        </a>
-                      )}
-                    </div>
-                  ) : (
-                    testcases.map((tc, idx) => (
-                      <div key={tc.id} style={tcCard}>
-                        <div style={tcHeader}>
-                          <strong>Test Case {idx + 1}</strong>
-                          <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' || tc.status === 'error' ? '#f87171' : '#94a3b8' }}>{tc.status.toUpperCase()}</span>
-                        </div>
-                        <div style={{ display: 'flex', gap: 10, padding: 10 }}>
-                          <div style={{ flex: 1 }}><div style={tcLabel}>Input</div><textarea value={tc.input} onChange={e => { const n = [...testcases]; n[idx].input = e.target.value; setTestcases(n); }} style={tcBox} /></div>
-                          <div style={{ flex: 1 }}><div style={tcLabel}>Expected Output</div><textarea value={tc.expectedOutput} onChange={e => { const n = [...testcases]; n[idx].expectedOutput = e.target.value; setTestcases(n); }} style={tcBox} /></div>
-                        </div>
-                        <div style={{ padding: '0 10px 10px' }}>
-                          <div style={tcLabel}>Actual Output</div>
-                          <pre style={{...tcBox, height: 60, margin: 0, overflow: 'auto', background: tc.status === 'failed' ? 'rgba(248,113,113,0.1)' : '#020617'}}>{tc.output}</pre>
-                        </div>
-                      </div>
-                    ))
-                  )}
-
-                  <button onClick={() => setTestcases([...testcases, { id: Date.now().toString(), input: '', expectedOutput: '', output: '', status: 'idle' }])} style={{...secondaryBtn, width: '100%'}}>+ Add Custom Test Case</button>
-                </div>
-              )}
-
-              {/* TERMINAL TAB */}
-              {activeTab === 'terminal' && (
-                <div style={{ display: 'flex', height: '100%', padding: 10, gap: 10, background: '#1e1e1e' }}>
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ color: '#ccc', fontSize: 12, marginBottom: 5, fontWeight: 'bold' }}>STDIN (Custom Input)</div>
-                    <textarea value={customInput} onChange={(e) => setCustomInput(e.target.value)} style={{ flex: 1, background: '#2d2d2d', color: '#fff', border: '1px solid #444', fontFamily: 'monospace', padding: 8, outline: 'none', resize: 'none' }} placeholder="Enter custom input here..." />
+        {/* LEFT PANE */}
+        <section style={{ width: '40%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #1e293b', background: '#0f172a' }}>
+          <div style={paneHeader}>Problem Description</div>
+          <div style={{ flex: 1, padding: 0, display: 'flex', flexDirection: 'column' }}>
+            {isMCQ ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8', marginTop: '10vh' }}>
+                <svg width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ margin: '0 auto 20px', color: '#38bdf8' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                <h2 style={{ color: '#eef2ff' }}>Theory Assessment</h2>
+                <p>Read the question carefully and select the correct option(s) in the workspace on the right.</p>
+              </div>
+            ) : (
+              <>
+                <iframe src={problemIframeUrl} style={{...iframeStyle, flex: 1}} title="Problem Statement" sandbox="allow-scripts allow-same-origin" />
+                {problem.externalUrl && (
+                  <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center', borderTop: '1px solid #334155' }}>
+                      <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontSize: 13, fontWeight: 'bold' }}>
+                        🔗 Having trouble viewing? Open Original Problem Here
+                      </a>
                   </div>
-                  <div style={{ flex: 2, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ color: '#ccc', fontSize: 12, marginBottom: 5, fontWeight: 'bold' }}>TERMINAL OUTPUT</div>
-                    <pre style={{ flex: 1, background: '#000', color: '#4ade80', margin: 0, padding: 10, border: '1px solid #444', fontFamily: 'monospace', overflowY: 'auto' }}>{terminalOutput}</pre>
-                  </div>
-                </div>
-              )}
-
-              {/* AI EXPLORER TAB */}
-
-              {/* DEBUG / HIDDEN TAB */}
-              {activeTab === 'testcases' && (
-                <div style={{ padding: 15, background: '#0f172a', minHeight: '100%' }}>
-                  <div style={aiTutorCard}>
-                    <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>🤖 AI Contest Tutor</h3>
-                    {!aiDebugResult ? (
-                      <button onClick={handleAiDebug} disabled={aiDebuggerLoading} style={aiTriggerBtn}>
-                        {aiDebuggerLoading ? 'Analyzing Code...' : 'Find Flaw & Generate Failing Case (-50 pts)'}
-                      </button>
-                    ) : (
-                      <div style={{ marginTop: 10, background: '#0f172a', padding: 16, borderRadius: 8, border: '1px solid #334155' }}>
-                        <p style={{ color: '#fbbf24', fontWeight: 'bold' }}>💡 Hint: {aiDebugResult.hint}</p>
-                        <div style={{ display: 'flex', gap: 10 }}>
-                          <div style={{ flex: 1 }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>FAILING INPUT</strong><pre style={codeBlockError}>{aiDebugResult.input}</pre></div>
-                          <div style={{ flex: 1 }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>EXPECTED OUTPUT</strong><pre style={codeBlockSuccess}>{aiDebugResult.expectedOutput}</pre></div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {!penaltyViewed ? (
-                    <div style={{ textAlign: 'center', marginTop: 20, borderTop: '1px solid #1e293b', paddingTop: 20 }}>
-                      <h3 style={{ color: '#f87171', marginTop: 0 }}>⚠️ Standard Hidden Test Cases</h3>
-                      <button onClick={() => { if(confirm("Deduct 50 pts?")) setPenaltyViewed(true); }} style={btnDanger}>Accept Penalty & View</button>
-                    </div>
-                  ) : (
-                    <div style={{ marginTop: 20 }}><h4 style={{ color: '#4ade80' }}>System Cases Unlocked</h4><p style={{ color: '#94a3b8', fontFamily: 'monospace' }}>[System test case data loaded]</p></div>
-                  )}
-                </div>
-              )}
-            </div>
+                )}
+              </>
+            )}
           </div>
         </section>
+
+        {/* RIGHT PANE: Workspace / MCQ Form */}
+        <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
+          {isMCQ ? (
+            <div style={{ padding: '40px 60px', display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', background: '#020617' }}>
+              <strong style={{ color: '#38bdf8', fontSize: 14, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Question {problem?.label || ''}</strong>
+              <h2 style={{ fontSize: 26, lineHeight: 1.5, margin: '20px 0 10px', color: '#eef2ff' }}>
+                {mcqData?.prompt || problem?.titleSnapshot || 'Loading question...'}
+              </h2>
+              {mcqData?.isMultiple ? (
+                 <p style={{ color: '#fbbf24', marginBottom: 30, fontWeight: 'bold' }}>* Select all that apply (Multiple Correct)</p>
+              ) : (
+                 <p style={{ color: '#94a3b8', marginBottom: 30 }}>* Select one answer</p>
+              )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                 {mcqData?.options?.map((opt: string, idx: number) => {
+                    const isSelected = selectedOptions.includes(idx);
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          if (mcqData?.isMultiple) {
+                             setSelectedOptions(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]);
+                          } else {
+                             setSelectedOptions([idx]);
+                          }
+                        }}
+                        style={{
+                          padding: '20px 24px', borderRadius: 16, background: isSelected ? 'rgba(34,211,238,.12)' : 'rgba(15,23,42,.6)',
+                          color: '#eef2ff', border: `2px solid ${isSelected ? 'rgba(34,211,238,.8)' : 'rgba(51,65,85,.6)'}`,
+                          cursor: 'pointer', textAlign: 'left', fontSize: 16, transition: 'all 0.2s',
+                          display: 'flex', alignItems: 'center', gap: 20
+                        }}
+                      >
+                        <div style={{ width: 24, height: 24, borderRadius: mcqData?.isMultiple ? 6 : 12, border: `2px solid ${isSelected ? '#22d3ee' : '#64748b'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', background: isSelected ? '#22d3ee' : 'transparent', flexShrink: 0 }}>
+                           {isSelected && <div style={{ width: 10, height: 10, background: '#0f172a', borderRadius: mcqData?.isMultiple ? 2 : 6 }} />}
+                        </div>
+                        <div style={{ flex: 1, lineHeight: 1.5 }}>
+                          <span style={{ fontWeight: 'bold', color: '#67e8f9', marginRight: 12 }}>{String.fromCharCode(65 + idx)}.</span>
+                          {opt}
+                        </div>
+                      </button>
+                    )
+                 })}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{ flex: 1, position: 'relative', paddingTop: 10 }}>
+                <Editor height="100%" theme="vs-dark" language={monacoLanguage} value={code} onChange={(val) => setCode(val || '')} options={{ minimap: { enabled: false }, fontSize: 16 }} />
+              </div>
+
+              <div style={{ height: '35%', display: 'flex', flexDirection: 'column', borderTop: '1px solid #333', background: '#1e1e1e' }}>
+                <div style={tabsHeader}>
+                  <button style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('cph')}>CPH TESTCASES</button>
+                  <button style={activeTab === 'terminal' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('terminal')}>TERMINAL</button>
+                  <button style={activeTab === 'testcases' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('testcases')}>DEBUG / HIDDEN</button>
+                </div>
+                
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  {activeTab === 'cph' && (
+                    <div style={{ padding: 15, background: '#0f172a', minHeight: '100%' }}>
+                      {testcases.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '40px 20px', background: '#020617', border: '1px dashed #334155', borderRadius: 8, marginBottom: 15 }}>
+                          <h3 style={{ color: '#94a3b8', margin: '0 0 10px' }}>No Pre-Loaded Test Cases</h3>
+                          <p style={{ color: '#64748b', fontSize: 13, marginBottom: 20 }}>Automatic scraping failed or was blocked by the platform. You can manually enter test cases below.</p>
+                        </div>
+                      ) : (
+                        testcases.map((tc, idx) => (
+                          <div key={tc.id} style={tcCard}>
+                            <div style={tcHeader}>
+                              <strong>Test Case {idx + 1}</strong>
+                              <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' || tc.status === 'error' ? '#f87171' : '#94a3b8' }}>{tc.status.toUpperCase()}</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: 10, padding: 10 }}>
+                              <div style={{ flex: 1 }}><div style={tcLabel}>Input</div><textarea value={tc.input} onChange={e => { const n = [...testcases]; n[idx].input = e.target.value; setTestcases(n); }} style={tcBox} /></div>
+                              <div style={{ flex: 1 }}><div style={tcLabel}>Expected Output</div><textarea value={tc.expectedOutput} onChange={e => { const n = [...testcases]; n[idx].expectedOutput = e.target.value; setTestcases(n); }} style={tcBox} /></div>
+                            </div>
+                            <div style={{ padding: '0 10px 10px' }}>
+                              <div style={tcLabel}>Actual Output</div>
+                              <pre style={{...tcBox, height: 60, margin: 0, overflow: 'auto', background: tc.status === 'failed' ? 'rgba(248,113,113,0.1)' : '#020617'}}>{tc.output}</pre>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                      <button onClick={() => setTestcases([...testcases, { id: Date.now().toString(), input: '', expectedOutput: '', output: '', status: 'idle' }])} style={{...secondaryBtn, width: '100%'}}>+ Add Custom Test Case</button>
+                    </div>
+                  )}
+
+                  {activeTab === 'terminal' && (
+                    <div style={{ display: 'flex', height: '100%', padding: 10, gap: 10, background: '#1e1e1e' }}>
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ color: '#ccc', fontSize: 12, marginBottom: 5, fontWeight: 'bold' }}>STDIN (Custom Input)</div>
+                        <textarea value={customInput} onChange={(e) => setCustomInput(e.target.value)} style={{ flex: 1, background: '#2d2d2d', color: '#fff', border: '1px solid #444', fontFamily: 'monospace', padding: 8, outline: 'none', resize: 'none' }} placeholder="Enter custom input here..." />
+                      </div>
+                      <div style={{ flex: 2, display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ color: '#ccc', fontSize: 12, marginBottom: 5, fontWeight: 'bold' }}>TERMINAL OUTPUT</div>
+                        <pre style={{ flex: 1, background: '#000', color: '#4ade80', margin: 0, padding: 10, border: '1px solid #444', fontFamily: 'monospace', overflowY: 'auto' }}>{terminalOutput}</pre>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'testcases' && (
+                    <div style={{ padding: 15, background: '#0f172a', minHeight: '100%' }}>
+                      <div style={aiTutorCard}>
+                        <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>🤖 AI Contest Tutor</h3>
+                        {!aiDebugResult ? (
+                          <button onClick={handleAiDebug} disabled={aiDebuggerLoading} style={aiTriggerBtn}>
+                            {aiDebuggerLoading ? 'Analyzing Code...' : 'Find Flaw & Generate Failing Case (-50 pts)'}
+                          </button>
+                        ) : (
+                          <div style={{ marginTop: 10, background: '#0f172a', padding: 16, borderRadius: 8, border: '1px solid #334155' }}>
+                            <p style={{ color: '#fbbf24', fontWeight: 'bold' }}>💡 Hint: {aiDebugResult.hint}</p>
+                            <div style={{ display: 'flex', gap: 10 }}>
+                              <div style={{ flex: 1 }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>FAILING INPUT</strong><pre style={codeBlockError}>{aiDebugResult.input}</pre></div>
+                              <div style={{ flex: 1 }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>EXPECTED OUTPUT</strong><pre style={codeBlockSuccess}>{aiDebugResult.expectedOutput}</pre></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {!penaltyViewed ? (
+                        <div style={{ textAlign: 'center', marginTop: 20, borderTop: '1px solid #1e293b', paddingTop: 20 }}>
+                          <h3 style={{ color: '#f87171', marginTop: 0 }}>⚠️ Standard Hidden Test Cases</h3>
+                          <button onClick={() => { if(confirm("Deduct 50 pts?")) setPenaltyViewed(true); }} style={btnDanger}>Accept Penalty & View</button>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 20 }}><h4 style={{ color: '#4ade80' }}>System Cases Unlocked</h4><p style={{ color: '#94a3b8', fontFamily: 'monospace' }}>[System test case data loaded]</p></div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </section>
       </div>
-
-      {showCfModal && (
-        <div style={modalOverlay}>
-          <div style={modalContent}>
-            <h2 style={{ margin: '0 0 15px 0', color: '#38bdf8' }}>Codeforces Submission Automator</h2>
-            <p style={{ color: '#cbd5e1', lineHeight: '1.6', marginBottom: 20 }}>
-              To ensure fairness without scraping penalties, submit this via Codeforces. We will instantly sync the result.
-            </p>
-            <ol style={{ color: '#e2e8f0', lineHeight: '1.8', marginBottom: 25, paddingLeft: 20 }}>
-              <li><strong>Copy</strong> your code.</li>
-              <li><strong>Click the link</strong> to open Codeforces directly to the Submit page.</li>
-              <li><strong>Submit</strong> the code.</li>
-              <li>Click <strong>"Sync Verdict"</strong>.</li>
-            </ol>
-            
-            <div style={{ display: 'flex', gap: 10, marginBottom: 25 }}>
-              <button onClick={() => navigator.clipboard.writeText(code).then(() => toast.success('Code copied!'))} style={secondaryBtn}>📋 Copy Code</button>
-              <a href={cfSubmitUrl} target="_blank" rel="noreferrer" style={primaryBtn}>↗ Open CF Submit Page</a>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid #334155', paddingTop: 20 }}>
-              <button onClick={() => setShowCfModal(false)} style={cancelBtn}>Cancel</button>
-              <button onClick={handleSyncCodeforces} disabled={isSyncing} style={syncBtn}>{isSyncing ? 'Syncing via API...' : '🔄 Sync Verdict'}</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Global Team Chat Embedded in Workspace */}
       {contest?.viewerMember?.teamId && (
@@ -632,8 +600,6 @@ const modalOverlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right:
 const modalContent: CSSProperties = { background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b', width: '90%', maxWidth: 500, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' };
 const secondaryBtn: CSSProperties = { background: '#334155', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
 const primaryBtn: CSSProperties = { background: '#0284c7', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', textDecoration: 'none', textAlign: 'center' };
-const cancelBtn: CSSProperties = { background: 'transparent', color: '#94a3b8', border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 'bold' };
-const syncBtn: CSSProperties = { background: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
 const tcCard: CSSProperties = { background: '#020617', border: '1px solid #334155', borderRadius: 8, overflow: 'hidden', marginBottom: 15 };
 const tcHeader: CSSProperties = { background: '#1e293b', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', fontSize: 13 };
 const tcBox: CSSProperties = { width: '100%', height: 60, background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#fff', fontFamily: 'monospace', padding: 8, fontSize: 13, resize: 'none' };
