@@ -70,6 +70,39 @@ function evaluateVerdict(status: string, stdout: string | null | undefined, expe
   return Verdict.JUDGE_ERROR;
 }
 
+// 👉 RESTORED: Point calculation logic
+async function finalizeVerdict(submissionId: string, verdict: Verdict) {
+  const submission = await prisma.submission.findUnique({
+    where: { id: submissionId }, include: { participant: true, team: true }
+  });
+
+  if (!submission) return;
+
+  await prisma.submission.update({ where: { id: submissionId }, data: { verdict } });
+
+  if (verdict !== Verdict.ACCEPTED && verdict !== Verdict.COMPILATION_ERROR) {
+    if (submission.participantId) {
+      await prisma.contestStanding.updateMany({ where: { participantId: submission.participantId }, data: { penalty: { increment: 50 } } });
+    }
+    if (submission.teamId) {
+      await prisma.contestTeam.update({ where: { id: submission.teamId }, data: { penalty: { increment: 50 } } });
+    }
+  }
+
+  if (verdict === Verdict.ACCEPTED && submission.participant) {
+    const teamId = submission.teamId;
+    const problemId = submission.contestProblemId;
+
+    if (teamId) {
+      const teamAlreadySolved = await prisma.submission.findFirst({
+        where: { contestProblemId: problemId, teamId: teamId, verdict: Verdict.ACCEPTED, id: { not: submissionId } }
+      });
+      if (!teamAlreadySolved) await prisma.contestTeam.update({ where: { id: teamId }, data: { score: { increment: 100 } } });
+    }
+    await prisma.contestParticipant.update({ where: { id: submission.participantId! }, data: { score: { increment: 100 } } });
+  }
+}
+
 export async function judgeQueuedSubmission(submissionId: string) {
   const submission = await prisma.submission.findUnique({
     where: { id: submissionId },
@@ -78,7 +111,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
 
   if (!submission) throw new Error('Submission not found');
   
-  // MCQ Assessment Logic
   if (submission.language === 'mcq') {
     const mcq = await prisma.interviewQuestion.findUnique({ where: { id: submission.contestProblem!.interviewQuestionId! } });
     let isCorrect = false;
@@ -90,16 +122,21 @@ export async function judgeQueuedSubmission(submissionId: string) {
     }
     const verdict = isCorrect ? Verdict.ACCEPTED : Verdict.WRONG_ANSWER;
     const judged = await prisma.submission.update({ where: { id: submission.id }, data: { status: 'FINISHED', verdict, judgeMessage: isCorrect ? 'Correct Answer' : 'Incorrect Answer', judgedAt: new Date() } });
-    return { submission: judged };
+    
+    await finalizeVerdict(judged.id, verdict);
+    const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
+    return { submission: judged, standings };
   }
 
-  // FALLBACK LINK NO-ERROR CLAUSE
   if (!submission.problem) {
     const judged = await prisma.submission.update({
       where: { id: submission.id },
       data: { status: 'FINISHED', verdict: Verdict.ACCEPTED, judgeMessage: `Verification URL Fallback: Check original description link.` }
     });
-    return { submission: judged };
+    
+    await finalizeVerdict(judged.id, Verdict.ACCEPTED);
+    const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
+    return { submission: judged, standings };
   }
 
   const testcases = submission.problem.testcases;
@@ -107,7 +144,10 @@ export async function judgeQueuedSubmission(submissionId: string) {
     const res = await submitToWandbox({ sourceCode: submission.code, language: submission.language, stdin: "1\n" });
     const verdict = res.status === 'ACCEPTED' ? Verdict.ACCEPTED : Verdict.RUNTIME_ERROR;
     const judged = await prisma.submission.update({ where: { id: submission.id }, data: { status: 'FINISHED', verdict, judgeMessage: res.stderr || 'Executed successfully. No internal test cases to validate against.' } });
-    return { submission: judged };
+    
+    await finalizeVerdict(judged.id, verdict);
+    const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
+    return { submission: judged, standings };
   }
 
   await prisma.submission.update({ where: { id: submission.id }, data: { status: 'RUNNING', verdict: Verdict.PENDING } });
@@ -131,10 +171,12 @@ export async function judgeQueuedSubmission(submissionId: string) {
     data: { status: 'FINISHED', verdict: finalVerdict, judgeMessage: detailedMessage || 'All standard sample arrays match.', judgedAt: new Date() }
   });
 
-  return { submission: judged };
+  await finalizeVerdict(judged.id, finalVerdict);
+  const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
+  
+  return { submission: judged, standings };
 }
 
-// 👉 UPDATED: 4-Argument function allowing expectedOutput checking
 export async function executeSubmission(sourceCode: string, language: string, input: string, expectedOutput?: string) {
   const result = await submitToWandbox({ sourceCode, language, stdin: input });
   
@@ -148,11 +190,9 @@ export async function executeSubmission(sourceCode: string, language: string, in
     return { verdict: 'RUNTIME_ERROR', stderr: result.stderr };
   }
 
-  // Normalize outputs
   const actual = normalizeOutput(result.stdout);
   let verdict = 'EXECUTED';
   
-  // Custom Output Grading
   if (expectedOutput) {
     const expected = normalizeOutput(expectedOutput);
     verdict = actual === expected ? 'ACCEPTED' : 'WRONG_ANSWER';
