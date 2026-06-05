@@ -106,7 +106,126 @@ export function mountV2Routes(app: Express, io: Server) {
       }
     });
   });
+  // ==========================================
+  // AI AVATAR DATASET & RECOMMENDATIONS
+  // ==========================================
+  router.get('/ai-dataset', asyncRoute(async (req, res) => {
+    // This fetches the curated problems from your database
+    try {
+      const problems = await prisma.aiProblemDataset.findMany({
+        take: 20,
+        orderBy: { createdAt: 'desc' }
+      });
+      res.json({ success: true, problems });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch AI dataset', problems: [] });
+    }
+  }));
 
+  // ==========================================
+  // ADVANCED PROBLEM CREATION (MASHUP TOOL)
+  // ==========================================
+  // ==========================================
+  // ADVANCED PROBLEM CREATION (MASHUP TOOL)
+  // ==========================================
+  router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
+    const contest = await loadContestOrThrow(req.params.id);
+    const viewer = requireOwner(contest, req);
+    const { type, url, customData, mcqData } = req.body;
+
+    // Calculate the next index and label (e.g. 0 -> A, 1 -> B)
+    const existingCount = await prisma.contestProblem.count({ where: { contestId: contest.id } });
+    const nextIndex = existingCount;
+    const nextLabel = String.fromCharCode(65 + existingCount);
+
+    // 1. Handling Direct URL Scrapes
+    if (type === 'URL' && url) {
+      const scrapedData = await scrapeProblemFromUrl(url);
+      const problem = await prisma.problem.create({
+        data: {
+          title: scrapedData.title,
+          description: scrapedData.descriptionHtml,
+          platform: scrapedData.platform as any, // Casts gracefully if it matches enum
+          source: 'EXTERNAL', url: scrapedData.originalUrl, problemCode: `SCRAPED-${Date.now()}`,
+          visibility: 'PUBLIC',
+          testcases: {
+            create: scrapedData.testcases.map((tc, idx) => ({
+              input: tc.input, expectedOutput: tc.expectedOutput, order: idx, isPublic: true, type: 'SAMPLE'
+            }))
+          }
+        }
+      });
+      const updatedContest = await addContestProblemV2(req.params.id, problem, viewer.userId || contest.createdById);
+      return res.json(safeSanitize(updatedContest, req));
+    }
+
+    // 2. Handling Theory/MCQ
+    if (type === 'MCQ' && mcqData) {
+      // Find or create a default track so Prisma doesn't crash on 'trackId'
+      let defaultTrack = await prisma.interviewTrack.findFirst({ where: { slug: 'mashup-theory' } });
+      if (!defaultTrack) {
+        defaultTrack = await prisma.interviewTrack.create({
+          data: { slug: 'mashup-theory', title: 'Mashup Theory', type: 'DSA' }
+        });
+      }
+
+      const newMcq = await prisma.interviewQuestion.create({
+        data: {
+          title: mcqData.prompt.substring(0, 40) + '...',
+          prompt: mcqData.prompt,
+          trackId: defaultTrack.id,
+          options: mcqData.options,
+          correctIndices: mcqData.correctIndices,
+          isMultiple: mcqData.correctIndices.length > 1,
+          difficulty: 'Medium'
+        }
+      });
+
+      // Explicitly providing the required ContestProblem fields
+      await prisma.contestProblem.create({
+        data: { 
+          contestId: contest.id, 
+          interviewQuestionId: newMcq.id, 
+          points: 50,
+          titleSnapshot: newMcq.title,
+          index: nextIndex,
+          label: nextLabel,
+          platform: 'DIVINECODE'
+        }
+      });
+      return res.json({ success: true, message: 'MCQ added to contest' });
+    }
+
+    // 3. Handling Custom Code Problems
+    if (type === 'CUSTOM' && customData) {
+      const problem = await prisma.problem.create({
+        data: {
+          title: customData.title,
+          description: customData.description,
+          platform: 'DIVINECODE', source: 'INTERNAL', problemCode: `CUSTOM-${Date.now()}`, visibility: 'PUBLIC',
+          testcases: {
+            create: customData.testcases.map((tc: any, idx: number) => ({
+              input: tc.input, expectedOutput: tc.output, order: idx, isPublic: true, type: 'SAMPLE'
+            }))
+          }
+        }
+      });
+      const cp = await prisma.contestProblem.create({
+        data: {
+          contestId: contest.id,
+          problemId: problem.id,
+          points: 100,
+          titleSnapshot: problem.title,
+          index: nextIndex,
+          label: nextLabel,
+          platform: 'DIVINECODE'
+        }
+      });
+      return res.json({ success: true, problem: cp });
+    }
+
+    res.status(400).json({ error: 'Invalid problem payload' });
+  }));
   router.get('/health', asyncRoute(async (_req, res) => {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ ok: true, sourceOfTruth: 'postgres-prisma' });
