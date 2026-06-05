@@ -102,6 +102,16 @@ export function mountV2Routes(app: Express, io: Server) {
       } catch (err) {}
     });
   });
+  router.get('/proxy/problem', async (req, res) => {
+    const url = req.query.url as string;
+    if (!url) return res.status(400).json({ error: 'URL required' });
+    try {
+      const { data } = await axios.get(url, { headers: { 'User-Agent': 'DivineCode-Proxy/1.0' } });
+      res.send(data);
+    } catch (e) {
+      res.status(502).json({ error: 'Proxy fetch failed' });
+    }
+  });
 
   // ==========================================
   // MASSIVE AI DATASET & MASHUP ENDPOINTS
@@ -130,7 +140,20 @@ export function mountV2Routes(app: Express, io: Server) {
       res.json({ success: true, problems: [] });
     }
   }));
+  router.post('/contests', async (req, res) => {
+    try {
+      // The contestService now handles empty problem arrays gracefully
+      const contest = await createContestV2(req.body);
+      res.status(201).json(contest);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
 
+  router.get('/contests', async (req, res) => {
+    const contests = await listContestsV2();
+    res.json(contests);
+  });
   router.post('/contests/:id/ai-recommendations', asyncRoute(async (req, res) => {
     const recs = [
       { id: 'dp-1', title: 'Dynamic Programming: Kadanes Maximum Array', originalUrl: 'https://leetcode.com/problems/maximum-subarray/', tags: ['DP'], difficulty: 'Medium' },
