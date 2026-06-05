@@ -315,7 +315,8 @@ export async function registerForContestV2(contestId: string, input: MemberInput
     });
   });
 
-  await recomputeContestStandings(contestId);
+  void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+return loadContestForViewer(contestId);
   return loadContestForViewer(contestId);
 }
 
@@ -395,6 +396,7 @@ export async function createContestV2(input: CreateContestInput) {
   }, { maxWait: 15000, timeout: 60000 });
 
   await recomputeContestStandings(contest.id);
+  
   return loadContestForViewer(contest.id);
 }
 
@@ -528,8 +530,8 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
     });
   });
 
-  await recomputeContestStandings(contestId);
-  return loadContestForViewer(contestId);
+void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+return loadContestForViewer(contestId);
 }
 
 export async function removeContestProblemV2(contestId: string, contestProblemId: string, actorId?: string) {
@@ -541,8 +543,8 @@ export async function removeContestProblemV2(contestId: string, contestProblemId
     await tx.contestProblem.delete({ where: { id: contestProblemId } });
   });
 
-  await recomputeContestStandings(contestId);
-  return loadContestForViewer(contestId);
+void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+return loadContestForViewer(contestId);
 }
 
 export async function replaceContestProblemV2(contestId: string, contestProblemId: string, problem: ProblemInput, actorId?: string) {
@@ -565,8 +567,8 @@ export async function replaceContestProblemV2(contestId: string, contestProblemI
     await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_REPLACE', entityType: 'ContestProblem', entityId: contestProblemId, before: existing as any, after: updated as any } });
   });
 
-  await recomputeContestStandings(contestId);
-  return loadContestForViewer(contestId);
+  void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+return loadContestForViewer(contestId);
 }
 
 export async function overrideSubmissionPoints(contestId: string, submissionId: string, manualPoints: number | null, actorId: string) {
@@ -575,7 +577,8 @@ export async function overrideSubmissionPoints(contestId: string, submissionId: 
   if (contest.createdById !== actorId) throw new Error('Only the contest owner can override submission points.');
 
   await prisma.submission.update({ where: { id: submissionId }, data: { manualPoints } });
-  await recomputeContestStandings(contestId);
+  void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+return loadContestForViewer(contestId);
   return loadContestForViewer(contestId);
 }
 

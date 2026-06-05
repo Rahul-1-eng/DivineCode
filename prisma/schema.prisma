@@ -320,7 +320,8 @@ model ContestParticipant {
   user             User?                  @relation(fields: [userId], references: [id])
   standing         ContestStanding?
   submissions      Submission[]
-
+ @@index([contestId])
+  @@index([userId])
   @@unique([contestId, userId])
   @@index([contestId, teamName])
   @@index([externalHandleId])

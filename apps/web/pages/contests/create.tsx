@@ -129,7 +129,11 @@ async function createContest() {
     
     const contest = await res.json();
     if (!res.ok) throw new Error(contest.error || "Shell creation failed");
-
+    console.log("Your Code is:", contest.inviteCode);
+    toast.success(`Contest Created! Invite Code: ${contest.inviteCode}`, { 
+  duration: 10000,
+  style: { background: '#38bdf8', color: '#000', fontWeight: 'bold' } 
+});
     // 2. Append problems one-by-one (Resilient Loop)
     for (let i = 0; i < compiledProblems.length; i++) {
       setLoadingContext(`Adding problem ${i + 1}/${compiledProblems.length}...`);
