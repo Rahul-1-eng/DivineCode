@@ -15,30 +15,33 @@ import { setupContestSockets } from './modules/contests/contestSocketService';
 const app = express();
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '*';
 // Replace your existing app.use(cors(...)) with this:
+// apps/api/src/index.ts
+
+// 1. Get the allowed origins from the environment variable (comma-separated list)
+const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:3000')
+  .split(',')
+  .map(o => o.trim().replace(/\/$/, ""));
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow local development ports and your production domain
-    const allowedOrigins = [
-      'http://localhost:3000', 
-      'http://localhost:3001',
-      'https://divinecode-xbfb.onrender.com' 
-    ];
-    
-    // Allow requests with no origin (like mobile apps or curl)
+    // !origin allows server-to-server or mobile requests if needed
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true, // Required for Auth sessions
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-user-email', 'x-user-name', 'x-worker-secret']
 }));
 app.use(express.json({ limit: '1mb' }));
-
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: CLIENT_ORIGIN === '*' ? '*' : CLIENT_ORIGIN.split(',').map((origin) => origin.trim()), methods: ['GET', 'POST'] } });
+const io = new Server(server, { 
+  cors: { 
+    origin: allowedOrigins, 
+    methods: ['GET', 'POST'] 
+  } 
+});
 startQueueWorkers(io);
 setupDuelSockets(io);
 setupContestSockets(io);
