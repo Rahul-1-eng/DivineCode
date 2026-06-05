@@ -1,7 +1,7 @@
 import { CheckerType, SubmissionStatus, Verdict } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
-import { analyzeSubmissionLogic } from '../ai/aiService'; // NEW IMPORT
+import { analyzeSubmissionLogic } from '../ai/aiService';
 
 const WANDBOX_URL = 'https://wandbox.org/api/compile.json';
 
@@ -68,10 +68,11 @@ function evaluateVerdict(status: string, stdout: string | null | undefined, expe
   return Verdict.JUDGE_ERROR;
 }
 
-// 👉 UPDATED: Strict Group vs Solo Scoring Logic
+// 👉 FIX 1: Added problem: true to the include block
 async function finalizeVerdict(submissionId: string, verdict: Verdict) {
   const submission = await prisma.submission.findUnique({
-    where: { id: submissionId }, include: { participant: true, team: true }
+    where: { id: submissionId }, 
+    include: { participant: true, team: true, problem: true } 
   });
 
   if (!submission || !submission.participant) return;
@@ -98,9 +99,6 @@ async function finalizeVerdict(submissionId: string, verdict: Verdict) {
 
     if (teamId && problemId) {
       try {
-        // Attempt to create the Team solve record.
-        // Because of the @@unique([teamId, contestProblemId]) constraint in the schema,
-        // this will THROW AN ERROR if another group member already solved it.
         await prisma.teamProblemSolve.create({
           data: {
             teamId: teamId,
@@ -109,18 +107,15 @@ async function finalizeVerdict(submissionId: string, verdict: Verdict) {
           }
         });
         
-        // If it succeeds, this is the FIRST solve for the group! Add group points.
         await prisma.contestTeam.update({ 
           where: { id: teamId }, 
           data: { score: { increment: submission.problem?.rating || 100 } } 
         });
       } catch (err) {
         // Unique constraint failed -> Another group member already solved it.
-        // We do NOT increment the group score. We just proceed to increment individual standing.
       }
     }
 
-    // INDIVIDUAL standing always increases, regardless of whether it counted for the group or not
     await prisma.contestStanding.updateMany({ 
       where: { participantId: submission.participantId }, 
       data: { individualScore: { increment: submission.problem?.rating || 100 }, individualSolved: { increment: 1 } } 
@@ -136,23 +131,45 @@ export async function judgeQueuedSubmission(submissionId: string) {
 
   if (!submission) throw new Error('Submission not found');
   
-  // MCQ Handling...
+  // MCQ Handling
   if (submission.language === 'mcq') {
-     // ... (Keep your existing MCQ logic here)
-     return { submission, standings: null }; // Omitted for brevity
+    const mcq = await prisma.interviewQuestion.findUnique({ where: { id: submission.contestProblem!.interviewQuestionId! } });
+    let isCorrect = false;
+    try {
+      const submitted = JSON.parse(submission.code);
+      isCorrect = Array.isArray(submitted) && mcq?.correctIndices && submitted.length === mcq.correctIndices.length && submitted.every(v => mcq.correctIndices.includes(v));
+    } catch {
+      isCorrect = mcq?.correctIndex === parseInt(submission.code);
+    }
+    const verdict = isCorrect ? Verdict.ACCEPTED : Verdict.WRONG_ANSWER;
+    const judged = await prisma.submission.update({ where: { id: submission.id }, data: { status: 'FINISHED', verdict, judgeMessage: isCorrect ? 'Correct Answer' : 'Incorrect Answer', judgedAt: new Date() } });
+    
+    await finalizeVerdict(judged.id, verdict);
+    const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
+    return { submission: judged, standings };
   }
 
-  // 👉 NEW: External Redirect Fallback Check
+  // External Redirect Fallback Check
   if (submission.contestProblem?.requiresRedirect) {
     const judged = await prisma.submission.update({
       where: { id: submission.id },
       data: { status: 'FINISHED', verdict: Verdict.SKIPPED, judgeMessage: `External Platform URL. Redirecting...` }
     });
-    // Do not alter standings for skipped redirects
     return { submission: judged, standings: null };
   }
 
   const testcases = submission.problem?.testcases || [];
+  
+  if (testcases.length === 0) {
+    const res = await submitToWandbox({ sourceCode: submission.code, language: submission.language, stdin: "1\n" });
+    const verdict = res.status === 'ACCEPTED' ? Verdict.ACCEPTED : Verdict.RUNTIME_ERROR;
+    const judged = await prisma.submission.update({ where: { id: submission.id }, data: { status: 'FINISHED', verdict, judgeMessage: res.stderr || 'Executed successfully. No internal test cases to validate against.' } });
+    
+    await finalizeVerdict(judged.id, verdict);
+    const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
+    return { submission: judged, standings };
+  }
+
   await prisma.submission.update({ where: { id: submission.id }, data: { status: 'RUNNING', verdict: Verdict.PENDING } });
   
   let finalVerdict: Verdict = Verdict.ACCEPTED;
@@ -177,12 +194,36 @@ export async function judgeQueuedSubmission(submissionId: string) {
   await finalizeVerdict(judged.id, finalVerdict);
   const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
   
-  // 👉 NEW: Asynchronous AI Check for Accepted Solutions
+  // Asynchronous AI Check for Accepted Solutions
   if (finalVerdict === Verdict.ACCEPTED && submission.problem) {
-    // Fire and forget - do not await this, let it run in the background so the user isn't waiting
     analyzeSubmissionLogic(judged.id, submission.problem.description, submission.code)
       .catch(err => console.error("AI Analysis failed in background:", err));
   }
 
   return { submission: judged, standings };
+}
+
+// 👉 FIX 2: Restored the executeSubmission function used by the scratchpad UI
+export async function executeSubmission(sourceCode: string, language: string, input: string, expectedOutput?: string) {
+  const result = await submitToWandbox({ sourceCode, language, stdin: input });
+  
+  if (result.status === 'COMPILATION_ERROR') {
+    return { verdict: 'COMPILATION_ERROR', compileError: result.compile_output };
+  }
+  if (result.status === 'TIME_LIMIT_EXCEEDED') {
+    return { verdict: 'TIME_LIMIT_EXCEEDED', stderr: result.stderr };
+  }
+  if (result.status === 'RUNTIME_ERROR') {
+    return { verdict: 'RUNTIME_ERROR', stderr: result.stderr };
+  }
+
+  const actual = normalizeOutput(result.stdout);
+  let verdict = 'EXECUTED';
+  
+  if (expectedOutput) {
+    const expected = normalizeOutput(expectedOutput);
+    verdict = actual === expected ? 'ACCEPTED' : 'WRONG_ANSWER';
+  }
+
+  return { verdict, stdout: result.stdout, stderr: result.stderr };
 }
