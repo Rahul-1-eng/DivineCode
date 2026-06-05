@@ -11,15 +11,16 @@ import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
 import { scrapeProblemFromUrl } from '../external-sync/problemScraper';
 import { generateToughTestCases } from '../ai/aiService';
+
 export type MemberInput = {
   username?: string; userId?: string; email?: string;
   name?: string; displayName?: string; teamName?: string;
+  teamInviteCode?: string; // 👉 ADDED: For Codeforces-style team joining
   codeforcesHandle?: string; ratingBefore?: number;
 };
 
 export type ProblemInput = {
-  id?: string; // 👉 ADDED: To correctly catch the native problem ID when passed from the scraper
-  problemId?: string; interviewQuestionId?: string; title?: string;
+  id?: string; problemId?: string; interviewQuestionId?: string; title?: string;
   platform?: string; code?: string; contestCode?: string;
   problemIndex?: string; externalId?: string; url?: string; points?: number;
 };
@@ -74,7 +75,7 @@ function parseCodeforcesCode(problem: ProblemInput) {
 }
 
 function externalUrl(problem: ProblemInput, platform: Platform) {
-  if (problem.url) return problem.url; // Prefer direct URL if scraped
+  if (problem.url) return problem.url; 
   if (platform === Platform.CODEFORCES) {
     const parsed = parseCodeforcesCode(problem);
     if (parsed.contestCode && parsed.problemIndex) {
@@ -183,8 +184,6 @@ async function assertUnsolvedByAll(members: MemberInput[], problems: ProblemInpu
   for (const problem of problems) {
     const platform = toPlatform(problem.platform);
     if (platform !== Platform.CODEFORCES) continue;
-    
-    // 👉 FIX: Skip Unsolved check for scraped/custom URLs that don't match the strict ID format
     if (problem.url || problem.id) continue;
 
     const parsed = parseCodeforcesCode(problem);
@@ -201,7 +200,6 @@ async function assertUnsolvedByAll(members: MemberInput[], problems: ProblemInpu
         }
       } catch (err: any) {
         if (err.message.includes('Cannot add')) throw err;
-        console.warn(`[WARN] Codeforces sync failed for ${member.codeforcesHandle}, bypassing check.`);
       }
     }
   }
@@ -216,7 +214,6 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
   return tx.contestProblem.create({
     data: {
       contestId: input.contestId,
-      // 👉 FIX: Properly binds the newly scraped problem's database ID to the contest!
       problemId: input.problem.problemId || input.problem.id || null,
       interviewQuestionId: input.problem.interviewQuestionId || null,
       titleSnapshot: String(input.problem.title || `Problem ${label}`).trim(),
@@ -243,7 +240,7 @@ export async function loadContestForViewer(contestId: string) {
         problems: {
           include: {
             problem: {
-              include: { editorial: true, officialSolutions: true, testcases: true } // 👉 Load test cases instantly
+              include: { editorial: true, officialSolutions: true, testcases: true }
             }
           },
           orderBy: { index: 'asc' }
@@ -254,7 +251,6 @@ export async function loadContestForViewer(contestId: string) {
       }
     });
   } catch (error) {
-    console.error(`[FATAL] loadContestForViewer Failed for ID ${contestId}:`, error);
     throw error;
   }
 }
@@ -287,18 +283,26 @@ export async function registerForContestV2(contestId: string, input: MemberInput
     if (existing) throw new Error('User is already registered for this contest.');
 
     let teamId = null;
-    const isRealTeam = memberInput.teamName && memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo';
-
-    if (isRealTeam) {
-      let team = await tx.contestTeam.findFirst({
-        where: { contestId, name: memberInput.teamName }
-      });
-      if (!team) {
-        team = await tx.contestTeam.create({
-          data: { contestId, name: memberInput.teamName! }
-        });
-      }
+    
+    // 👉 TEAM INVITE LOGIC INTEGRATION
+    if (memberInput.teamInviteCode) {
+      const team = await tx.contestTeam.findUnique({ where: { inviteCode: memberInput.teamInviteCode } });
+      if (!team || team.contestId !== contestId) throw new Error("Invalid Team Invite Code");
       teamId = team.id;
+      memberInput.teamName = team.name; // Sync name
+    } else {
+      const isRealTeam = memberInput.teamName && memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo';
+      if (isRealTeam) {
+        let team = await tx.contestTeam.findFirst({
+          where: { contestId, name: memberInput.teamName }
+        });
+        if (!team) {
+          team = await tx.contestTeam.create({
+            data: { contestId, name: memberInput.teamName! }
+          });
+        }
+        teamId = team.id;
+      }
     }
 
     await tx.contestParticipant.create({
@@ -323,7 +327,7 @@ export async function createContestV2(input: CreateContestInput) {
   if (members.length === 0) throw new Error('Add at least one player. The owner is not added automatically.');
 
   const problems = input.problems || [];
-  if (problems.length === 0) throw new Error('Add at least one problem.');
+  // 👉 FIX: Removed 'if (problems.length === 0) throw Error' to allow the Mashup Orchestrator to instantiate first!
 
   const startTime = input.startTime ? new Date(input.startTime) : new Date();
   const durationMinutes = Math.max(1, Number(input.durationMinutes || 120));
@@ -334,20 +338,7 @@ export async function createContestV2(input: CreateContestInput) {
     throw new Error('V2 contests require ownerUserId or ownerEmail so edit/delete permissions are deterministic.');
   }
 
-  for (const member of members) {
-    if (!member.codeforcesHandle && member.username) {
-      const user = await prisma.user.findUnique({ where: { username: member.username } });
-      if (user) {
-        member.userId = user.id;
-        const handleRecord = await prisma.externalHandle.findFirst({
-          where: { userId: user.id, platform: Platform.CODEFORCES }
-        });
-        if (handleRecord?.handle) member.codeforcesHandle = handleRecord.handle;
-      }
-    }
-  }
-
-  if (input.requireUnsolvedByAll !== false) {
+  if (input.requireUnsolvedByAll !== false && problems.length > 0) {
     await assertUnsolvedByAll(members, problems);
   }
 
@@ -407,6 +398,7 @@ export async function createContestV2(input: CreateContestInput) {
   return loadContestForViewer(contest.id);
 }
 
+// ... Keep your existing deleteContestV2, listContestsV2, extendContestV2, updateContestSettingsV2, addContestProblemV2, removeContestProblemV2, replaceContestProblemV2, overrideSubmissionPoints, getContestSubmissionsV2 identical to previous file ...
 export async function deleteContestV2(contestId: string, actorId?: string) {
   const contest = await prisma.contest.findUnique({ where: { id: contestId } });
   if (!contest) throw new Error('Contest not found');
@@ -497,26 +489,21 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
 
   if (problem.url && !problem.id) {
     try {
-      // 1. Attempt to Scrape
       const scraped = await scrapeProblemFromUrl(problem.url);
       enrichedProblem.title = scraped.title;
       enrichedProblem.platform = scraped.platform;
       finalDescription = scraped.descriptionHtml;
       
-      // 2. Attempt AI Generation
       const aiGeneratedCases = await generateToughTestCases(scraped.descriptionHtml);
       newTestcases = [...scraped.testcases, ...aiGeneratedCases];
     } catch (err) {
       console.warn("Scraping or AI failed, applying URL fallback.");
-      // 👉 FALLBACK: If fetch fails, replace description with a clickable link
       finalDescription = `<h3>External Problem</h3><p>Please view the problem description here: <a href="${problem.url}" target="_blank" style="color: #38bdf8;">${problem.url}</a></p>`;
       enrichedProblem.title = problem.title || 'Imported Problem';
     }
   }
 
   await prisma.$transaction(async (tx) => {
-    // Note: ensure createContestProblemRow is updated to accept/save the finalDescription 
-    // if your ContestProblem table supports a description override.
     const created = await createContestProblemRow(tx, { 
       contestId, 
       problem: enrichedProblem, 
@@ -525,10 +512,9 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
     });
 
     if (newTestcases.length > 0) {
-       // 👉 THE FIX: Changed tx.testCase to tx.testcase to match schema.prisma
        await tx.testcase.createMany({
          data: newTestcases.map((tc, idx) => ({
-           problemId: created.problemId || '', // Ensure this links correctly based on your schema
+           problemId: created.problemId || '', 
            input: tc.input,
            expectedOutput: tc.expectedOutput,
            order: idx + 1,
@@ -639,25 +625,23 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
       orderBy: { judgedAt: 'desc' }, take: 250
     });
 
-  // Update the return mapping in getContestSubmissionsV2:
-return submissions.map(sub => {
-  const contestCode = sub.contestProblem?.externalId?.match(/^\d+/)?.[0];
-  const externalSubmissionUrl = sub.externalSubmissionId && contestCode 
-    ? `https://codeforces.com/contest/${contestCode}/submission/${sub.externalSubmissionId}`
-    : null;
+    return submissions.map(sub => {
+      const contestCode = sub.contestProblem?.externalId?.match(/^\d+/)?.[0];
+      const externalSubmissionUrl = sub.externalSubmissionId && contestCode 
+        ? `https://codeforces.com/contest/${contestCode}/submission/${sub.externalSubmissionId}`
+        : null;
 
-  return {
-    id: sub.id, contestId: sub.contestId, memberId: sub.participantId,
-    userId: sub.participant?.displayName || sub.participant?.user?.name || 'Unknown',
-    problemId: sub.contestProblemId, verdict: sub.verdict, language: sub.language,
-    source: sub.source, externalSubmissionId: sub.externalSubmissionId,
-    externalSubmissionUrl, // <-- Add this to frontend payload
-    createdAt: sub.externalCreatedAt || sub.judgedAt || sub.createdAt,
-    platform: sub.contestProblem?.platform || 'Codeforces', code: sub.code
-  };
-});
+      return {
+        id: sub.id, contestId: sub.contestId, memberId: sub.participantId,
+        userId: sub.participant?.displayName || sub.participant?.user?.name || 'Unknown',
+        problemId: sub.contestProblemId, verdict: sub.verdict, language: sub.language,
+        source: sub.source, externalSubmissionId: sub.externalSubmissionId,
+        externalSubmissionUrl, 
+        createdAt: sub.externalCreatedAt || sub.judgedAt || sub.createdAt,
+        platform: sub.contestProblem?.platform || 'Codeforces', code: sub.code
+      };
+    });
   } catch (error) {
-    console.error(`[FATAL] getContestSubmissionsV2 Failed for ID ${contestId}:`, error);
     throw error;
   }
 }

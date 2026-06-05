@@ -1,5 +1,6 @@
 import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
+import toast, { Toaster } from 'react-hot-toast';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -11,18 +12,15 @@ export default function InterviewPage() {
   const [questions, setQuestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Filters & State
   const [selectedTrack, setSelectedTrack] = useState('All');
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [attempt, setAttempt] = useState(1);
   const [seed, setSeed] = useState(Date.now());
   const [showSubmitModal, setShowSubmitModal] = useState(false);
 
-  // New Question Form State
   const [newQ, setNewQ] = useState({ trackId: '', title: '', prompt: '', opt0: '', opt1: '', opt2: '', opt3: '', correctIndex: 0, explanation: '' });
 
   useEffect(() => {
-    // 👉 FIX: Added Security Headers to allow the backend to return interview data
     const headers = { 'x-user-email': session?.user?.email || '' };
 
     Promise.all([
@@ -36,7 +34,7 @@ export default function InterviewPage() {
       }
       setLoading(false);
     }).catch(console.error);
-  }, [session]); // 👉 FIX: Re-fetch if session updates
+  }, [session]);
 
   const filtered = useMemo(() => {
     let list = selectedTrack === 'All' ? questions : questions.filter(q => q.trackId === selectedTrack);
@@ -53,7 +51,7 @@ export default function InterviewPage() {
 
   async function submitContribution(e: React.FormEvent) {
     e.preventDefault();
-    if (!session?.user?.email) return alert("Must be logged in to contribute.");
+    if (!session?.user?.email) return toast.error("Must be logged in to contribute.");
     
     const payload = {
       trackId: newQ.trackId,
@@ -71,15 +69,18 @@ export default function InterviewPage() {
     });
 
     if (res.ok) {
-      alert("Thanks! Your question is pending owner approval.");
+      toast.success("Thanks! Your question is pending owner approval.");
       setShowSubmitModal(false);
+      setNewQ(prev => ({...prev, title: '', prompt: '', opt0: '', opt1: '', opt2: '', opt3: '', explanation: ''}));
     } else {
-      alert("Failed to submit question.");
+      toast.error("Failed to submit question.");
     }
   }
 
   return (
     <main style={page}>
+      <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
+      
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; }
@@ -91,7 +92,6 @@ export default function InterviewPage() {
       `}</style>
 
       <section style={{ maxWidth: 1160, margin: '0 auto' }}>
-        
         <nav style={nav}>
           <a href="/" style={brand}>DivineCode Interview Arena</a>
           <div style={{ display: 'flex', gap: 12 }}>
@@ -146,7 +146,7 @@ export default function InterviewPage() {
                 <section key={`${attempt}-${q.id}`} style={card}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
                     <span style={tag}>{q.track?.title || 'General'}</span>
-                    <span style={rating}>{q.difficultyLabel || 'Medium'}</span>
+                    <span style={rating}>{q.difficultyLabel || q.difficulty || 'Medium'}</span>
                   </div>
                   
                   <h2 style={{ fontSize: 20, margin: '0 0 16px 0', lineHeight: 1.5 }}>{q.prompt}</h2>
@@ -181,7 +181,6 @@ export default function InterviewPage() {
         </div>
       </section>
 
-      {/* Contribute Question Modal */}
       {showSubmitModal && (
         <div style={modalOverlay}>
           <div style={modalContent}>
@@ -224,7 +223,6 @@ export default function InterviewPage() {
   );
 }
 
-// Styles
 const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(34,211,238,.2), transparent 34rem), #070a16', boxSizing: 'border-box' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 24 };
 const brand: CSSProperties = { color: '#eef2ff', textDecoration: 'none', fontWeight: 950, fontSize: 'clamp(18px, 4vw, 24px)' };
