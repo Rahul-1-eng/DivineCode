@@ -38,24 +38,28 @@ export default function GlobalNavigationAndMashupCreator() {
   const [isCreating, setIsCreating] = useState(false);
   const [loadingContext, setLoadingContext] = useState('');
 
- useEffect(() => {
-  fetch(`${API_V2}/ai-dataset`)
-    .then(r => r.json())
-    .then(d => {
-       // If empty, use hardcoded backup so it doesn't look broken
-       if (d.problems && d.problems.length > 0) {
-         setAiBank(d.problems);
-       } else {
-         setAiBank([
-           { id: 'cf-1', title: 'Watermelon', originalUrl: 'https://codeforces.com/problemset/problem/4/A', difficulty: 'Easy', platform: 'Codeforces' },
-           { id: 'lc-1', title: 'Two Sum', originalUrl: 'https://leetcode.com/problems/two-sum/', difficulty: 'Easy', platform: 'LeetCode' }
-         ]);
-       }
-    })
-    .catch(() => {});
-}, []);
+  // Added: Helper to remove problem from queue
+  const removeProblem = (index: number) => {
+    setCompiledProblems((prev) => prev.filter((_, i) => i !== index));
+    toast.success("Problem removed from queue.");
+  };
 
-  // Convert uploaded image to Base64 for the AI to parse
+  useEffect(() => {
+    fetch(`${API_V2}/ai-dataset`)
+      .then(r => r.json())
+      .then(d => {
+         if (d.problems && d.problems.length > 0) {
+           setAiBank(d.problems);
+         } else {
+           setAiBank([
+             { id: 'cf-1', title: 'Watermelon', originalUrl: 'https://codeforces.com/problemset/problem/4/A', difficulty: 'Easy', platform: 'Codeforces' },
+             { id: 'lc-1', title: 'Two Sum', originalUrl: 'https://leetcode.com/problems/two-sum/', difficulty: 'Easy', platform: 'LeetCode' }
+           ]);
+         }
+      })
+      .catch(() => {});
+  }, []);
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -75,13 +79,12 @@ export default function GlobalNavigationAndMashupCreator() {
       
     } else if (activeTab === 'IMAGE') {
       if (!imageBase64) return toast.error('Upload an image containing the problem');
-      payload.imageUrl = imageBase64; // Will be processed by AI on backend
+      payload.imageUrl = imageBase64;
       payload.requiresRedirect = false; 
       payload.displayTitle = "OCR Image Problem";
       
     } else if (activeTab === 'CUSTOM') {
       if (!customTitle) return toast.error('Enter custom title');
-      // Filter out empty cases
       const validCases = customCases.filter(c => c.input.trim() !== '' && c.expectedOutput.trim() !== '');
       payload.customData = { title: customTitle, description: customDesc, testcases: validCases };
       payload.displayTitle = customTitle;
@@ -93,75 +96,69 @@ export default function GlobalNavigationAndMashupCreator() {
     }
     
     setCompiledProblems([...compiledProblems, payload]);
-    
-    // Reset forms
     setUrlProblem(''); setImageBase64(''); setCustomTitle(''); setCustomDesc(''); 
     setCustomCases([{ input: '', expectedOutput: '', isHidden: false }]);
     setMcqPrompt(''); setMcqCorrect([]); setMcqOptions(['', '']);
     toast.success("Problem appended to contest batch queue!");
   }
 
- // Replace your existing createContest function inside create.tsx
-async function createContest() {
-  if (compiledProblems.length === 0) return toast.error("Batch queue empty.");
-  setIsCreating(true);
-  setLoadingContext('Creating contest shell...');
+  async function createContest() {
+    if (compiledProblems.length === 0) return toast.error("Batch queue empty.");
+    setIsCreating(true);
+    setLoadingContext('Creating contest shell...');
 
-  try {
-    // 1. Create the Shell
-    const res = await fetch(`${API_V2}/contests`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
-      body: JSON.stringify({ 
-        title, 
-        durationMinutes: duration, 
-        type: contestMode, 
-        startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined,
-        ownerEmail: session?.user?.email,
-        ownerName: session?.user?.name || 'Admin',
-        members: [{ 
-            email: session?.user?.email, 
-            displayName: session?.user?.name || 'Admin', 
-            teamName: 'Admin Team' 
-        }]
-      })
-    });
-    
-    const contest = await res.json();
-    if (!res.ok) throw new Error(contest.error || "Shell creation failed");
-    console.log("Your Code is:", contest.inviteCode);
-    toast.success(`Contest Created! Invite Code: ${contest.inviteCode}`, { 
-  duration: 10000,
-  style: { background: '#38bdf8', color: '#000', fontWeight: 'bold' } 
-});
-    // 2. Append problems one-by-one (Resilient Loop)
-    for (let i = 0; i < compiledProblems.length; i++) {
-      setLoadingContext(`Adding problem ${i + 1}/${compiledProblems.length}...`);
-      try {
-        await fetch(`${API_V2}/contests/${contest.id}/problems/mashup`, {
-          method: 'POST', 
-          headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' }, 
-          body: JSON.stringify(compiledProblems[i])
-        });
-      } catch (err) {
-        console.error(`Failed to add problem ${i}:`, err);
+    try {
+      const res = await fetch(`${API_V2}/contests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
+        body: JSON.stringify({ 
+          title, 
+          durationMinutes: duration, 
+          type: contestMode, 
+          startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined,
+          ownerEmail: session?.user?.email,
+          ownerName: session?.user?.name || 'Admin',
+          members: [{ 
+              email: session?.user?.email, 
+              displayName: session?.user?.name || 'Admin', 
+              teamName: 'Admin Team' 
+          }]
+        })
+      });
+      
+      const contest = await res.json();
+      if (!res.ok) throw new Error(contest.error || "Shell creation failed");
+      
+      toast.success(`Contest Created! Invite Code: ${contest.inviteCode}`, { 
+        duration: 10000,
+        style: { background: '#38bdf8', color: '#000', fontWeight: 'bold' } 
+      });
+
+      for (let i = 0; i < compiledProblems.length; i++) {
+        setLoadingContext(`Adding problem ${i + 1}/${compiledProblems.length}...`);
+        try {
+          await fetch(`${API_V2}/contests/${contest.id}/problems/mashup`, {
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' }, 
+            body: JSON.stringify(compiledProblems[i])
+          });
+        } catch (err) {
+          console.error(`Failed to add problem ${i}:`, err);
+        }
       }
-    }
-    
-    toast.success("Mashup fully synchronized!");
-    router.push(`/contests/${contest.id}`);
-  } catch (err: any) {
-    console.error(err);
-    toast.error("Could not create contest shell.");
-    setIsCreating(false);
-  } 
-}
+      
+      toast.success("Mashup fully synchronized!");
+      router.push(`/contests/${contest.id}`);
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Could not create contest shell.");
+      setIsCreating(false);
+    } 
+  }
 
   return (
     <div style={page}>
       <Toaster />
-      
-      {/* CSS for Context-Aware Loading Animation */}
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes pulseGlow { 0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.4); } 70% { box-shadow: 0 0 0 20px rgba(56, 189, 248, 0); } 100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); } }
         @keyframes spin { 100% { transform: rotate(360deg); } }
@@ -177,7 +174,6 @@ async function createContest() {
         </div>
       )}
 
-      {/* TOP HUB NAVIGATION */}
       <nav style={{ display: 'flex', gap: 15, background: '#1e293b', padding: '15px 30px', borderBottom: '1px solid #334155' }}>
         <button onClick={() => setNavTab('mashup')} style={navTab === 'mashup' ? actNav : pasNav}>Mashup Control Room</button>
         <button onClick={() => { setNavTab('duel'); router.push('/duel'); }} style={navTab === 'duel' ? actNav : pasNav}>1v1 Realtime Duel Matrix</button>
@@ -187,11 +183,9 @@ async function createContest() {
       {navTab === 'mashup' && (
         <div style={{ display: 'flex', gap: '30px', padding: 40, maxWidth: 1300, margin: '0 auto', flexWrap: 'wrap' }}>
           
-          {/* LEFT CREATOR PANEL */}
           <div style={{ flex: '1 1 600px' }}>
             <h1 style={{ color: '#38bdf8', marginTop: 0 }}>Create Live Practice Contest</h1>
             
-            {/* 👉 SOLO VS GROUP TOGGLE */}
             <div style={{ display: 'flex', gap: 10, marginBottom: 25, background: '#0f172a', padding: 10, borderRadius: 8, border: '1px solid #334155' }}>
               <button onClick={() => setContestMode('SOLO')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'SOLO' ? '#38bdf8' : 'transparent', color: contestMode === 'SOLO' ? '#000' : '#94a3b8' }}>👤 Solo Standings</button>
               <button onClick={() => setContestMode('GROUP')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'GROUP' ? '#38bdf8' : 'transparent', color: contestMode === 'GROUP' ? '#000' : '#94a3b8' }}>👥 Group & Team Mode</button>
@@ -207,7 +201,6 @@ async function createContest() {
               <input type="datetime-local" value={startTimeStr} onChange={e => setStartTimeStr(e.target.value)} style={{ ...inputBox, colorScheme: 'dark' }} />
             </div>
 
-            {/* PROBLEM INPUT TABS */}
             <div style={{ display: 'flex', gap: 10, marginBottom: 20, borderBottom: '1px solid #1e293b', paddingBottom: 10 }}>
               {['URL', 'IMAGE', 'CUSTOM', 'MCQ'].map(t => (
                 <button key={t} onClick={() => setActiveTab(t as any)} style={{ padding: '8px 16px', background: activeTab === t ? '#38bdf8' : '#1e293b', color: activeTab === t ? '#000' : '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}>{t}</button>
@@ -216,12 +209,11 @@ async function createContest() {
 
             {activeTab === 'URL' && <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste External Problem Link..." />}
             
-            {/* 👉 IMAGE OCR UPLOAD */}
             {activeTab === 'IMAGE' && (
                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: '#0f172a', padding: 20, borderRadius: 8, border: '1px dashed #38bdf8' }}>
-                 <p style={{ margin: 0, color: '#94a3b8', fontSize: 14 }}>Upload a screenshot of a problem. AI will extract the description and generate test cases.</p>
-                 <input type="file" accept="image/*" onChange={handleImageUpload} style={{ color: '#fff', marginTop: 10 }} />
-                 {imageBase64 && <img src={imageBase64} alt="Preview" style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain', marginTop: 10, borderRadius: 8 }} />}
+                  <p style={{ margin: 0, color: '#94a3b8', fontSize: 14 }}>Upload a screenshot of a problem. AI will extract the description and generate test cases.</p>
+                  <input type="file" accept="image/*" onChange={handleImageUpload} style={{ color: '#fff', marginTop: 10 }} />
+                  {imageBase64 && <img src={imageBase64} alt="Preview" style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain', marginTop: 10, borderRadius: 8 }} />}
                </div>
             )}
 
@@ -260,12 +252,23 @@ async function createContest() {
             <button onClick={createContest} style={{ background: '#10b981', color: '#fff', padding: 15, borderRadius: 8, width: '100%', marginTop: 15, fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>Deploy & Synchronize Mashup Suite</button>
           </div>
 
-          {/* RIGHT SIDEBAR: Queued view & massive AI avatar catalogs */}
           <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div style={{ background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid #1e293b' }}>
               <h3 style={{ marginTop: 0, color: '#a5b4fc' }}>Queued Suite Batch ({compiledProblems.length})</h3>
               {compiledProblems.length === 0 && <p style={{color: '#64748b'}}>No problems queued.</p>}
-              {compiledProblems.map((p, i) => <div key={i} style={{ padding: '10px', background: '#1e293b', borderRadius: 4, margin: '8px 0', border: '1px solid #334155' }}>{p.displayTitle}</div>)}
+              
+              {/* UPDATED: Mapping with delete logic */}
+              {compiledProblems.map((p, i) => (
+                <div key={i} style={{ padding: '10px', background: '#1e293b', borderRadius: 4, margin: '8px 0', border: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '14px' }}>{p.displayTitle}</span>
+                  <button 
+                    onClick={() => removeProblem(i)}
+                    style={{ background: 'transparent', border: '1px solid #f87171', color: '#f87171', padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
             </div>
 
             <div style={{ background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid #1e293b', flex: 1 }}>

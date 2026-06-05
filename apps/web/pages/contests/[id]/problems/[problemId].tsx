@@ -116,8 +116,7 @@ export default function ContestProblemWorkspace() {
   const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
   
-  const isMCQ = problem?.platform === 'DIVINECODE' && !!problem?.interviewQuestionId;
-
+const isMCQ = !!problem?.interviewQuestionId;
   useEffect(() => {
     if (isMCQ && problem?.interviewQuestionId) {
       fetch(`${API_V2_BASE_URL}/interview/questions`, {
