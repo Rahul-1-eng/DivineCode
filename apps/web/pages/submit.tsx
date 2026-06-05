@@ -209,16 +209,13 @@ export default function SubmitPage() {
       </nav>
 
       <section style={layout}>
-        <aside style={asideStyle}>
+       <aside style={asideStyle}>
           <p style={eyebrow}>{isCodeforces ? 'External verified submission' : isMCQ ? 'Theoretical MCQ' : 'DivineCode local judge'}</p>
           <h1 style={{ margin: '10px 0' }}>{canSeeProblemMeta ? problem?.title || 'Loading problem...' : `Problem ${problemLabel}`}</h1>
           <p style={{ color: '#94a3b8', margin: '0 0 20px 0' }}>{problem?.platform}</p>
 
-          {isCodeforces && <div style={warning}><strong>Codeforces problem</strong><p style={{ margin: '6px 0 0 0', fontSize: 14 }}>Submit your solution on Codeforces. DivineCode updates standings only after Codeforces sync.</p></div>}
-          {!isMCQ && problem?.url && <a href={problem.url} target="_blank" rel="noreferrer" style={primaryLink}>{isCodeforces ? 'Open and Submit on Codeforces' : 'Open original problem'}</a>}
-          
           {!isMCQ && (
-            <div style={{ marginTop: 22 }}>
+            <div style={{ marginTop: 10, marginBottom: 20 }}>
               <label style={{ fontWeight: 'bold' }}>Language</label>
               <select value={language} onChange={(e) => setLanguage(e.target.value)} style={input}>
                 <option value="cpp">C++</option>
@@ -229,10 +226,18 @@ export default function SubmitPage() {
               </select>
             </div>
           )}
-          
-          <button onClick={submitCode} disabled={submitting || !contest?.viewerMember} style={submitBtn}>
-            {isCodeforces ? 'Store as Pending Verification' : isMCQ ? 'Submit Answer' : 'Final Submit to Judge'}
-          </button>
+
+          {/* 👉 DUAL OPTIONS ADDED HERE */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {!isMCQ && problem?.url && (
+               <a href={problem.url} target="_blank" rel="noreferrer" style={{...submitBtn, textDecoration: 'none', textAlign: 'center', background: '#3b82f6', color: 'white'}}>
+                 1. Submit on Original Platform ↗
+               </a>
+            )}
+            <button onClick={submitCode} disabled={submitting || !contest?.viewerMember} style={{...submitBtn, marginTop: 0}}>
+              {isMCQ ? 'Submit Answer' : '2. Test & Submit Local Judge 🚀'}
+            </button>
+          </div>
           
           {!contest?.viewerMember && !contest?.canManage && <p style={{ color: '#fca5a5', marginTop: 12, textAlign: 'center' }}>Only registered players can submit.</p>}
           

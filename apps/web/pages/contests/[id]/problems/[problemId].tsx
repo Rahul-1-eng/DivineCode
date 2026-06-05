@@ -453,24 +453,42 @@ const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cp
             <div style={{ flex: 1, overflowY: 'auto' }}>
               
               {/* CPH TAB */}
+             {/* CPH TAB */}
               {activeTab === 'cph' && (
                 <div style={{ padding: 15, background: '#0f172a', minHeight: '100%' }}>
-                  {testcases.map((tc, idx) => (
-                    <div key={tc.id} style={tcCard}>
-                      <div style={tcHeader}>
-                        <strong>Test Case {idx + 1}</strong>
-                        <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' || tc.status === 'error' ? '#f87171' : '#94a3b8' }}>{tc.status.toUpperCase()}</span>
-                      </div>
-                      <div style={{ display: 'flex', gap: 10, padding: 10 }}>
-                        <div style={{ flex: 1 }}><div style={tcLabel}>Input</div><textarea value={tc.input} onChange={e => { const n = [...testcases]; n[idx].input = e.target.value; setTestcases(n); }} style={tcBox} /></div>
-                        <div style={{ flex: 1 }}><div style={tcLabel}>Expected Output</div><textarea value={tc.expectedOutput} onChange={e => { const n = [...testcases]; n[idx].expectedOutput = e.target.value; setTestcases(n); }} style={tcBox} /></div>
-                      </div>
-                      <div style={{ padding: '0 10px 10px' }}>
-                        <div style={tcLabel}>Actual Output</div>
-                        <pre style={{...tcBox, height: 60, margin: 0, overflow: 'auto', background: tc.status === 'failed' ? 'rgba(248,113,113,0.1)' : '#020617'}}>{tc.output}</pre>
-                      </div>
+                  
+                  {/* Graceful Fallback if testcases don't exist */}
+                  {testcases.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '40px 20px', background: '#020617', border: '1px dashed #334155', borderRadius: 8, marginBottom: 15 }}>
+                      <h3 style={{ color: '#94a3b8', margin: '0 0 10px' }}>No Pre-Loaded Test Cases</h3>
+                      <p style={{ color: '#64748b', fontSize: 13, marginBottom: 20 }}>
+                        Automatic scraping failed or was blocked by the platform. You can manually enter test cases below, or view the original problem.
+                      </p>
+                      {problem?.externalUrl && (
+                        <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{...primaryBtn, display: 'inline-block', marginBottom: 15}}>
+                          ↗ View Original Problem
+                        </a>
+                      )}
                     </div>
-                  ))}
+                  ) : (
+                    testcases.map((tc, idx) => (
+                      <div key={tc.id} style={tcCard}>
+                        <div style={tcHeader}>
+                          <strong>Test Case {idx + 1}</strong>
+                          <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' || tc.status === 'error' ? '#f87171' : '#94a3b8' }}>{tc.status.toUpperCase()}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 10, padding: 10 }}>
+                          <div style={{ flex: 1 }}><div style={tcLabel}>Input</div><textarea value={tc.input} onChange={e => { const n = [...testcases]; n[idx].input = e.target.value; setTestcases(n); }} style={tcBox} /></div>
+                          <div style={{ flex: 1 }}><div style={tcLabel}>Expected Output</div><textarea value={tc.expectedOutput} onChange={e => { const n = [...testcases]; n[idx].expectedOutput = e.target.value; setTestcases(n); }} style={tcBox} /></div>
+                        </div>
+                        <div style={{ padding: '0 10px 10px' }}>
+                          <div style={tcLabel}>Actual Output</div>
+                          <pre style={{...tcBox, height: 60, margin: 0, overflow: 'auto', background: tc.status === 'failed' ? 'rgba(248,113,113,0.1)' : '#020617'}}>{tc.output}</pre>
+                        </div>
+                      </div>
+                    ))
+                  )}
+
                   <button onClick={() => setTestcases([...testcases, { id: Date.now().toString(), input: '', expectedOutput: '', output: '', status: 'idle' }])} style={{...secondaryBtn, width: '100%'}}>+ Add Custom Test Case</button>
                 </div>
               )}
