@@ -3,6 +3,7 @@ import Head from 'next/head';
 import { useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
@@ -59,7 +60,7 @@ export default function JudgePage() {
   };
 
   const runTestCase = async (index: number) => {
-    if (!code.trim()) return alert("Code cannot be empty");
+    if (!code.trim()) return toast.error("Code cannot be empty");
     
     const newCases = [...testcases];
     newCases[index].status = 'running';
@@ -93,55 +94,46 @@ export default function JudgePage() {
   };
 
   const handleFetchCPHSamples = async () => {
-    if (!cfUrl) return alert('Enter a URL');
+    if (!cfUrl) return toast.error('Enter a URL');
     setGlobalLoadingText('Attempting standard extraction...');
     setIsFetchingSamples(true);
     
     try {
       const res = await fetch(`${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(cfUrl)}`);
+      const data = await res.json();
       
-      if (!res.ok) {
-         setGlobalLoadingText('Standard extraction blocked. Routing to AI fallback parser...');
-         
-         const aiRes = await fetch(`${API_V2_BASE_URL}/ai/generate-testcases`, {
-           method: 'POST', 
-           headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ problemDescription: `Extract the input and output test cases exactly from this URL: ${cfUrl}` })
-         });
-         
-         const aiData = await aiRes.json();
-         if (!aiRes.ok || !aiData.testcases) throw new Error();
-         
-         // 👉 FIX: Added 'as const'
-         const newCases: TestCase[] = aiData.testcases.map((tc: any, idx: number) => ({
-           id: Date.now().toString() + idx, input: tc.input, expectedOutput: tc.expectedOutput, output: '', status: 'idle' as const
-         }));
-         setTestcases(newCases);
+      // 👉 FIX: The backend now returns { requiresRedirect: true, url }
+      if (data.requiresRedirect) {
+         toast.error("Scraping blocked. Redirecting to platform...");
+         window.open(data.url, '_blank');
          setIsFetchingSamples(false);
-         return toast?.success("AI successfully bypassed block and extracted test cases!");
+         return;
       }
 
+      if (!res.ok) throw new Error();
+      
+      // If direct proxy succeeded (not redirected), it returned html string
       const html = await res.text();
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, 'text/html');
       const inputNodes = Array.from(doc.querySelectorAll('.input pre')).map(el => el.textContent?.trim() || '');
       const outputNodes = Array.from(doc.querySelectorAll('.output pre')).map(el => el.textContent?.trim() || '');
       
-      // 👉 FIX: Added 'as const'
       const newCases: TestCase[] = inputNodes.map((inp, idx) => ({
         id: Date.now().toString() + idx, input: inp, expectedOutput: outputNodes[idx] || '', output: '', status: 'idle' as const
       }));
       setTestcases(newCases);
+      toast.success("Extraction successful!");
       
     } catch (error) {
-      alert("Both standard and AI extraction failed. Try pasting the problem text in the AI tab.");
+      toast.error("Extraction failed. Try the AI tab.");
     } finally {
       setIsFetchingSamples(false);
     }
   };
 
   const handleGenerateTestcases = async () => {
-    if (!aiGenDesc && !imageBase64) return alert("Upload an image or paste description.");
+    if (!aiGenDesc && !imageBase64) return toast.error("Upload an image or paste description.");
     setGlobalLoadingText('AI is generating hidden test cases...');
     setAiGenLoading(true);
     
@@ -155,25 +147,32 @@ export default function JudgePage() {
       });
       const data = await res.json();
       if (res.ok && data.testcases) {
-        // 👉 FIX: Added 'as const'
         const generated: TestCase[] = data.testcases.map((tc: any, i: number) => ({
           id: 'gen' + i, input: tc.input, expectedOutput: tc.expectedOutput, output: '', status: 'idle' as const
         }));
         setTestcases(generated);
         setActiveTab('cph');
+        toast.success("AI generated hidden test cases!");
+      } else {
+        toast.error(data.error || "AI generation failed.");
       }
-    } catch (e) {} finally { setAiGenLoading(false); }
+    } catch (e) {
+      toast.error("Network error.");
+    } finally { 
+      setAiGenLoading(false); 
+    }
   };
 
   return (
     <main style={{...page, minHeight: '100vh', height: 'auto'}}>
       <Head><title>Universal Judge | DivineCode</title></Head>
+      <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
 
       <AnimatePresence>
         {(isFetchingSamples || aiGenLoading) && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(8px)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-            <motion.div animate={{ rotate: 360, boxShadow: ["0 0 0 0 rgba(56, 189, 248, 0.4)", "0 0 0 20px rgba(56, 189, 248, 0)", "0 0 0 0 rgba(56, 189, 248, 0)"] }} transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }} style={{ width: 64, height: 64, border: '5px solid #1e293b', borderTopColor: '#38bdf8', borderRadius: '50%' }} />
-            <motion.h2 initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={{ color: '#67e8f9', marginTop: 24, fontSize: 24 }}>{globalLoadingText}</motion.h2>
+            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ width: 64, height: 64, border: '5px solid #1e293b', borderTopColor: '#38bdf8', borderRadius: '50%' }} />
+            <motion.h2 style={{ color: '#67e8f9', marginTop: 24, fontSize: 24 }}>{globalLoadingText}</motion.h2>
           </motion.div>
         )}
       </AnimatePresence>
@@ -236,7 +235,6 @@ export default function JudgePage() {
                       <button onClick={() => runTestCase(idx)} style={{ width: '100%', padding: 8, background: '#1e293b', color: '#fff', border: 'none', cursor: 'pointer' }}>{tc.status === 'running' ? 'Running...' : '▶ Run this case'}</button>
                     </div>
                   ))}
-                  {/* 👉 FIX: Added 'as const' to the new item button */}
                   <button onClick={() => setTestcases([...testcases, { id: Date.now().toString(), input: '', expectedOutput: '', output: '', status: 'idle' as const }])} style={{...secondaryBtn, width: '100%'}}>+ Add Custom Test Case</button>
                 </div>
               </>
@@ -265,7 +263,6 @@ export default function JudgePage() {
   );
 }
 
-// STYLES
 const page: CSSProperties = { display: 'flex', flexDirection: 'column', backgroundColor: '#020617', color: '#eef2ff', fontFamily: 'Inter, sans-serif' };
 const headerBar: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', backgroundColor: '#0f172a', borderBottom: '1px solid #1e293b', zIndex: 10 };
 const brand: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 'bold' };

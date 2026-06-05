@@ -11,31 +11,30 @@ export interface ScrapedProblem {
 
 export async function scrapeProblemFromUrl(url: string) {
   try {
-    const { data } = await axios.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
+    // 1. Prioritize Specialized Scrapers for speed and accuracy
+    if (url.includes('codeforces.com')) {
+      const cfData = await scrapeCodeforces(url);
+      return { ...cfData, success: true, requiresRedirect: false };
+    }
 
-    // Use AI to clean the HTML and grab the test cases seamlessly
-    const aiExtracted = await extractProblemFromTextOrImage(data);
-
-    return {
-      title: aiExtracted.title || 'External Problem',
-      descriptionHtml: aiExtracted.descriptionHtml,
-      testcases: aiExtracted.testcases,
-      platform: 'OTHER',
-      originalUrl: url,
-      requiresRedirect: aiExtracted.requiresRedirect
-    };
+    // 2. Generic Platform Scraper
+    const genericData = await scrapeGenericPlatform(url);
+    return { ...genericData, success: true, requiresRedirect: false };
 
   } catch (error) {
-    // 👉 SILENT FALLBACK: No errors shown to the user.
-    // The database will flag `requiresRedirect: true`. The frontend submit button will just open the link.
-    return {
+    console.error(`[Scraper] Full extraction failed for ${url}, using AI fallback.`);
+    
+    // 3. Fallback: Return a structure that tells the frontend to redirect
+    return { 
       title: 'External Platform Problem',
-      descriptionHtml: `<p>Problem hosted externally.</p>`,
+      descriptionHtml: `<div style="text-align:center; padding: 20px;">
+        <p>Problem description could not be extracted automatically.</p>
+        <a href="${url}" target="_blank" style="padding: 10px 15px; background: #38bdf8; color: white; border-radius: 6px; text-decoration: none;">View Original Problem ↗</a>
+      </div>`,
       testcases: [],
-      platform: 'OTHER',
+      platform: 'OTHER' as const,
       originalUrl: url,
+      success: false,
       requiresRedirect: true
     };
   }

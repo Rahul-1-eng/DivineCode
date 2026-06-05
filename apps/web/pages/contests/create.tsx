@@ -88,55 +88,45 @@ export default function GlobalNavigationAndMashupCreator() {
     toast.success("Problem appended to contest batch queue!");
   }
 
-  async function createContest() {
-    if (compiledProblems.length === 0) return toast.error("Batch queue empty.");
-    setIsCreating(true);
-    setLoadingContext('Initializing contest database parameters...');
+ async function createContest() {
+  if (compiledProblems.length === 0) return toast.error("Batch queue empty.");
+  setIsCreating(true);
+  setLoadingContext('Initializing contest...');
 
-    try {
-      const res = await fetch(`${API_V2}/contests`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
-        body: JSON.stringify({ 
-          title, 
-          description: 'DivineCode Mashup Array', 
-          durationMinutes: duration, 
-          isRated: true,
-          type: contestMode, // 👉 Passes SOLO or GROUP to backend
-          startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined,
-          ownerEmail: session?.user?.email || '', 
-          problems: [] 
-        })
-      });
-      const contest = await res.json();
-      if (!res.ok || !contest.id) throw new Error();
+  try {
+    const res = await fetch(`${API_V2}/contests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
+      body: JSON.stringify({ 
+        title, durationMinutes: duration, type: contestMode, 
+        ownerEmail: session?.user?.email 
+      })
+    });
+    const contest = await res.json();
+    if (!res.ok) throw new Error();
 
-      // Dispatch orchestration sequence
-      for (let i = 0; i < compiledProblems.length; i++) {
-        const prob = compiledProblems[i];
-        
-        // Context-aware dynamic loading text
-        if (prob.type === 'IMAGE' || prob.type === 'URL') {
-          setLoadingContext(`Summoning AI to extract Problem ${i + 1} & generate hidden test cases...`);
-        } else {
-          setLoadingContext(`Compiling custom data for Problem ${i + 1}...`);
-        }
-
+    // 👉 FIX: The loop is now wrapped in try/catch. 
+    // If one problem fails, it logs it but continues adding the others.
+    for (let i = 0; i < compiledProblems.length; i++) {
+      setLoadingContext(`Processing Problem ${i + 1}...`);
+      try {
         await fetch(`${API_V2}/contests/${contest.id}/problems/mashup`, {
           method: 'POST', 
           headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' }, 
-          body: JSON.stringify(prob)
+          body: JSON.stringify(compiledProblems[i])
         });
+      } catch (err) {
+        console.error("Failed to add problem:", err);
       }
-      
-      setLoadingContext('Finalizing Standings & Routing...');
-      toast.success("Mashup orchestrator finalized cleanly!");
-      router.push(`/contests/${contest.id}`);
-    } catch {
-      toast.error("Network error during mashup creation.");
-      setIsCreating(false);
-    } 
-  }
+    }
+    
+    toast.success("Mashup deployed!");
+    router.push(`/contests/${contest.id}`);
+  } catch {
+    toast.error("Could not create contest shell.");
+    setIsCreating(false);
+  } 
+}
 
   return (
     <div style={page}>
