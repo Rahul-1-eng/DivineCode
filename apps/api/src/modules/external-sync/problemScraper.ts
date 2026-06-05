@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-
+import { extractProblemFromTextOrImage } from '../ai/aiService';
 export interface ScrapedProblem {
   title: string;
   descriptionHtml: string; 
@@ -9,12 +9,36 @@ export interface ScrapedProblem {
   originalUrl: string;
 }
 
-export async function scrapeProblemFromUrl(url: string): Promise<ScrapedProblem> {
-  if (url.includes('codeforces.com')) {
-    return await scrapeCodeforces(url);
+export async function scrapeProblemFromUrl(url: string) {
+  try {
+    const { data } = await axios.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+
+    // Use AI to clean the HTML and grab the test cases seamlessly
+    const aiExtracted = await extractProblemFromTextOrImage(data);
+
+    return {
+      title: aiExtracted.title || 'External Problem',
+      descriptionHtml: aiExtracted.descriptionHtml,
+      testcases: aiExtracted.testcases,
+      platform: 'OTHER',
+      originalUrl: url,
+      requiresRedirect: aiExtracted.requiresRedirect
+    };
+
+  } catch (error) {
+    // 👉 SILENT FALLBACK: No errors shown to the user.
+    // The database will flag `requiresRedirect: true`. The frontend submit button will just open the link.
+    return {
+      title: 'External Platform Problem',
+      descriptionHtml: `<p>Problem hosted externally.</p>`,
+      testcases: [],
+      platform: 'OTHER',
+      originalUrl: url,
+      requiresRedirect: true
+    };
   }
-  
-  return await scrapeGenericPlatform(url);
 }
 
 async function scrapeCodeforces(url: string): Promise<ScrapedProblem> {

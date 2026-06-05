@@ -13,86 +13,152 @@ export default function GlobalNavigationAndMashupCreator() {
   const [navTab, setNavTab] = useState<'mashup' | 'duel' | 'interview'>('mashup');
 
   // Creator forms state
-  const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
+  const [contestMode, setContestMode] = useState<'SOLO' | 'GROUP'>('GROUP');
+  const [activeTab, setActiveTab] = useState<'URL' | 'IMAGE' | 'CUSTOM' | 'MCQ'>('URL');
   const [title, setTitle] = useState('DivineCode Controlled Practice Set');
   const [duration, setDuration] = useState(120);
   const [startTimeStr, setStartTimeStr] = useState('');
-  const [usernameInput, setUsernameInput] = useState('');
-
+  
+  // Input states
   const [urlProblem, setUrlProblem] = useState('');
+  const [imageBase64, setImageBase64] = useState<string>('');
+  
   const [customTitle, setCustomTitle] = useState('');
   const [customDesc, setCustomDesc] = useState('');
-  const [customCases, setCustomCases] = useState([{ input: '', output: '' }]);
+  const [customCases, setCustomCases] = useState([{ input: '', expectedOutput: '', isHidden: false }]);
+  
   const [mcqPrompt, setMcqPrompt] = useState('');
   const [mcqOptions, setMcqOptions] = useState(['', '']);
   const [mcqCorrect, setMcqCorrect] = useState<number[]>([]);
   
   const [compiledProblems, setCompiledProblems] = useState<any[]>([]);
   const [aiBank, setAiBank] = useState<any[]>([]);
+  
+  // Context-Aware Loading State
   const [isCreating, setIsCreating] = useState(false);
+  const [loadingContext, setLoadingContext] = useState('');
 
   useEffect(() => {
-    fetch(`${API_V2}/ai-dataset`).then(r => r.json()).then(d => setAiBank(d.problems || []));
+    fetch(`${API_V2}/ai-dataset`).then(r => r.json()).then(d => setAiBank(d.problems || [])).catch(() => {});
   }, []);
+
+  // Convert uploaded image to Base64 for the AI to parse
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setImageBase64(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
 
   function queueProblem() {
     let payload: any = { type: activeTab };
+    
     if (activeTab === 'URL') {
       if (!urlProblem) return toast.error('Enter URL');
       payload.url = urlProblem;
-      payload.displayTitle = urlProblem.split('/').pop();
+      payload.displayTitle = urlProblem.split('/').pop() || 'External Problem';
+      
+    } else if (activeTab === 'IMAGE') {
+      if (!imageBase64) return toast.error('Upload an image containing the problem');
+      payload.imageUrl = imageBase64; // Will be processed by AI on backend
+      payload.requiresRedirect = false; 
+      payload.displayTitle = "OCR Image Problem";
+      
     } else if (activeTab === 'CUSTOM') {
       if (!customTitle) return toast.error('Enter custom title');
-      payload.customData = { title: customTitle, description: customDesc, testcases: customCases };
+      // Filter out empty cases
+      const validCases = customCases.filter(c => c.input.trim() !== '' && c.expectedOutput.trim() !== '');
+      payload.customData = { title: customTitle, description: customDesc, testcases: validCases };
       payload.displayTitle = customTitle;
+      
     } else {
       if (!mcqPrompt || mcqCorrect.length === 0) return toast.error('Enter question parameters');
       payload.mcqData = { prompt: mcqPrompt, options: mcqOptions, correctIndices: mcqCorrect };
       payload.displayTitle = "Theory MCQ: " + mcqPrompt.substring(0, 20) + "...";
     }
+    
     setCompiledProblems([...compiledProblems, payload]);
-    setUrlProblem(''); setCustomTitle(''); setCustomDesc(''); setMcqPrompt(''); setMcqCorrect([]); setMcqOptions(['', '']);
+    
+    // Reset forms
+    setUrlProblem(''); setImageBase64(''); setCustomTitle(''); setCustomDesc(''); 
+    setCustomCases([{ input: '', expectedOutput: '', isHidden: false }]);
+    setMcqPrompt(''); setMcqCorrect([]); setMcqOptions(['', '']);
     toast.success("Problem appended to contest batch queue!");
   }
 
   async function createContest() {
     if (compiledProblems.length === 0) return toast.error("Batch queue empty.");
     setIsCreating(true);
+    setLoadingContext('Initializing contest database parameters...');
 
     try {
       const res = await fetch(`${API_V2}/contests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ 
-          title, description: 'DivineCode Mashup Array', durationMinutes: duration, isRated: true,
+          title, 
+          description: 'DivineCode Mashup Array', 
+          durationMinutes: duration, 
+          isRated: true,
+          type: contestMode, // 👉 Passes SOLO or GROUP to backend
           startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined,
-          ownerEmail: session?.user?.email || '', members: [{ username: usernameInput.trim() || 'RKS_Rider', teamName: 'Solo' }], problems: [] 
+          ownerEmail: session?.user?.email || '', 
+          problems: [] 
         })
       });
       const contest = await res.json();
       if (!res.ok || !contest.id) throw new Error();
 
-      // Flawless synchronous dispatch orchestration sequence
-      for (const prob of compiledProblems) {
+      // Dispatch orchestration sequence
+      for (let i = 0; i < compiledProblems.length; i++) {
+        const prob = compiledProblems[i];
+        
+        // Context-aware dynamic loading text
+        if (prob.type === 'IMAGE' || prob.type === 'URL') {
+          setLoadingContext(`Summoning AI to extract Problem ${i + 1} & generate hidden test cases...`);
+        } else {
+          setLoadingContext(`Compiling custom data for Problem ${i + 1}...`);
+        }
+
         await fetch(`${API_V2}/contests/${contest.id}/problems/mashup`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' }, body: JSON.stringify(prob)
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' }, 
+          body: JSON.stringify(prob)
         });
       }
+      
+      setLoadingContext('Finalizing Standings & Routing...');
       toast.success("Mashup orchestrator finalized cleanly!");
       router.push(`/contests/${contest.id}`);
     } catch {
       toast.error("Network error during mashup creation.");
-    } finally {
       setIsCreating(false);
-    }
+    } 
   }
 
   return (
     <div style={page}>
       <Toaster />
-      {isCreating && <div style={overlay}><div style={overlayModal}><h2>Forging Mashup array specifications...</h2></div></div>}
+      
+      {/* CSS for Context-Aware Loading Animation */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes pulseGlow { 0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.4); } 70% { box-shadow: 0 0 0 20px rgba(56, 189, 248, 0); } 100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); } }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+      `}} />
 
-      {/* 👉 TOP HOME PAGE COMPREHENSIVE HUB CHANNELS */}
+      {isCreating && (
+        <div style={overlay}>
+          <div style={overlayModal}>
+            <div style={{ width: 50, height: 50, border: '4px solid #1e293b', borderTopColor: '#38bdf8', borderRadius: '50%', margin: '0 auto 20px', animation: 'spin 1s linear infinite, pulseGlow 2s infinite' }} />
+            <h2 style={{ color: '#fff', marginBottom: 10 }}>Forging Mashup Array</h2>
+            <p style={{ color: '#38bdf8', fontWeight: 'bold' }}>{loadingContext}</p>
+          </div>
+        </div>
+      )}
+
+      {/* TOP HUB NAVIGATION */}
       <nav style={{ display: 'flex', gap: 15, background: '#1e293b', padding: '15px 30px', borderBottom: '1px solid #334155' }}>
         <button onClick={() => setNavTab('mashup')} style={navTab === 'mashup' ? actNav : pasNav}>Mashup Control Room</button>
         <button onClick={() => { setNavTab('duel'); router.push('/duel'); }} style={navTab === 'duel' ? actNav : pasNav}>1v1 Realtime Duel Matrix</button>
@@ -101,37 +167,59 @@ export default function GlobalNavigationAndMashupCreator() {
 
       {navTab === 'mashup' && (
         <div style={{ display: 'flex', gap: '30px', padding: 40, maxWidth: 1300, margin: '0 auto', flexWrap: 'wrap' }}>
+          
+          {/* LEFT CREATOR PANEL */}
           <div style={{ flex: '1 1 600px' }}>
             <h1 style={{ color: '#38bdf8', marginTop: 0 }}>Create Live Practice Contest</h1>
             
+            {/* 👉 SOLO VS GROUP TOGGLE */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 25, background: '#0f172a', padding: 10, borderRadius: 8, border: '1px solid #334155' }}>
+              <button onClick={() => setContestMode('SOLO')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'SOLO' ? '#38bdf8' : 'transparent', color: contestMode === 'SOLO' ? '#000' : '#94a3b8' }}>👤 Solo Standings</button>
+              <button onClick={() => setContestMode('GROUP')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'GROUP' ? '#38bdf8' : 'transparent', color: contestMode === 'GROUP' ? '#000' : '#94a3b8' }}>👥 Group & Team Mode</button>
+            </div>
+
             <div style={{ display: 'flex', gap: 20, marginBottom: 20 }}>
               <div style={{ flex: 1 }}><label>Contest Title</label><input value={title} onChange={e => setTitle(e.target.value)} style={inputBox} /></div>
               <div style={{ flex: 0.5 }}><label>Duration (mins)</label><input type="number" value={duration} onChange={e => setDuration(Number(e.target.value))} style={inputBox} /></div>
             </div>
 
-            {/* 👉 CALENDAR BOX RESTRUCTURE: Fixed invisible picker icon by forcing color-scheme properties */}
             <div style={{ marginBottom: 25 }}>
               <label style={{ display: 'block', marginBottom: 8, fontWeight: 'bold' }}>Schedule Launch Calendar Time</label>
-              <input 
-                type="datetime-local" 
-                value={startTimeStr} 
-                onChange={e => setStartTimeStr(e.target.value)} 
-                style={{ ...inputBox, colorScheme: 'dark', backgroundColor: '#0f172a', color: '#fff' }} 
-              />
+              <input type="datetime-local" value={startTimeStr} onChange={e => setStartTimeStr(e.target.value)} style={{ ...inputBox, colorScheme: 'dark' }} />
             </div>
 
+            {/* PROBLEM INPUT TABS */}
             <div style={{ display: 'flex', gap: 10, marginBottom: 20, borderBottom: '1px solid #1e293b', paddingBottom: 10 }}>
-              {['URL', 'CUSTOM', 'MCQ'].map(t => (
+              {['URL', 'IMAGE', 'CUSTOM', 'MCQ'].map(t => (
                 <button key={t} onClick={() => setActiveTab(t as any)} style={{ padding: '8px 16px', background: activeTab === t ? '#38bdf8' : '#1e293b', color: activeTab === t ? '#000' : '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}>{t}</button>
               ))}
             </div>
 
             {activeTab === 'URL' && <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste External Problem Link..." />}
             
+            {/* 👉 IMAGE OCR UPLOAD */}
+            {activeTab === 'IMAGE' && (
+               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: '#0f172a', padding: 20, borderRadius: 8, border: '1px dashed #38bdf8' }}>
+                 <p style={{ margin: 0, color: '#94a3b8', fontSize: 14 }}>Upload a screenshot of a problem. AI will extract the description and generate test cases.</p>
+                 <input type="file" accept="image/*" onChange={handleImageUpload} style={{ color: '#fff', marginTop: 10 }} />
+                 {imageBase64 && <img src={imageBase64} alt="Preview" style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain', marginTop: 10, borderRadius: 8 }} />}
+               </div>
+            )}
+
             {activeTab === 'CUSTOM' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <input value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} placeholder="Title" />
-                <textarea value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, height: 80, resize: 'none'}} placeholder="Markdown Statement Content" />
+                <textarea value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, height: 80, resize: 'vertical'}} placeholder="Markdown Statement Content" />
+                
+                <h4 style={{ color: '#a5b4fc', margin: '10px 0 0' }}>Manual Test Cases</h4>
+                {customCases.map((tc, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: 10, alignItems: 'center', background: '#1e293b', padding: 10, borderRadius: 8 }}>
+                    <textarea placeholder="Input" value={tc.input} onChange={e => { const n = [...customCases]; n[idx].input = e.target.value; setCustomCases(n); }} style={{...inputBox, height: 50, marginTop: 0}} />
+                    <textarea placeholder="Expected Output" value={tc.expectedOutput} onChange={e => { const n = [...customCases]; n[idx].expectedOutput = e.target.value; setCustomCases(n); }} style={{...inputBox, height: 50, marginTop: 0}} />
+                    <button onClick={() => setCustomCases(customCases.filter((_, i) => i !== idx))} style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '15px 10px', borderRadius: 6, cursor: 'pointer' }}>X</button>
+                  </div>
+                ))}
+                <button onClick={() => setCustomCases([...customCases, { input: '', expectedOutput: '', isHidden: false }])} style={{...ghostBtn, alignSelf: 'flex-start'}}>+ Add Test Case</button>
               </div>
             )}
 
@@ -189,5 +277,5 @@ const pasNav: CSSProperties = { padding: '10px 15px', background: 'transparent',
 const inputBox = { width: '100%', padding: '12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#fff', boxSizing: 'border-box' as const, marginTop: 5 };
 const primaryBtn = { background: '#38bdf8', color: '#000', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 'bold' as const, cursor: 'pointer' };
 const ghostBtn = { background: 'transparent', color: '#38bdf8', border: '1px solid #38bdf8', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' as const };
-const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 };
-const overlayModal = { background: '#0f172a', padding: 30, borderRadius: 12, border: '1px solid #38bdf8', textAlign: 'center' as const };
+const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999, flexDirection: 'column' as const };
+const overlayModal = { background: '#0f172a', padding: 40, borderRadius: 12, border: '1px solid #38bdf8', textAlign: 'center' as const, boxShadow: '0 0 30px rgba(56, 189, 248, 0.2)' };

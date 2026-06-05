@@ -1,5 +1,88 @@
 import axios from 'axios';
+// (Keep your existing imports and AI functions here)
+import { prisma } from '../../prisma/client';
 
+export async function analyzeSubmissionLogic(submissionId: string, problemDescription: string, userCode: string) {
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) return;
+
+  const prompt = `
+    You are an expert code reviewer.
+    Problem Description: ${problemDescription}
+    Submitted Code:
+    ${userCode}
+
+    Analyze this code. Provide exactly four things:
+    1. A short paragraph of feedback on the logic (is it optimal?).
+    2. The Big-O Time Complexity (e.g., O(N log N)).
+    3. A similarity score from 0.0 to 1.0 indicating how similar this is to a standard copied template or known online solution. (0.0 = highly original, 1.0 = exact copy of common online solution).
+    4. A boolean indicating if it seems highly plagiarized or AI-generated (true if similarity score > 0.85).
+
+    Respond strictly with JSON:
+    {"feedback": "...", "complexity": "O(...)", "similarityScore": 0.8, "isPlagiarized": false}
+  `;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const { data } = await axios.post(url, {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json" }
+    });
+
+    const result = JSON.parse(data.candidates[0].content.parts[0].text);
+
+    // Save the AI analysis directly to the submission record
+    await prisma.submission.update({
+      where: { id: submissionId },
+      data: {
+        aiFeedback: result.feedback,
+        aiComplexity: result.complexity,
+        aiSimilarityScore: result.similarityScore,
+        isPlagiarized: result.isPlagiarized
+      }
+    });
+
+    // If flagged as heavily plagiarized, you could optionally trigger a WebSocket notification to the contest manager here.
+
+  } catch (error: any) {
+    console.error("AI Logic Analysis Error:", error.response?.data || error.message);
+  }
+}
+
+// This handles the OCR / Link parsing you requested
+export async function extractProblemFromTextOrImage(rawTextOrUrl: string) {
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
+
+  const prompt = `
+    You are a competitive programming parser. I will provide either raw scraped HTML, or OCR text from an image.
+    Extract the problem details into a clean format. Find the hidden system tests if you can deduce them.
+    
+    Data:
+    ${rawTextOrUrl}
+
+    Respond strictly with JSON:
+    {
+      "title": "...",
+      "descriptionHtml": "...",
+      "testcases": [{"input": "...", "expectedOutput": "..."}],
+      "requiresRedirect": false // Set to true ONLY if you cannot extract any meaningful question text and testcases at all
+    }
+  `;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const { data } = await axios.post(url, {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json" }
+    });
+
+    return JSON.parse(data.candidates[0].content.parts[0].text);
+  } catch (error) {
+    // Graceful fallback so the system doesn't crash, it just redirects the user.
+    return { title: "Custom Problem", descriptionHtml: "View source link.", testcases: [], requiresRedirect: true };
+  }
+}
 export async function generateTestCasesWithAI(problemDescription: string, masterSolution: string) {
   // 👉 Read the key INSIDE the function so it never gets stuck as undefined
   const apiKey = process.env.AI_API_KEY;

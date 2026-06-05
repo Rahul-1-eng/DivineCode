@@ -32,7 +32,12 @@ export async function createQueuedContestSubmission(input: {
 
   const contestProblem = contest.problems.find((problem) => problem.id === input.contestProblemId);
   if (!contestProblem) throw new Error('Contest problem not found');
-
+if (contestProblem.requiresRedirect && contestProblem.externalUrl) {
+    return { 
+      redirectUrl: contestProblem.externalUrl,
+      status: 'REDIRECT_REQUIRED' 
+    };
+  }
   if (!input.code?.trim()) throw new Error('Code is required');
   if (!input.language?.trim()) throw new Error('Language is required');
 

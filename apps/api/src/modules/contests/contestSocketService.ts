@@ -42,6 +42,14 @@ export function setupContestSockets(io: Server) {
       }
     });
 
+    // 👉 NEW: Broadcast Accepted Solutions exclusively to the solver's group
+    socket.on('broadcastTeamSolve', (data: { teamId: string, solverName: string, problemLabel: string }) => {
+      io.to(`team:${data.teamId}`).emit('teamNotification', {
+        type: 'ACCEPTED',
+        message: `${data.solverName} just got an Accepted verdict for Problem ${data.problemLabel}! 🚀`
+      });
+    });
+
     // 5. Leave rooms dynamically (prevent memory leaks)
     socket.on('leaveSubmission', (submissionId: string) => {
       socket.leave(`submission:${submissionId}`);

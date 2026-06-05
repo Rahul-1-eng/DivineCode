@@ -63,6 +63,7 @@ export default function SubmitPage() {
 
   const isCodeforces = problem?.platform?.toLowerCase?.().includes('codeforces');
   const isMCQ = problem?.platform === 'Interview MCQ';
+  const requiresRedirect = problem?.requiresRedirect === true; // 👉 NEW: AI Fallback flag
   const canSeeProblemMeta = Boolean(contest?.visibility?.canSeeProblemMeta);
   const problemIndex = Math.max(0, (contest?.problems || []).findIndex((p: any) => p.id === problem?.id));
   const problemLabel = problem ? String.fromCharCode(65 + problemIndex) : '';
@@ -122,7 +123,6 @@ export default function SubmitPage() {
     if (!contest || !problem) return alert('Contest problem not loaded');
     const member = contest.viewerMember;
     if (!member && !contest?.canManage) return alert('Only registered contest players can submit.');
-    if (isCodeforces) return alert('For Codeforces problems, submit on Codeforces first, then ask the owner to run Codeforces sync.');
     
     if (isMCQ && selectedOption === null) return alert('Please select an answer option first.');
 
@@ -139,6 +139,14 @@ export default function SubmitPage() {
         body: JSON.stringify({ code: finalCode, language: finalLanguage, contestProblemId: problemId })
       });
       const submissionData = await res.json();
+      
+      // 👉 NEW: Graceful handling of AI extraction fallback
+      if (submissionData.status === 'REDIRECT_REQUIRED' || submissionData.redirectUrl) {
+         setSubmitting(false);
+         setVerdict({ verdict: 'Redirected', message: 'Problem requires submission on the original platform.'});
+         window.open(submissionData.redirectUrl || problem.externalUrl, '_blank');
+         return;
+      }
       
       if (!res.ok) {
         setSubmitting(false);
@@ -210,11 +218,11 @@ export default function SubmitPage() {
 
       <section style={layout}>
        <aside style={asideStyle}>
-          <p style={eyebrow}>{isCodeforces ? 'External verified submission' : isMCQ ? 'Theoretical MCQ' : 'DivineCode local judge'}</p>
+          <p style={eyebrow}>{requiresRedirect ? 'External submission required' : isCodeforces ? 'External verified submission' : isMCQ ? 'Theoretical MCQ' : 'DivineCode local judge'}</p>
           <h1 style={{ margin: '10px 0' }}>{canSeeProblemMeta ? problem?.title || 'Loading problem...' : `Problem ${problemLabel}`}</h1>
           <p style={{ color: '#94a3b8', margin: '0 0 20px 0' }}>{problem?.platform}</p>
 
-          {!isMCQ && (
+          {!isMCQ && !requiresRedirect && (
             <div style={{ marginTop: 10, marginBottom: 20 }}>
               <label style={{ fontWeight: 'bold' }}>Language</label>
               <select value={language} onChange={(e) => setLanguage(e.target.value)} style={input}>
@@ -227,16 +235,27 @@ export default function SubmitPage() {
             </div>
           )}
 
-          {/* 👉 DUAL OPTIONS ADDED HERE */}
+          {/* 👉 DYNAMIC SUBMIT BUTTONS (Handles Redirect vs Local) */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {!isMCQ && problem?.url && (
-               <a href={problem.url} target="_blank" rel="noreferrer" style={{...submitBtn, textDecoration: 'none', textAlign: 'center', background: '#3b82f6', color: 'white'}}>
-                 1. Submit on Original Platform ↗
-               </a>
+            {requiresRedirect ? (
+               <button 
+                 onClick={() => window.open(problem?.externalUrl, '_blank')} 
+                 style={{...submitBtn, textDecoration: 'none', textAlign: 'center', background: '#3b82f6', color: 'white', marginTop: 0}}
+               >
+                 Submit on Original Platform ↗
+               </button>
+            ) : (
+               <>
+                 {!isMCQ && problem?.url && (
+                    <a href={problem.url} target="_blank" rel="noreferrer" style={{...submitBtn, textDecoration: 'none', textAlign: 'center', background: 'transparent', color: '#38bdf8', border: '1px solid #38bdf8', marginTop: 0}}>
+                      View Original Platform ↗
+                    </a>
+                 )}
+                 <button onClick={submitCode} disabled={submitting || !contest?.viewerMember} style={{...submitBtn, marginTop: 0}}>
+                   {isMCQ ? 'Submit Answer' : 'Submit Local Judge 🚀'}
+                 </button>
+               </>
             )}
-            <button onClick={submitCode} disabled={submitting || !contest?.viewerMember} style={{...submitBtn, marginTop: 0}}>
-              {isMCQ ? 'Submit Answer' : '2. Test & Submit Local Judge 🚀'}
-            </button>
           </div>
           
           {!contest?.viewerMember && !contest?.canManage && <p style={{ color: '#fca5a5', marginTop: 12, textAlign: 'center' }}>Only registered players can submit.</p>}
@@ -275,7 +294,7 @@ export default function SubmitPage() {
           ) : (
             <>
               <div style={editorTop}>
-                <strong>{isCodeforces ? 'Scratchpad only' : 'Code editor'}</strong>
+                <strong>{requiresRedirect ? 'Scratchpad only' : 'Code editor'}</strong>
                 <button onClick={runCustomTest} disabled={executing} style={runBtn}>
                   {executing ? 'Running...' : '▶ Run Code'}
                 </button>
