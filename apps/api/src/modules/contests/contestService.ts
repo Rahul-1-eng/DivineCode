@@ -15,7 +15,7 @@ import { generateToughTestCases } from '../ai/aiService';
 export type MemberInput = {
   username?: string; userId?: string; email?: string;
   name?: string; displayName?: string; teamName?: string;
-  teamInviteCode?: string; // 👉 ADDED: For Codeforces-style team joining
+  teamInviteCode?: string;
   codeforcesHandle?: string; ratingBefore?: number;
 };
 
@@ -284,7 +284,7 @@ export async function registerForContestV2(contestId: string, input: MemberInput
 
     let teamId = null;
     
-    // 👉 TEAM INVITE LOGIC INTEGRATION
+    // TEAM INVITE LOGIC INTEGRATION
     if (memberInput.teamInviteCode) {
       const team = await tx.contestTeam.findUnique({ where: { inviteCode: memberInput.teamInviteCode } });
       if (!team || team.contestId !== contestId) throw new Error("Invalid Team Invite Code");
@@ -316,7 +316,6 @@ export async function registerForContestV2(contestId: string, input: MemberInput
   });
 
   void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
-return loadContestForViewer(contestId);
   return loadContestForViewer(contestId);
 }
 
@@ -328,8 +327,6 @@ export async function createContestV2(input: CreateContestInput) {
   if (members.length === 0) throw new Error('Add at least one player. The owner is not added automatically.');
 
   const problems = input.problems || [];
-  // 👉 FIX: Removed 'if (problems.length === 0) throw Error' to allow the Mashup Orchestrator to instantiate first!
-
   const startTime = input.startTime ? new Date(input.startTime) : new Date();
   const durationMinutes = Math.max(1, Number(input.durationMinutes || 120));
   const endTime = new Date(startTime.getTime() + durationMinutes * 60000);
@@ -400,7 +397,6 @@ export async function createContestV2(input: CreateContestInput) {
   return loadContestForViewer(contest.id);
 }
 
-// ... Keep your existing deleteContestV2, listContestsV2, extendContestV2, updateContestSettingsV2, addContestProblemV2, removeContestProblemV2, replaceContestProblemV2, overrideSubmissionPoints, getContestSubmissionsV2 identical to previous file ...
 export async function deleteContestV2(contestId: string, actorId?: string) {
   const contest = await prisma.contest.findUnique({ where: { id: contestId } });
   if (!contest) throw new Error('Contest not found');
@@ -456,17 +452,26 @@ export async function extendContestV2(contestId: string, minutes: number, actorI
   return loadContestForViewer(contestId);
 }
 
-export async function updateContestSettingsV2(contestId: string, input: { title?: string; description?: string; durationMinutes?: number; }, actorId?: string) {
+export async function updateContestSettingsV2(contestId: string, input: { title?: string; description?: string; durationMinutes?: number; startTime?: string }, actorId?: string) {
   const contest = await prisma.contest.findUnique({ where: { id: contestId } });
   if (!contest) throw new Error('Contest not found');
 
   const durationMinutes = input.durationMinutes ? Math.max(1, Number(input.durationMinutes)) : contest.durationMinutes;
-  const data = {
+  
+  const data: any = {
     title: input.title?.trim() || contest.title,
     description: typeof input.description === 'string' ? input.description : contest.description,
-    durationMinutes,
-    endTime: new Date(contest.startTime.getTime() + durationMinutes * 60000)
+    durationMinutes
   };
+
+  // ✅ Issue #2 Fixed: Saving Date Times Properly
+  if (input.startTime) {
+     const st = new Date(input.startTime);
+     data.startTime = st;
+     data.endTime = new Date(st.getTime() + durationMinutes * 60000);
+  } else {
+     data.endTime = new Date(contest.startTime.getTime() + durationMinutes * 60000);
+  }
 
   await prisma.$transaction(async (tx) => {
     const updated = await tx.contest.update({ where: { id: contestId }, data });
@@ -500,12 +505,36 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
       newTestcases = [...scraped.testcases, ...aiGeneratedCases];
     } catch (err) {
       console.warn("Scraping or AI failed, applying URL fallback.");
-      finalDescription = `<h3>External Problem</h3><p>Please view the problem description here: <a href="${problem.url}" target="_blank" style="color: #38bdf8;">${problem.url}</a></p>`;
+      // ✅ Issue #8/9/11 Fixed: Valid fallback with links if scraper completely fails
+      finalDescription = `<h3>External Problem</h3><p>Please view the problem description here: <a href="${problem.url}" target="_blank" style="color: #38bdf8;">Click here to open ${problem.url}</a></p>`;
       enrichedProblem.title = problem.title || 'Imported Problem';
     }
   }
 
   await prisma.$transaction(async (tx) => {
+    let finalProblemId = problem.problemId || problem.id || null;
+
+    // ✅ Issue #4 Fixed: Saving the Custom HTML output physically so the UI can render it.
+    if (!finalProblemId && problem.url) {
+       try {
+         const newProb = await tx.problem.create({
+           data: {
+             title: enrichedProblem.title || 'Imported Problem',
+             description: finalDescription,
+             platform: enrichedProblem.platform as any || 'OTHER',
+             source: 'EXTERNAL',
+             url: problem.url,
+             problemCode: `EXT-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+             visibility: 'PUBLIC'
+           }
+         });
+         finalProblemId = newProb.id;
+         enrichedProblem.problemId = finalProblemId;
+       } catch(err) {
+         console.error("Failed to create fallback problem", err);
+       }
+    }
+
     const created = await createContestProblemRow(tx, { 
       contestId, 
       problem: enrichedProblem, 
@@ -530,21 +559,30 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
     });
   });
 
-void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
-return loadContestForViewer(contestId);
+  void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+  return loadContestForViewer(contestId);
 }
 
 export async function removeContestProblemV2(contestId: string, contestProblemId: string, actorId?: string) {
   const problem = await prisma.contestProblem.findFirst({ where: { id: contestProblemId, contestId } });
   if (!problem) throw new Error('Problem not found');
 
+  // ✅ Issue #6 Fixed: Middle problem deletion handling! Rebuilds indexes seamlessly.
   await prisma.$transaction(async (tx) => {
     await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_REMOVE', entityType: 'ContestProblem', entityId: contestProblemId, before: problem as any } });
     await tx.contestProblem.delete({ where: { id: contestProblemId } });
+
+    const remaining = await tx.contestProblem.findMany({ where: { contestId }, orderBy: { index: 'asc' } });
+    for (let i = 0; i < remaining.length; i++) {
+      await tx.contestProblem.update({
+        where: { id: remaining[i].id },
+        data: { index: i, label: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')[i] || `Q${i + 1}` }
+      });
+    }
   });
 
-void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
-return loadContestForViewer(contestId);
+  void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+  return loadContestForViewer(contestId);
 }
 
 export async function replaceContestProblemV2(contestId: string, contestProblemId: string, problem: ProblemInput, actorId?: string) {
@@ -568,7 +606,7 @@ export async function replaceContestProblemV2(contestId: string, contestProblemI
   });
 
   void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
-return loadContestForViewer(contestId);
+  return loadContestForViewer(contestId);
 }
 
 export async function overrideSubmissionPoints(contestId: string, submissionId: string, manualPoints: number | null, actorId: string) {
@@ -578,7 +616,6 @@ export async function overrideSubmissionPoints(contestId: string, submissionId: 
 
   await prisma.submission.update({ where: { id: submissionId }, data: { manualPoints } });
   void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
-return loadContestForViewer(contestId);
   return loadContestForViewer(contestId);
 }
 

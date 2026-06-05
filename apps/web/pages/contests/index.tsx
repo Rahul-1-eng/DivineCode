@@ -1,139 +1,127 @@
-import { CSSProperties, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import Head from 'next/head';
+import { motion } from 'framer-motion';
 
-const API_V2_BASE_URL = `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000'}/api/v2`;
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
-export default function ContestsPage() {
+const features = [
+  { title: 'Login', href: '/signin', icon: '🔐', text: 'Google account access with contest identity.' },
+  { title: 'Verified Contests', href: '/contests', icon: '🏆', text: 'Codeforces-style gym rooms with live sync and standings.' },
+  { title: 'Create Mashup', href: '/contests/create', icon: '👥', text: 'Smart problem lookup, CF handles, fairness checks.' },
+  { title: 'Duel Arena', href: '/duel', icon: '⚔️', text: 'Real-time MCQ battles with live scoring.' },
+  { title: 'Interview Modules', href: '/interview', icon: '💼', text: 'Practice curated DSA questions and theory tracks.' },
+  { title: 'AI Avatar Practice', href: '/practice', icon: '🤖', text: 'IDE workspace with an AI Explainer and detailed reporting.' },
+  { title: 'Submission Judge', href: '/judge', icon: '⚙️', text: 'Judge0-ready for custom problems, CF sync for external problems.' }
+];
+
+export default function Home() {
   const { data: session, status } = useSession();
-  const [contests, setContests] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [mounted, setMounted] = useState(false);
-  const [nowTick, setNowTick] = useState(Date.now()); 
+  const [profile, setProfile] = useState<any>(null);
+
+  const navLinks = [
+    ['Practice', '/practice'],
+    ['Duel', '/duel'],
+    ['Contest', '/contests'],
+    ['Interview', '/interview'],
+    ['Group', '/contests/create']
+  ];
 
   useEffect(() => {
-    setMounted(true);
-    const ticker = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(ticker);
-  }, []);
-
-  useEffect(() => {
-    if (status !== 'loading') {
-      loadContests();
+    if (session?.user?.email) {
+      fetch(`${API_BASE_URL}/api/v2/profile/me`, { headers: { 'x-user-email': session.user.email } })
+      .then(r => r.json())
+      .then(data => { if (!data.error) setProfile(data); })
+      .catch(() => null);
     }
-  }, [session, status]);
-
-  async function loadContests() {
-    try { 
-      setLoading(true);
-      setError('');
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (session?.user?.email) headers['x-user-email'] = session.user.email;
-
-      const res = await fetch(`${API_V2_BASE_URL}/contests`, { headers }); 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to fetch contests');
-      }
-      const data = await res.json(); 
-      setContests(Array.isArray(data) ? data : []); 
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Network error occurred');
-    } finally { 
-      setLoading(false); 
-    }
-  }
-
-  function formatCountdown(ms: number) {
-    if (ms <= 0) return 'Starting...';
-    const s = Math.floor((ms / 1000) % 60);
-    const m = Math.floor((ms / 1000 / 60) % 60);
-    const h = Math.floor((ms / (1000 * 60 * 60)) % 24);
-    const d = Math.floor(ms / (1000 * 60 * 60 * 24));
-    return `${d}d ${h}h ${m}m ${s}s`;
-  }
-
-  if (!mounted) return null; 
-  const userLabel = session?.user?.name || session?.user?.email;
-  const now = Date.now(); 
-
-  const upcomingContests = contests
-    .filter(c => new Date(c.startTime).getTime() > now)
-    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-    
-  const pastAndLiveContests = contests.filter(c => new Date(c.startTime).getTime() <= now);
+  }, [session]);
 
   return (
-    <main style={page}>
-      <Head><title>Gym Dashboard | DivineCode</title></Head>
-      <section style={{ maxWidth: 1180, margin: '0 auto', boxSizing: 'border-box' }}>
-        <nav style={nav}>
-          <a href="/" style={brand}>DivineCode</a>
-          <div style={navLinks}>
-            {userLabel ? <a href="/profile" style={pill}>{userLabel}</a> : <a href="/signin" style={pill}>Login</a>}
-            <a href="/duel" style={pill}>Duel</a>
-            <a href="/contests/create" style={primary}>+ Create Mashup</a>
-          </div>
-        </nav>
-        
-        <div style={hero}>
-          <p style={eyebrow}>Gym dashboard</p>
-          <h1 style={{ fontSize: 'clamp(32px, 6vw, 78px)', margin: '10px 0', letterSpacing: '-.05em', lineHeight: 1.1 }}>Contest rooms that feel alive.</h1>
-        </div>
+    <motion.main 
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }}
+      style={{ minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.35), transparent 36rem), radial-gradient(circle at top right, rgba(34,211,238,.22), transparent 30rem), #070a16' }}
+    >
+      <style>{`
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+        .skeleton-pulse { animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+      `}</style>
 
-        {upcomingContests.length > 0 && (
-          <div style={{ marginBottom: 40 }}>
-            <h3 style={{ color: '#67e8f9', marginBottom: 15 }}>Scheduled Rounds</h3>
-            {upcomingContests.map(contest => (
-              <a key={contest.id} href={`/contests/${contest.id}`} style={notificationRow}>
-                <strong>📅 {contest.title}</strong>
-                <span style={{ fontFamily: 'monospace' }}>{formatCountdown(new Date(contest.startTime).getTime() - nowTick)}</span>
+      <motion.nav initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} style={{ maxWidth: 1180, margin: '0 auto 42px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+        <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'white', textDecoration: 'none', fontWeight: 900, fontSize: 22 }}>
+          <span style={{ width: 44, height: 44, borderRadius: 15, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617' }}>DC</span>
+          DivineCode
+        </a>
+        
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          {navLinks.map(([item, href]) => (
+            <a key={item} href={href} style={{ color: '#dbeafe', textDecoration: 'none', padding: '11px 16px', borderRadius: 999, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(15,23,42,.72)' }}>{item}</a>
+          ))}
+
+          {status === 'loading' ? (
+            <div className="skeleton-pulse" style={{ width: 140, height: 42, borderRadius: 999, background: 'rgba(148,163,184,.2)' }} />
+          ) : session ? (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginLeft: 10 }}>
+              {profile ? (
+                <>
+                  <span style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(251,191,36,.15)', color: '#fbbf24', fontWeight: 'bold', fontSize: 14 }}>🏆 {profile.rating || 1200}</span>
+                  <span style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(34,211,238,.15)', color: '#67e8f9', fontWeight: 'bold', fontSize: 14 }}>🪙 {profile.coins || 0}</span>
+                </>
+              ) : (
+                <div className="skeleton-pulse" style={{ width: 120, height: 36, borderRadius: 999, background: 'rgba(148,163,184,.2)' }} />
+              )}
+              <a href="/profile" style={{ color: '#020617', textDecoration: 'none', padding: '11px 18px', borderRadius: 999, fontWeight: 900, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)' }}>
+                {profile?.username || session.user?.name?.split(' ')[0] || 'Profile'}
               </a>
-            ))}
+            </div>
+          ) : (
+            <a href="/signin" style={{ color: '#dbeafe', textDecoration: 'none', padding: '11px 16px', borderRadius: 999, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(15,23,42,.72)' }}>Login</a>
+          )}
+        </div>
+      </motion.nav>
+
+      <motion.section initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.4 }} style={{ maxWidth: 1180, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 24, alignItems: 'center' }}>
+        <div style={{ padding: 42, borderRadius: 30, border: '1px solid rgba(148,163,184,.22)', background: 'linear-gradient(180deg,rgba(15,23,42,.9),rgba(15,23,42,.62))', boxShadow: '0 28px 90px rgba(0,0,0,.35)' }}>
+          <p style={{ color: '#67e8f9', fontWeight: 800, letterSpacing: '.12em', textTransform: 'uppercase' }}>Verified competitive programming arena</p>
+          <h1 style={{ fontSize: 'clamp(44px,7vw,88px)', lineHeight: .92, letterSpacing: '-.08em', margin: '12px 0 18px' }}>Code. Sync. Duel. Interview.</h1>
+          <p style={{ color: '#cbd5e1', fontSize: 18, lineHeight: 1.75 }}>DivineCode combines Codeforces-style verified mashups, live standings, AI Explainer workspaces, and Judge0-ready custom submissions in one polished platform.</p>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 28 }}>
+            <motion.a whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} href="/contests/create" style={{ display: 'inline-block', color: '#020617', textDecoration: 'none', padding: '13px 18px', borderRadius: 999, fontWeight: 900, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)' }}>Create Verified Mashup</motion.a>
+            <motion.a whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} href="/interview" style={{ display: 'inline-block', color: '#e2e8f0', textDecoration: 'none', padding: '13px 18px', borderRadius: 999, border: '1px solid rgba(16,185,129,0.5)', background: 'rgba(16,185,129,0.1)' }}>Interview Modules</motion.a>
+            <motion.a whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} href="/practice" style={{ display: 'inline-block', color: '#e2e8f0', textDecoration: 'none', padding: '13px 18px', borderRadius: 999, border: '1px solid rgba(148,163,184,.28)' }}>Open AI Workspace</motion.a>
           </div>
-        )}
-        
-        {loading && <div style={panel}>Loading contests...</div>}
-        {error && <div style={{...panel, borderColor: '#ef4444'}}><h2 style={{color: '#ef4444'}}>Connection Error</h2><p>{error}</p></div>}
-        
-        <h3 style={{ color: '#fff', marginBottom: 20 }}>All Rounds</h3>
-        <section style={grid}>
-          {pastAndLiveContests.map((contest) => {
-            const end = new Date(contest.startTime).getTime() + contest.durationMinutes * 60000;
-            const isLive = nowTick >= new Date(contest.startTime).getTime() && nowTick <= end;
-            
-            return (
-              <a key={contest.id} href={`/contests/${contest.id}`} style={{ ...card, flex: 1, position: 'relative' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <strong style={{ fontSize: 18 }}>{contest.title}</strong>
-                  {isLive ? <span style={badgeLive}>🔴 Live</span> : <span style={badgeEnded}>✅ Completed</span>}
-                </div>
-                <p style={{ color: '#94a3b8', fontSize: 14 }}>{contest.description}</p>
-                <div style={{ marginTop: 15, fontSize: 12, color: '#475569' }}>
-                  {contest.membersCount} participants · {contest.problemsCount} problems
-                </div>
-              </a>
-            );
-          })}
-        </section>
-      </section>
-    </main>
+        </div>
+        <div style={{ padding: 28, borderRadius: 30, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.72)', boxShadow: '0 28px 90px rgba(0,0,0,.3)' }}>
+          <h2 style={{ marginTop: 0 }}>Platform Status</h2>
+          {['Codeforces Automator (No bans)', 'Judge0 C++ / Python Support', 'AI Explainer & Debugger', 'Live standings and submission feed'].map((x) => (
+            <p key={x} style={{ padding: 14, borderRadius: 16, background: 'rgba(2,6,23,.55)', border: '1px solid rgba(148,163,184,.16)' }}>✅ {x}</p>
+          ))}
+        </div>
+      </motion.section>
+
+      <motion.section initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.6 }} style={{ maxWidth: 1180, margin: '28px auto 0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 18 }}>
+        {features.map((f) => (
+          <motion.a whileHover={{ scale: 1.02 }} href={f.href} key={f.title} style={{ color: '#eef2ff', textDecoration: 'none', padding: 22, borderRadius: 24, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.72)', boxShadow: '0 18px 60px rgba(0,0,0,.22)' }}>
+            <div style={{ fontSize: 30 }}>{f.icon}</div>
+            <h3>{f.title}</h3>
+            <p style={{ color: '#a8b3c7', lineHeight: 1.55 }}>{f.text}</p>
+          </motion.a>
+        ))}
+      </motion.section>
+
+      {/* ✅ Issue #14 / #16 Fixed: Floating AI Mentor Avatar Invoked! */}
+      <motion.div
+        animate={{ y: [0, -15, 0] }}
+        transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
+        style={{ position: 'fixed', bottom: 40, right: 40, zIndex: 50, display: 'flex', alignItems: 'flex-end', gap: 10 }}
+      >
+        <div style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid #38bdf8', padding: '12px 16px', borderRadius: '16px 16px 0 16px', color: '#e2e8f0', boxShadow: '0 10px 25px rgba(0,0,0,0.5)', maxWidth: 220, fontSize: 14 }}>
+          <strong style={{color: '#38bdf8', display: 'block', marginBottom: 4}}>AI Mentor</strong>
+          Ready to level up? I have <b>10,000+ DSA & System Design</b> problems waiting for you! Let's code.
+        </div>
+        <div style={{ width: 60, height: 60, borderRadius: '50%', background: 'linear-gradient(135deg, #38bdf8, #818cf8)', display: 'flex', justifyContent: 'center', alignItems: 'center', fontSize: 32, boxShadow: '0 10px 25px rgba(56,189,248,0.4)', border: '2px solid #0f172a' }}>
+          🤖
+        </div>
+      </motion.div>
+
+    </motion.main>
   );
 }
-
-const page: CSSProperties = { minHeight: '100vh', padding: 40, fontFamily: 'Inter, sans-serif', color: '#eef2ff', background: '#070a16' };
-const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', marginBottom: 40 };
-const brand: CSSProperties = { color: '#fff', textDecoration: 'none', fontWeight: 950, fontSize: 24 };
-const navLinks: CSSProperties = { display: 'flex', gap: 10 };
-const pill: CSSProperties = { padding: '10px 16px', borderRadius: 999, border: '1px solid #334155', color: '#eef2ff', textDecoration: 'none', fontSize: 14, fontWeight: '600' };
-const primary: CSSProperties = { ...pill, background: '#38bdf8', color: '#000', fontWeight: 'bold' };
-const hero: CSSProperties = { padding: 40, border: '1px solid #1e293b', borderRadius: 20, marginBottom: 40, background: '#0f172a' };
-const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 900, textTransform: 'uppercase', fontSize: 12, marginBottom: 8 };
-const grid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 };
-const card: CSSProperties = { padding: 20, border: '1px solid #1e293b', borderRadius: 16, background: '#0f172a', textDecoration: 'none', color: '#fff', transition: 'transform 0.2s' };
-const panel: CSSProperties = { padding: 20, border: '1px solid #1e293b', borderRadius: 16, background: '#0f172a' };
-const notificationRow: CSSProperties = { display: 'flex', justifyContent: 'space-between', padding: 15, background: '#1e293b', marginBottom: 10, borderRadius: 8, color: '#fff', textDecoration: 'none' };
-const badgeLive: CSSProperties = { background: '#991b1b', color: '#fca5a5', padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 'bold' };
-const badgeEnded: CSSProperties = { background: '#064e3b', color: '#6ee7b7', padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 'bold' };

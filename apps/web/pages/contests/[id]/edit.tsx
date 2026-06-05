@@ -1,6 +1,7 @@
 import { CSSProperties, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
+import toast, { Toaster } from 'react-hot-toast';
 
 export async function getServerSideProps() { return { props: {} }; }
 
@@ -37,6 +38,11 @@ export default function ContestEditPage() {
   const [newProblemPlatform, setNewProblemPlatform] = useState('Codeforces');
   const [newProblemUrl, setNewProblemUrl] = useState(''); 
   
+  // 👉 Custom Problem States
+  const [customTitle, setCustomTitle] = useState('');
+  const [customDescription, setCustomDescription] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -72,8 +78,9 @@ export default function ContestEditPage() {
     });
     const data = await res.json();
     setSaving(false);
-    if (!res.ok) return alert(data.error || 'Could not save contest');
+    if (!res.ok) return toast.error(data.error || 'Could not save contest');
     setContest(data);
+    toast.success('Settings saved successfully!');
   }
 
   async function lookupProblem(platform: string, code: string) {
@@ -84,7 +91,7 @@ export default function ContestEditPage() {
   }
 
   async function addProblem() {
-    if (!id || !session || !newProblemCode.trim()) return alert('Enter a problem code.');
+    if (!id || !session || !newProblemCode.trim()) return toast.error('Enter a problem code.');
     try {
       const p = await lookupProblem(newProblemPlatform, newProblemCode);
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems`, { 
@@ -93,15 +100,15 @@ export default function ContestEditPage() {
         body: JSON.stringify(p) 
       });
       const data = await res.json();
-      if (!res.ok) return alert(data.error || 'Could not add problem');
+      if (!res.ok) return toast.error(data.error || 'Could not add problem');
       setContest(data);
       setNewProblemCode('');
-    } catch (e: any) { alert(e.message || 'Could not add problem'); }
+      toast.success('Problem added!');
+    } catch (e: any) { toast.error(e.message || 'Could not add problem'); }
   }
 
-  // 👉 Smart Scraper logic
   async function addProblemFromUrl() {
-    if (!id || !session || !newProblemUrl.trim()) return alert('Enter a problem URL.');
+    if (!id || !session || !newProblemUrl.trim()) return toast.error('Enter a problem URL.');
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/scrape`, { 
         method: 'POST', 
@@ -109,11 +116,65 @@ export default function ContestEditPage() {
         body: JSON.stringify({ url: newProblemUrl }) 
       });
       const data = await res.json();
-      if (!res.ok) return alert(data.error || 'Could not scrape problem. Check URL.');
+      if (!res.ok) return toast.error(data.error || 'Could not scrape problem. Check URL.');
       setContest(data);
       setNewProblemUrl('');
-    } catch (e: any) { alert(e.message || 'Scrape failed'); }
+      toast.success('Problem scraped and added!');
+    } catch (e: any) { toast.error(e.message || 'Scrape failed'); }
   }
+
+  // 👉 Custom Image Uploader handler
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    const formData = new FormData();
+    formData.append('image', file);
+
+    setUploadingImage(true);
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/upload-image`, {
+        method: 'POST',
+        body: formData // DO NOT set Content-Type header manually for FormData
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCustomDescription(prev => prev + `\n<br /><img src="${API_BASE_URL}${data.url}" alt="Problem Image" style="max-width: 100%; border-radius: 8px;" />\n<br />`);
+        toast.success("Image uploaded & appended to description!");
+      } else {
+        toast.error("Image upload failed.");
+      }
+    } catch (err) {
+      toast.error("Image upload failed.");
+    } finally {
+      setUploadingImage(false);
+      e.target.value = ''; // reset input
+    }
+  };
+
+  const addCustomProblem = async () => {
+    if (!id || !session || !customTitle.trim()) return toast.error('Enter a title for your custom problem.');
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/mashup`, {
+        method: 'POST',
+        headers: viewerHeaders(session),
+        body: JSON.stringify({
+          type: 'CUSTOM',
+          customData: {
+            title: customTitle,
+            description: customDescription,
+            testcases: [] 
+          }
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) return toast.error(data.error || 'Could not add custom problem');
+      
+      setCustomTitle('');
+      setCustomDescription('');
+      toast.success('Custom problem added successfully!');
+      loadContest(); 
+    } catch (e: any) { toast.error(e.message || 'Custom add failed'); }
+  };
 
   async function replaceProblem(problemId: string) {
     const code = prompt('Enter new problem code (e.g. 1500A):');
@@ -126,9 +187,10 @@ export default function ContestEditPage() {
         body: JSON.stringify(p)
       });
       const data = await res.json();
-      if (!res.ok) return alert(data.error || 'Could not replace problem');
+      if (!res.ok) return toast.error(data.error || 'Could not replace problem');
       setContest(data);
-    } catch (e: any) { alert(e.message || 'Could not replace problem'); }
+      toast.success('Problem replaced successfully!');
+    } catch (e: any) { toast.error(e.message || 'Could not replace problem'); }
   }
 
   async function removeProblem(problemId: string) {
@@ -139,9 +201,10 @@ export default function ContestEditPage() {
         headers: viewerHeaders(session)
       });
       const data = await res.json();
-      if (!res.ok) return alert(data.error || 'Could not remove problem');
+      if (!res.ok) return toast.error(data.error || 'Could not remove problem');
       setContest(data);
-    } catch (e: any) { alert(e.message || 'Could not remove problem'); }
+      toast.success('Problem removed!');
+    } catch (e: any) { toast.error(e.message || 'Could not remove problem'); }
   }
 
   async function deleteContest() {
@@ -154,9 +217,9 @@ export default function ContestEditPage() {
       if (res.ok) router.push('/contests');
       else {
         const data = await res.json();
-        alert(data.error || 'Could not delete contest');
+        toast.error(data.error || 'Could not delete contest');
       }
-    } catch (e: any) { alert(e.message || 'Could not delete contest'); }
+    } catch (e: any) { toast.error(e.message || 'Could not delete contest'); }
   }
 
   if (status === 'loading') return <main style={page}>Checking account...</main>;
@@ -167,6 +230,7 @@ export default function ContestEditPage() {
 
   return (
     <main style={page}>
+      <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
       <section style={{ maxWidth: 1120, margin: '0 auto' }}>
         <nav style={nav}>
           <a href={`/contests/${id}`} style={link}>← Back to live room</a>
@@ -209,13 +273,40 @@ export default function ContestEditPage() {
             </div>
           </div>
 
-          <div style={{ borderTop: '1px solid #1e293b', paddingTop: 20 }}>
+          <div style={{ borderTop: '1px solid #1e293b', paddingTop: 20, marginBottom: 20 }}>
             <label style={{ display: 'block', marginBottom: 5, color: '#94a3b8' }}>Option 2: Smart Scrape via URL (Extracts Code & Test Cases)</label>
             <div style={{ display: 'flex', gap: 12 }}>
               <input value={newProblemUrl} onChange={(e) => setNewProblemUrl(e.target.value)} placeholder="https://codeforces.com/problemset/problem/..." style={{ ...input, flex: 1, margin: 0 }} />
               <button onClick={addProblemFromUrl} style={primary}>Scrape & Add</button>
             </div>
           </div>
+
+          {/* 👉 NEW: Option 3 Custom Problem creation with Image Upload */}
+          <div style={{ borderTop: '1px solid #1e293b', paddingTop: 20 }}>
+            <label style={{ display: 'block', marginBottom: 5, color: '#94a3b8' }}>Option 3: Create Custom Problem</label>
+            <input value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} placeholder="Custom Problem Title" style={input} />
+            
+            <div style={{ background: '#020617', padding: 10, borderRadius: '12px 12px 0 0', border: '1px solid #334155', borderBottom: 'none', display: 'flex', gap: 10, alignItems: 'center' }}>
+              <span style={{ fontSize: 13, color: '#94a3b8' }}>Insert Image:</span>
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={handleImageUpload} 
+                style={{ fontSize: 13, color: '#e2e8f0', width: 220 }} 
+                disabled={uploadingImage}
+              />
+              {uploadingImage && <span style={{ color: '#38bdf8', fontSize: 12 }}>Uploading...</span>}
+            </div>
+            <textarea 
+              value={customDescription} 
+              onChange={(e) => setCustomDescription(e.target.value)} 
+              placeholder="Write your HTML/Text description here. Use the image uploader above to automatically inject images." 
+              style={{ ...input, minHeight: 140, borderRadius: '0 0 12px 12px' }} 
+            />
+            
+            <button onClick={addCustomProblem} style={primary}>Create Custom Problem</button>
+          </div>
+
         </section>
 
         <section style={panel}>
@@ -224,7 +315,7 @@ export default function ContestEditPage() {
             <div key={problem.id} style={row}>
               <strong style={{ fontSize: 24, color: '#e2e8f0' }}>{String.fromCharCode(65 + index)}</strong>
               <div style={{ flex: 1 }}>
-                <b style={{ fontSize: 18 }}>{problem.title}</b>
+                <b style={{ fontSize: 18 }}>{problem.titleSnapshot || problem.title}</b>
                 <p style={{ margin: '4px 0 0', color: '#94a3b8' }}>{problem.platform} - Rating {problem.rating || problem.difficulty || 'Practice'}</p>
               </div>
               <button onClick={() => replaceProblem(problem.id)} style={ghost}>Replace</button>

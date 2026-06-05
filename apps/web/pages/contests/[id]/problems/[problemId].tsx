@@ -69,7 +69,7 @@ export default function ContestProblemWorkspace() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 👉 NEW: MCQ Specific States
+  // MCQ Specific States
   const [mcqData, setMcqData] = useState<any>(null);
   const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
 
@@ -116,9 +116,9 @@ export default function ContestProblemWorkspace() {
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
   
   // Identify if this is a theory question
-  const isMCQ = problem?.platform === 'Interview MCQ' || !!problem?.interviewQuestionId;
+  const isMCQ = problem?.platform === 'DIVINECODE' && !!problem?.interviewQuestionId;
 
-  // 👉 Fetch MCQ Data if applicable
+  // Fetch MCQ Data if applicable
   useEffect(() => {
     if (isMCQ && problem?.interviewQuestionId) {
       fetch(`${API_V2_BASE_URL}/interview/questions`, {
@@ -173,6 +173,39 @@ export default function ContestProblemWorkspace() {
     setChatInput('');
   };
 
+  // 👉 CPH Integration
+  const sendToCPH = async () => {
+    if (!problem) return;
+    const cphPayload = {
+      name: problem.titleSnapshot || 'Problem',
+      group: "DivineCode",
+      url: window.location.href,
+      interactive: false,
+      memoryLimit: 256,
+      timeLimit: 2000,
+      tests: testcases.filter(tc => tc.input || tc.expectedOutput).map(tc => ({
+        input: tc.input,
+        output: tc.expectedOutput
+      })),
+      testType: "single",
+      input: { type: "stdin" },
+      output: { type: "stdout" },
+      languages: { java: { taskClass: "Main" } }
+    };
+
+    try {
+      const res = await fetch("http://localhost:10043/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cphPayload)
+      });
+      if (res.ok) toast.success("Test cases sent to CPH successfully!");
+      else toast.error("Make sure CPH extension is running.");
+    } catch (err) {
+      toast.error("Could not connect to CPH. Is the extension open?");
+    }
+  };
+
   const runCustomCode = async () => {
     if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
     setActiveTab('terminal');
@@ -182,7 +215,7 @@ export default function ContestProblemWorkspace() {
         method: 'POST', 
         headers: { 
           'Content-Type': 'application/json',
-          'x-user-email': session?.user?.email || '' // 👉 Security Header Fix
+          'x-user-email': session?.user?.email || '' 
         },
         body: JSON.stringify({ sourceCode: code, language, input: customInput })
       });
@@ -210,7 +243,7 @@ export default function ContestProblemWorkspace() {
           method: 'POST', 
           headers: { 
             'Content-Type': 'application/json',
-            'x-user-email': session?.user?.email || '' // 👉 Security Header Fix
+            'x-user-email': session?.user?.email || ''
           },
           body: JSON.stringify({ sourceCode: code, language, input: newCases[i].input })
         });
@@ -240,7 +273,6 @@ export default function ContestProblemWorkspace() {
     }
   };
 
-  // 👉 UPDATED: Handles both Code string OR JSON MCQ Arrays dynamically
   const handleSubmitCode = async () => {
     if (isMCQ) {
        if (selectedOptions.length === 0) return alert("Please select an answer before submitting.");
@@ -259,7 +291,6 @@ export default function ContestProblemWorkspace() {
     const finalCode = isMCQ ? JSON.stringify(selectedOptions) : code;
 
     try {
-      // Create the submission
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
         method: 'POST', 
         headers: { 
@@ -271,12 +302,11 @@ export default function ContestProblemWorkspace() {
       const submission = await res.json();
       if (!res.ok) throw new Error(submission.error || 'Could not create submission');
 
-      // Trigger the background Wandbox Judge and WAIT for it
       const judgeRes = await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge?wait=true`, { 
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json', 
-          'x-user-email': session?.user?.email || '' // 👉 Security Header Fix
+          'x-user-email': session?.user?.email || '' 
         }
       });
       const judgeData = await judgeRes.json();
@@ -390,6 +420,7 @@ export default function ContestProblemWorkspace() {
                 <option value="python">Python 3</option>
                 <option value="java">Java</option>
               </select>
+              <button onClick={sendToCPH} style={{...ghostBtn, borderColor: '#10b981', color: '#10b981'}}>⚡ Send to CPH</button>
               <button onClick={runAllTestcases} style={ghostBtn}>Run Test Cases</button>
               <button onClick={runCustomCode} style={runBtn}>Terminal ▶</button>
             </>
@@ -413,28 +444,17 @@ export default function ContestProblemWorkspace() {
             ) : (
               <>
                 {problem.externalUrl ? (
-  <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-    <iframe 
-      src={problem.externalUrl} 
-      style={{...iframeStyle, flex: 1}} 
-      title="Problem Statement" 
-    />
-    <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center' }}>
-       <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: 'bold' }}>
-         ↗ Open Original Problem in New Tab
-       </a>
-    </div>
-  </div>
-) : (
-  <div style={{ padding: 20 }}>
-    <div dangerouslySetInnerHTML={{ __html: problem.description }} />
-  </div>
-)}
-                {problem.externalUrl && (
-                  <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center', borderTop: '1px solid #334155' }}>
-                      <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontSize: 13, fontWeight: 'bold' }}>
-                        🔗 Having trouble viewing? Open Original Problem Here
-                      </a>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                    <iframe src={problemIframeUrl} style={{...iframeStyle, flex: 1}} title="Problem Statement" />
+                    <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center' }}>
+                       <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: 'bold' }}>
+                         ↗ Open Original Problem in New Tab
+                       </a>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ padding: 20 }}>
+                    <div dangerouslySetInnerHTML={{ __html: problem.description || 'No description provided.' }} />
                   </div>
                 )}
               </>
