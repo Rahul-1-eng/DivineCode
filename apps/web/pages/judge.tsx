@@ -49,7 +49,10 @@ export default function JudgePage() {
     try {
       const res = await fetch(`${API_V2_BASE_URL}/execute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-email': session?.user?.email || '' // 👉 Security Header Fix
+        },
         body: JSON.stringify({ sourceCode: code, language, input: newCases[index].input })
       });
       const data = await res.json();
@@ -80,7 +83,9 @@ export default function JudgePage() {
     if (!cfUrl.includes('codeforces')) return alert('Please enter a valid Codeforces URL');
     setIsFetchingSamples(true);
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(cfUrl)}`);
+      const res = await fetch(`${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(cfUrl)}`, {
+        headers: { 'x-user-email': session?.user?.email || '' }
+      });
       const html = await res.text();
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, 'text/html');
@@ -112,7 +117,11 @@ export default function JudgePage() {
     setAiGenLoading(true);
     try {
       const res = await fetch(`${API_V2_BASE_URL}/ai/generate-testcases`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-email': session?.user?.email || '' 
+        },
         body: JSON.stringify({ problemDescription: aiGenDesc, masterSolution: aiGenSolution })
       });
       const data = await res.json();

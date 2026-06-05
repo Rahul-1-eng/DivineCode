@@ -1,9 +1,11 @@
 import { CSSProperties, useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { useSession } from 'next-auth/react'; // 👉 FIX: Imported useSession
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
 export default function PracticePage() {
+  const { data: session } = useSession(); // 👉 FIX: Initialized session
   const [problems, setProblems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -13,7 +15,10 @@ export default function PracticePage() {
   const [platformFilter, setPlatformFilter] = useState('All');
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/problems`)
+    // 👉 FIX: Injected security headers
+    fetch(`${API_BASE_URL}/api/problems`, {
+      headers: { 'x-user-email': session?.user?.email || '' }
+    })
       .then((r) => r.json())
       .then((d) => {
         setProblems(Array.isArray(d) ? d : []);
@@ -23,7 +28,7 @@ export default function PracticePage() {
         setProblems([]);
         setLoading(false);
       });
-  }, []);
+  }, [session]); // 👉 FIX: Dependency updated
 
   const getDifficultyColor = (rating: number | null) => {
     if (!rating) return '#94a3b8'; 

@@ -8,6 +8,7 @@ const features = [
   { title: 'Verified Contests', href: '/contests', icon: '🏆', text: 'Codeforces-style gym rooms with live sync and standings.' },
   { title: 'Create Mashup', href: '/contests/create', icon: '👥', text: 'Smart problem lookup, CF handles, fairness checks.' },
   { title: 'Duel Arena', href: '/duel', icon: '⚔️', text: 'Real-time MCQ battles with live scoring.' },
+  { title: 'Interview Modules', href: '/interview', icon: '💼', text: 'Practice curated DSA questions and theory tracks.' },
   { title: 'AI Avatar Practice', href: '/practice', icon: '🤖', text: 'IDE workspace with an AI Explainer and detailed reporting.' },
   { title: 'Submission Judge', href: '/judge', icon: '⚙️', text: 'Judge0-ready for custom problems, CF sync for external problems.' }
 ];
@@ -81,6 +82,7 @@ export default function Home() {
           <p style={{ color: '#cbd5e1', fontSize: 18, lineHeight: 1.75 }}>DivineCode combines Codeforces-style verified mashups, live standings, AI Explainer workspaces, and Judge0-ready custom submissions in one polished platform.</p>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 28 }}>
             <a href="/contests/create" style={{ color: '#020617', textDecoration: 'none', padding: '13px 18px', borderRadius: 999, fontWeight: 900, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)' }}>Create Verified Mashup</a>
+            <a href="/interview" style={{ color: '#e2e8f0', textDecoration: 'none', padding: '13px 18px', borderRadius: 999, border: '1px solid rgba(16,185,129,0.5)', background: 'rgba(16,185,129,0.1)' }}>Interview Modules</a>
             <a href="/practice" style={{ color: '#e2e8f0', textDecoration: 'none', padding: '13px 18px', borderRadius: 999, border: '1px solid rgba(148,163,184,.28)' }}>Open AI Workspace</a>
           </div>
         </div>

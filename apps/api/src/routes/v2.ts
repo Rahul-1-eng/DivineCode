@@ -52,6 +52,31 @@ function requireOwner(contest: any, req: Request) {
   return viewer;
 }
 
+// 👉 FIX: User who wrote the code is allowed to execute the judge
+async function requireJudgeAccess(submissionId: string, req: Request) {
+  const workerSecret = process.env.JUDGE_WORKER_SECRET;
+  const providedSecret = String(req.headers['x-worker-secret'] || '').trim();
+  if (workerSecret && providedSecret && workerSecret === providedSecret) return;
+
+  const submission = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    include: { 
+      user: true, 
+      contest: { include: { createdBy: true, participants: { include: { user: true, externalHandle: true } } } } 
+    }
+  });
+
+  if (!submission) throw new Error('Submission not found');
+
+  const viewer = viewerFromRequest(req);
+  
+  if (viewer.email && submission.user?.email === viewer.email) return;
+  if (viewer.userId && submission.userId === viewer.userId) return;
+
+  if (!submission.contest) return;
+  requireOwner(submission.contest, req);
+}
+
 function safeSanitize(contest: any, req: Request) {
   try {
     return sanitizeContestForViewer(contest, viewerFromRequest(req));
@@ -123,7 +148,6 @@ export function mountV2Routes(app: Express, io: Server) {
 
     if (type === 'URL' && url) {
       let scrapedTitle = 'External Problem Resource';
-      // 👉 NO ERROR THROWN: If scraping fails, it injects this anchor link fallback directly into the HTML
       let scrapedHtml = `<div style="padding:30px;text-align:center;background:#020617;border-radius:12px;border:1px dashed #334155;">
         <h3 style="color:#94a3b8;margin-bottom:15px;">Statement view blocked by host platform</h3>
         <p style="color:#64748b;margin-bottom:25px;">Please read the problem constraints explicitly on the original site.</p>
@@ -211,6 +235,14 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
 
   router.post('/submissions/:id/judge', asyncRoute(async (req, res) => {
+    await requireJudgeAccess(req.params.id, req); // 👉 FIX: User validated, judge access approved
+    
+    if (String(req.query.wait || req.body?.wait || '') !== 'true') {
+      const job = await enqueueJudgeSubmission(req.params.id);
+      res.status(202).json({ ok: true, queued: true, job });
+      return;
+    }
+
     const result = await judgeQueuedSubmission(req.params.id);
     
     if (result.submission.contestId) {
@@ -230,8 +262,8 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
 
   router.post('/execute', asyncRoute(async (req, res) => {
-    const { sourceCode, language, input } = req.body;
-    const result = await executeSubmission(sourceCode, language, input || '');
+    const { sourceCode, language, input, expectedOutput } = req.body;
+    const result = await executeSubmission(sourceCode, language, input || '', expectedOutput);
     res.json(result);
   }));
 

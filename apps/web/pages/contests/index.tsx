@@ -12,19 +12,29 @@ export default function ContestsPage() {
   const [mounted, setMounted] = useState(false);
   const [nowTick, setNowTick] = useState(Date.now()); 
 
+  // 👉 FIX: Separated the ticker so it runs independently
   useEffect(() => {
     setMounted(true);
-    loadContests(); 
-    
     const ticker = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(ticker);
   }, []);
+
+  // 👉 FIX: Added session dependency so it fetches AFTER you are logged in
+  useEffect(() => {
+    loadContests();
+  }, [session]); 
 
   async function loadContests() {
     try { 
       setLoading(true);
       setError('');
-      const res = await fetch(`${API_V2_BASE_URL}/contests`); 
+      // 👉 FIX: Injected the mandatory security header
+      const res = await fetch(`${API_V2_BASE_URL}/contests`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': session?.user?.email || ''
+        }
+      }); 
       if (!res.ok) throw new Error('Failed to fetch contests from server');
       const data = await res.json(); 
       setContests(Array.isArray(data) ? data : []); 
@@ -119,7 +129,6 @@ export default function ContestsPage() {
                 return (
                   <a key={contest.id} href={`/contests/${contest.id}`} style={notificationRow}>
                     <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-                      {/* 👉 ADDED: The 📅 Schedule icon */}
                       <strong style={{ fontSize: 16, color: '#eef2ff' }}>📅 {contest.title}</strong>
                       <span style={{ fontSize: 13, color: '#94a3b8' }}>Starts at {new Date(contest.startTime).toLocaleString()}</span>
                     </div>

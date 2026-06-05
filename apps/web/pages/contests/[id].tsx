@@ -16,7 +16,6 @@ export function PostContestAiRecommendations({ contestId, contestStatus }: { con
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Only fetch recommendations if the contest is actually finished
     if (contestStatus !== 'ENDED') return;
 
     setLoading(true);
@@ -189,7 +188,10 @@ export default function ContestRoomPage() {
 
   async function loadContest() {
     if (!id) return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}${viewerQuery(session)}`);
+    // 👉 FIX: Added viewerHeaders to bypass "Connection Error" on private contests
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}${viewerQuery(session)}`, {
+      headers: viewerHeaders(session)
+    });
     const data = await res.json();
     if (!res.ok) { setError(data.error || 'Contest not found'); return; }
     

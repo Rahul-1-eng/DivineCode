@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
+import { useSession } from 'next-auth/react'; // 👉 Added import
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -8,6 +9,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4
 export default function ProblemWorkspace() {
   const router = useRouter();
   const { id } = router.query;
+  const { data: session } = useSession(); // 👉 Extracted session
 
   const [problem, setProblem] = useState<any>(null);
   const [language, setLanguage] = useState('cpp');
@@ -30,7 +32,11 @@ export default function ProblemWorkspace() {
     setActiveTab('console');
     try {
       const res = await fetch(`${API_BASE_URL}/api/v2/submissions/run-samples`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-email': session?.user?.email || '' // 👉 Security Header Fix
+        },
         body: JSON.stringify({ problemId: problem.id, code, language })
       });
       const data = await res.json();
@@ -55,7 +61,7 @@ export default function ProblemWorkspace() {
         <a href="/practice" style={{ color: '#67e8f9', textDecoration: 'none', fontWeight: 900, display: 'inline-block', marginBottom: 16 }}>← Back to Practice</a>
         <h1 style={{ margin: '0 0 8px 0' }}>{problem.title}</h1>
         <div style={{ color: '#67e8f9', marginBottom: 20 }}>Difficulty: {problem.difficulty || problem.rating || 'Unrated'}</div>
-        <div style={{ lineHeight: 1.7, color: '#cbd5e1', fontSize: '15px' }}>{problem.description}</div>
+        <div style={{ lineHeight: 1.7, color: '#cbd5e1', fontSize: '15px' }} dangerouslySetInnerHTML={{__html: problem.description}}></div>
 
         {(problem.stdin || problem.expectedOutput) && (
           <div style={{ marginTop: 24, padding: 16, borderRadius: 12, background: '#020617', border: '1px solid rgba(148,163,184,.18)' }}>

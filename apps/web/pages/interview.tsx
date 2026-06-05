@@ -22,9 +22,12 @@ export default function InterviewPage() {
   const [newQ, setNewQ] = useState({ trackId: '', title: '', prompt: '', opt0: '', opt1: '', opt2: '', opt3: '', correctIndex: 0, explanation: '' });
 
   useEffect(() => {
+    // 👉 FIX: Added Security Headers to allow the backend to return interview data
+    const headers = { 'x-user-email': session?.user?.email || '' };
+
     Promise.all([
-      fetch(`${API_BASE_URL}/api/v2/interview/tracks`).then(r => r.json()),
-      fetch(`${API_BASE_URL}/api/v2/interview/questions`).then(r => r.json())
+      fetch(`${API_BASE_URL}/api/v2/interview/tracks`, { headers }).then(r => r.json()),
+      fetch(`${API_BASE_URL}/api/v2/interview/questions`, { headers }).then(r => r.json())
     ]).then(([trackData, qData]) => {
       setTracks(Array.isArray(trackData) ? trackData : []);
       setQuestions(Array.isArray(qData) ? qData : []);
@@ -33,7 +36,7 @@ export default function InterviewPage() {
       }
       setLoading(false);
     }).catch(console.error);
-  }, []);
+  }, [session]); // 👉 FIX: Re-fetch if session updates
 
   const filtered = useMemo(() => {
     let list = selectedTrack === 'All' ? questions : questions.filter(q => q.trackId === selectedTrack);
@@ -118,7 +121,6 @@ export default function InterviewPage() {
 
         <div style={{ display: 'grid', gap: 16 }}>
           {loading ? (
-            // 👉 NEW: Skeleton Loader while waiting for DB
             <>
               {[1, 2, 3].map((i) => (
                 <section key={i} className="skeleton-pulse" style={{...card, minHeight: 200}}>
@@ -222,7 +224,7 @@ export default function InterviewPage() {
   );
 }
 
-// RESTORED CSS
+// Styles
 const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(34,211,238,.2), transparent 34rem), #070a16', boxSizing: 'border-box' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 24 };
 const brand: CSSProperties = { color: '#eef2ff', textDecoration: 'none', fontWeight: 950, fontSize: 'clamp(18px, 4vw, 24px)' };

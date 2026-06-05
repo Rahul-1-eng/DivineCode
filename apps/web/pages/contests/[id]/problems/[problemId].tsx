@@ -93,7 +93,9 @@ export default function ContestProblemWorkspace() {
 
   useEffect(() => {
     if (!id || !session?.user?.email) return;
-    fetch(`${API_V2_BASE_URL}/contests/${id}?viewerEmail=${session.user.email}`)
+    fetch(`${API_V2_BASE_URL}/contests/${id}?viewerEmail=${session.user.email}`, {
+      headers: { 'x-user-email': session.user.email }
+    })
       .then(res => res.json())
       .then(data => {
         const cData = data.data || data;
@@ -119,13 +121,15 @@ export default function ContestProblemWorkspace() {
   // 👉 Fetch MCQ Data if applicable
   useEffect(() => {
     if (isMCQ && problem?.interviewQuestionId) {
-      fetch(`${API_V2_BASE_URL}/interview/questions`)
+      fetch(`${API_V2_BASE_URL}/interview/questions`, {
+        headers: { 'x-user-email': session?.user?.email || '' }
+      })
         .then(r => r.json())
         .then(data => {
           if (Array.isArray(data)) setMcqData(data.find(q => q.id === problem.interviewQuestionId));
         });
     }
-  }, [isMCQ, problem]);
+  }, [isMCQ, problem, session]);
 
   // WebSocket Connection
   useEffect(() => {
@@ -175,7 +179,11 @@ export default function ContestProblemWorkspace() {
     setTerminalOutput(`> Compiling and running...\n`);
     try {
       const res = await fetch(`${API_V2_BASE_URL}/execute`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-email': session?.user?.email || '' // 👉 Security Header Fix
+        },
         body: JSON.stringify({ sourceCode: code, language, input: customInput })
       });
       const data = await res.json();
@@ -199,7 +207,11 @@ export default function ContestProblemWorkspace() {
 
       try {
         const res = await fetch(`${API_V2_BASE_URL}/execute`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST', 
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-user-email': session?.user?.email || '' // 👉 Security Header Fix
+          },
           body: JSON.stringify({ sourceCode: code, language, input: newCases[i].input })
         });
         const data = await res.json();
@@ -247,14 +259,26 @@ export default function ContestProblemWorkspace() {
     const finalCode = isMCQ ? JSON.stringify(selectedOptions) : code;
 
     try {
+      // Create the submission
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'application/json', 
+          'x-user-email': session?.user?.email || '' 
+        },
         body: JSON.stringify({ contestProblemId: problemId, code: finalCode, language: finalLanguage })
       });
       const submission = await res.json();
       if (!res.ok) throw new Error(submission.error || 'Could not create submission');
 
-      const judgeRes = await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge?wait=true`, { method: 'POST' });
+      // Trigger the background Wandbox Judge and WAIT for it
+      const judgeRes = await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge?wait=true`, { 
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json', 
+          'x-user-email': session?.user?.email || '' // 👉 Security Header Fix
+        }
+      });
       const judgeData = await judgeRes.json();
       if (!judgeRes.ok) throw new Error(judgeData.error || 'Error executing system judge.');
 
@@ -539,6 +563,33 @@ export default function ContestProblemWorkspace() {
         </section>
       </div>
 
+      {showCfModal && (
+        <div style={modalOverlay}>
+          <div style={modalContent}>
+            <h2 style={{ margin: '0 0 15px 0', color: '#38bdf8' }}>Codeforces Submission Automator</h2>
+            <p style={{ color: '#cbd5e1', lineHeight: '1.6', marginBottom: 20 }}>
+              To ensure fairness without scraping penalties, submit this via Codeforces. We will instantly sync the result.
+            </p>
+            <ol style={{ color: '#e2e8f0', lineHeight: '1.8', marginBottom: 25, paddingLeft: 20 }}>
+              <li><strong>Copy</strong> your code.</li>
+              <li><strong>Click the link</strong> to open Codeforces directly to the Submit page.</li>
+              <li><strong>Submit</strong> the code.</li>
+              <li>Click <strong>"Sync Verdict"</strong>.</li>
+            </ol>
+            
+            <div style={{ display: 'flex', gap: 10, marginBottom: 25 }}>
+              <button onClick={() => navigator.clipboard.writeText(code).then(() => toast.success('Code copied!'))} style={secondaryBtn}>📋 Copy Code</button>
+              <a href={problem.externalUrl || 'https://codeforces.com/problemset/submit'} target="_blank" rel="noreferrer" style={primaryBtn}>↗ Open CF Submit Page</a>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid #334155', paddingTop: 20 }}>
+              <button onClick={() => setShowCfModal(false)} style={cancelBtn}>Cancel</button>
+              <button onClick={handleSyncCodeforces} disabled={isSyncing} style={syncBtn}>{isSyncing ? 'Syncing via API...' : '🔄 Sync Verdict'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Global Team Chat Embedded in Workspace */}
       {contest?.viewerMember?.teamId && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
@@ -599,7 +650,9 @@ const codeBlockSuccess: CSSProperties = { ...codeBlockError, background: 'rgba(7
 const modalOverlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(2, 6, 23, 0.8)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
 const modalContent: CSSProperties = { background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b', width: '90%', maxWidth: 500, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' };
 const secondaryBtn: CSSProperties = { background: '#334155', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
-const primaryBtn: CSSProperties = { background: '#0284c7', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', textDecoration: 'none', textAlign: 'center' };
+const primaryBtn: CSSProperties = { background: '#0284c7', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', textDecoration: 'none', textAlign: 'center', display: 'inline-block' };
+const cancelBtn: CSSProperties = { background: 'transparent', color: '#94a3b8', border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 'bold' };
+const syncBtn: CSSProperties = { background: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
 const tcCard: CSSProperties = { background: '#020617', border: '1px solid #334155', borderRadius: 8, overflow: 'hidden', marginBottom: 15 };
 const tcHeader: CSSProperties = { background: '#1e293b', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', fontSize: 13 };
 const tcBox: CSSProperties = { width: '100%', height: 60, background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#fff', fontFamily: 'monospace', padding: 8, fontSize: 13, resize: 'none' };
