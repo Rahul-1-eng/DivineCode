@@ -24,18 +24,50 @@ export default function ContestsPage() {
     loadContests();
   }, [session]); 
 
+import { useEffect, useState, CSSProperties } from 'react';
+import { useSession } from 'next-auth/react';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
+
+export default function ContestsPage() {
+  const { data: session, status } = useSession();
+  const [contests, setContests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [nowTick, setNowTick] = useState(Date.now()); 
+
+  useEffect(() => {
+    const ticker = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(ticker);
+  }, []);
+
+  // 👉 FIX: This only runs when the session is actually loaded!
+  useEffect(() => {
+    if (status === 'loading') return;
+    loadContests(); 
+  }, [status, session]);
+
   async function loadContests() {
     try { 
       setLoading(true);
       setError('');
-      // 👉 FIX: Injected the mandatory security header
-      const res = await fetch(`${API_V2_BASE_URL}/contests`, {
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-email': session?.user?.email || ''
-        }
-      }); 
-      if (!res.ok) throw new Error('Failed to fetch contests from server');
+      
+      // 👉 FIX: The backend now expects this specific header to grant access
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+      if (session?.user?.email) {
+        headers['x-user-email'] = session.user.email;
+      }
+
+      const res = await fetch(`${API_V2_BASE_URL}/contests`, { headers }); 
+      
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to fetch contests');
+      }
+      
       const data = await res.json(); 
       setContests(Array.isArray(data) ? data : []); 
     } catch (err: any) {
@@ -45,6 +77,8 @@ export default function ContestsPage() {
       setLoading(false); 
     }
   }
+
+  // ... [Keep the rest of your formatCountdown, handleDelete, and UI code the same] ...
 
   async function handleDelete(e: React.MouseEvent, id: string) {
     e.preventDefault();
