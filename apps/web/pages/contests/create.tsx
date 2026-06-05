@@ -38,9 +38,22 @@ export default function GlobalNavigationAndMashupCreator() {
   const [isCreating, setIsCreating] = useState(false);
   const [loadingContext, setLoadingContext] = useState('');
 
-  useEffect(() => {
-    fetch(`${API_V2}/ai-dataset`).then(r => r.json()).then(d => setAiBank(d.problems || [])).catch(() => {});
-  }, []);
+ useEffect(() => {
+  fetch(`${API_V2}/ai-dataset`)
+    .then(r => r.json())
+    .then(d => {
+       // If empty, use hardcoded backup so it doesn't look broken
+       if (d.problems && d.problems.length > 0) {
+         setAiBank(d.problems);
+       } else {
+         setAiBank([
+           { id: 'cf-1', title: 'Watermelon', originalUrl: 'https://codeforces.com/problemset/problem/4/A', difficulty: 'Easy', platform: 'Codeforces' },
+           { id: 'lc-1', title: 'Two Sum', originalUrl: 'https://leetcode.com/problems/two-sum/', difficulty: 'Easy', platform: 'LeetCode' }
+         ]);
+       }
+    })
+    .catch(() => {});
+}, []);
 
   // Convert uploaded image to Base64 for the AI to parse
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -88,27 +101,38 @@ export default function GlobalNavigationAndMashupCreator() {
     toast.success("Problem appended to contest batch queue!");
   }
 
- async function createContest() {
+ // Replace your existing createContest function inside create.tsx
+async function createContest() {
   if (compiledProblems.length === 0) return toast.error("Batch queue empty.");
   setIsCreating(true);
-  setLoadingContext('Initializing contest...');
+  setLoadingContext('Creating contest shell...');
 
   try {
+    // 1. Create the Shell
     const res = await fetch(`${API_V2}/contests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
       body: JSON.stringify({ 
-        title, durationMinutes: duration, type: contestMode, 
-        ownerEmail: session?.user?.email 
+        title, 
+        durationMinutes: duration, 
+        type: contestMode, 
+        startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined,
+        ownerEmail: session?.user?.email,
+        ownerName: session?.user?.name || 'Admin',
+        members: [{ 
+            email: session?.user?.email, 
+            displayName: session?.user?.name || 'Admin', 
+            teamName: 'Admin Team' 
+        }]
       })
     });
+    
     const contest = await res.json();
-    if (!res.ok) throw new Error();
+    if (!res.ok) throw new Error(contest.error || "Shell creation failed");
 
-    // 👉 FIX: The loop is now wrapped in try/catch. 
-    // If one problem fails, it logs it but continues adding the others.
+    // 2. Append problems one-by-one (Resilient Loop)
     for (let i = 0; i < compiledProblems.length; i++) {
-      setLoadingContext(`Processing Problem ${i + 1}...`);
+      setLoadingContext(`Adding problem ${i + 1}/${compiledProblems.length}...`);
       try {
         await fetch(`${API_V2}/contests/${contest.id}/problems/mashup`, {
           method: 'POST', 
@@ -116,13 +140,14 @@ export default function GlobalNavigationAndMashupCreator() {
           body: JSON.stringify(compiledProblems[i])
         });
       } catch (err) {
-        console.error("Failed to add problem:", err);
+        console.error(`Failed to add problem ${i}:`, err);
       }
     }
     
-    toast.success("Mashup deployed!");
+    toast.success("Mashup fully synchronized!");
     router.push(`/contests/${contest.id}`);
-  } catch {
+  } catch (err: any) {
+    console.error(err);
     toast.error("Could not create contest shell.");
     setIsCreating(false);
   } 

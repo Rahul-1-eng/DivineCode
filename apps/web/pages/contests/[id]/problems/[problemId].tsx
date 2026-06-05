@@ -412,7 +412,24 @@ export default function ContestProblemWorkspace() {
               </div>
             ) : (
               <>
-                <iframe src={problemIframeUrl} style={{...iframeStyle, flex: 1}} title="Problem Statement" sandbox="allow-scripts allow-same-origin" />
+                {problem.externalUrl ? (
+  <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+    <iframe 
+      src={problem.externalUrl} 
+      style={{...iframeStyle, flex: 1}} 
+      title="Problem Statement" 
+    />
+    <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center' }}>
+       <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: 'bold' }}>
+         ↗ Open Original Problem in New Tab
+       </a>
+    </div>
+  </div>
+) : (
+  <div style={{ padding: 20 }}>
+    <div dangerouslySetInnerHTML={{ __html: problem.description }} />
+  </div>
+)}
                 {problem.externalUrl && (
                   <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center', borderTop: '1px solid #334155' }}>
                       <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontSize: 13, fontWeight: 'bold' }}>

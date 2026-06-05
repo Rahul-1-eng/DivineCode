@@ -78,18 +78,21 @@ export function mountV2Routes(app: Express, io: Server) {
   });
 
   // 👉 2. PROXY ROUTE (Unified)
-  router.get('/proxy/problem', async (req, res) => {
-    const url = req.query.url as string;
-    if (!url) return res.status(400).json({ error: 'URL required' });
-    console.log(`[Proxy] Fetching: ${url}`);
-    try {
-      const { data } = await axios.get(url, { headers: { 'User-Agent': 'DivineCode-Proxy/1.0' }, timeout: 5000 });
-      res.send(data);
-    } catch (e) {
-      console.error(`[Proxy] Failed: ${url}`);
-      res.status(502).json({ error: 'Proxy fetch failed' });
-    }
-  });
+router.get('/proxy/problem', async (req, res) => {
+  const url = req.query.url as string;
+  if (!url) return res.status(400).json({ error: 'URL required' });
+  try {
+    const { data } = await axios.get(url, { 
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)' }, 
+      timeout: 5000 
+    });
+    res.send(data);
+  } catch (e) {
+    console.warn(`[Proxy] Scrape failed for ${url}, sending fallback.`);
+    // Instead of 502, we return a 200 with a flag. The frontend reads this flag and redirects the user.
+    res.json({ requiresRedirect: true, url }); 
+  }
+});
 
   // 👉 3. CONTEST ROUTES (Unified & De-duplicated)
   router.get('/contests', async (req, res) => {

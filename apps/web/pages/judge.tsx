@@ -73,16 +73,28 @@ export default function JudgePage() {
         headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ sourceCode: code, language, input: newCases[index].input })
       });
+      
       const data = await res.json();
       
-      const actualOut = data.stdout ? atob(data.stdout).trim() : (data.compile_output ? atob(data.compile_output) : 'Error');
+      // 👉 SAFE PARSING: Check if data exists before calling atob
+      let actualOut = 'No Output';
+      if (data.stdout) {
+         try { actualOut = atob(data.stdout).trim(); } 
+         catch { actualOut = data.stdout.trim(); } // Fallback if not base64
+      } else if (data.stderr || data.compileError) {
+         actualOut = data.stderr || data.compileError;
+         newCases[index].status = 'error';
+      }
+
       const expectedOut = newCases[index].expectedOutput.trim();
-      
       newCases[index].output = actualOut;
-      newCases[index].status = (actualOut === expectedOut || !expectedOut) ? 'passed' : 'failed';
+      
+      if (newCases[index].status !== 'error') {
+        newCases[index].status = (actualOut === expectedOut || !expectedOut) ? 'passed' : 'failed';
+      }
     } catch (e) {
       newCases[index].status = 'error';
-      newCases[index].output = 'Execution failed on server.';
+      newCases[index].output = 'Connection error: Judge engine unreachable.';
     }
     setTestcases([...newCases]);
   };
@@ -101,14 +113,12 @@ export default function JudgePage() {
     try {
       const res = await fetch(`${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(cfUrl)}`);
       const data = await res.json();
-      
-      // 👉 FIX: The backend now returns { requiresRedirect: true, url }
       if (data.requiresRedirect) {
-         toast.error("Scraping blocked. Redirecting to platform...");
+         toast.error("Extraction failed. Redirecting to problem page...");
          window.open(data.url, '_blank');
-         setIsFetchingSamples(false);
          return;
       }
+      // 👉 FIX: The backend now returns { requiresRedirect: true, url }
 
       if (!res.ok) throw new Error();
       
