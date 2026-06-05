@@ -211,6 +211,11 @@ export function mountV2Routes(app: Express, io: Server) {
     res.status(400).json({ error: 'Bad type parsing' });
   }));
 
+  router.get('/contests', asyncRoute(async (req, res) => {
+    const contests = await listContestsV2();
+    // Sanitize each contest before sending to the frontend
+    res.json(contests.map(c => safeSanitize(c, req)));
+  }));
   // ==========================================
   // STANDARD CONTEST & SUBMISSION ENDPOINTS
   // ==========================================

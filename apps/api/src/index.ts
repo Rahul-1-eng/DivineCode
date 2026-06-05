@@ -14,7 +14,27 @@ import { setupDuelSockets } from './modules/duel/duelSocketService';
 import { setupContestSockets } from './modules/contests/contestSocketService';
 const app = express();
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '*';
-app.use(cors({ origin: CLIENT_ORIGIN === '*' ? '*' : CLIENT_ORIGIN.split(',').map((origin) => origin.trim()) }));
+// Replace your existing app.use(cors(...)) with this:
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow local development ports and your production domain
+    const allowedOrigins = [
+      'http://localhost:3000', 
+      'http://localhost:3001',
+      'https://divinecode-xbfb.onrender.com' 
+    ];
+    
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true, // Required for Auth sessions
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-email', 'x-user-name', 'x-worker-secret']
+}));
 app.use(express.json({ limit: '1mb' }));
 
 const server = http.createServer(app);
