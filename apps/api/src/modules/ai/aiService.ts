@@ -1,6 +1,11 @@
 import axios from 'axios';
-// (Keep your existing imports and AI functions here)
 import { prisma } from '../../prisma/client';
+
+// Helper to strip markdown JSON formatting from LLM responses
+function parseAiJsonResponse(text: string) {
+  const cleanStr = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  return JSON.parse(cleanStr);
+}
 
 export async function analyzeSubmissionLogic(submissionId: string, problemDescription: string, userCode: string) {
   const apiKey = process.env.AI_API_KEY;
@@ -29,9 +34,8 @@ export async function analyzeSubmissionLogic(submissionId: string, problemDescri
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    const result = JSON.parse(data.candidates[0].content.parts[0].text);
+    const result = parseAiJsonResponse(data.candidates[0].content.parts[0].text);
 
-    // Save the AI analysis directly to the submission record
     await prisma.submission.update({
       where: { id: submissionId },
       data: {
@@ -41,15 +45,11 @@ export async function analyzeSubmissionLogic(submissionId: string, problemDescri
         isPlagiarized: result.isPlagiarized
       }
     });
-
-    // If flagged as heavily plagiarized, you could optionally trigger a WebSocket notification to the contest manager here.
-
   } catch (error: any) {
     console.error("AI Logic Analysis Error:", error.response?.data || error.message);
   }
 }
 
-// This handles the OCR / Link parsing you requested
 export async function extractProblemFromTextOrImage(rawTextOrUrl: string) {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
@@ -66,7 +66,7 @@ export async function extractProblemFromTextOrImage(rawTextOrUrl: string) {
       "title": "...",
       "descriptionHtml": "...",
       "testcases": [{"input": "...", "expectedOutput": "..."}],
-      "requiresRedirect": false // Set to true ONLY if you cannot extract any meaningful question text and testcases at all
+      "requiresRedirect": false 
     }
   `;
 
@@ -77,14 +77,13 @@ export async function extractProblemFromTextOrImage(rawTextOrUrl: string) {
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    return JSON.parse(data.candidates[0].content.parts[0].text);
+    return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
   } catch (error) {
-    // Graceful fallback so the system doesn't crash, it just redirects the user.
     return { title: "Custom Problem", descriptionHtml: "View source link.", testcases: [], requiresRedirect: true };
   }
 }
+
 export async function generateTestCasesWithAI(problemDescription: string, masterSolution: string) {
-  // 👉 Read the key INSIDE the function so it never gets stuck as undefined
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
 
@@ -106,8 +105,7 @@ export async function generateTestCasesWithAI(problemDescription: string, master
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    const jsonString = data.candidates[0].content.parts[0].text;
-    return JSON.parse(jsonString);
+    return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
   } catch (error: any) {
     console.error("AI Generation Error from Google:", error.response?.data || error.message);
     throw new Error("Failed to parse AI test cases.");
@@ -141,15 +139,13 @@ export async function findFailingTestCaseWithAI(problemDescription: string, user
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    const jsonString = data.candidates[0].content.parts[0].text;
-    return JSON.parse(jsonString);
+    return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
   } catch (error: any) {
     console.error("AI Debug Error from Google:", error.response?.data || error.message);
     throw new Error("Failed to parse AI debug response.");
   }
 }
 
-// 👉 NEW: AI Explainer specifically formatted for animation / step-by-step reading
 export async function generateSolutionExplanationWithAI(problemDescription: string) {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
@@ -171,14 +167,13 @@ export async function generateSolutionExplanationWithAI(problemDescription: stri
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    const jsonString = data.candidates[0].content.parts[0].text;
-    return JSON.parse(jsonString);
+    return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
   } catch (error: any) {
     console.error("AI Explanation Error from Google:", error.response?.data || error.message);
     throw new Error("Failed to generate AI explanation.");
   }
 }
-// Add this export to apps/api/src/modules/ai/aiService.ts
+
 export async function generateToughTestCases(problemDescriptionHtml: string) {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
@@ -200,10 +195,9 @@ export async function generateToughTestCases(problemDescriptionHtml: string) {
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    const jsonString = data.candidates[0].content.parts[0].text;
-    return JSON.parse(jsonString);
+    return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
   } catch (error: any) {
     console.error("AI Generation Error from Google:", error.response?.data || error.message);
-    return []; // Return empty array so it doesn't crash the problem insertion
+    return []; 
   }
 }

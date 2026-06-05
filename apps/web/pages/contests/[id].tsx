@@ -134,6 +134,10 @@ export default function ContestRoomPage() {
   const [lobbyChat, setLobbyChat] = useState('');
   const [lobbyMessages, setLobbyMessages] = useState<any[]>([]);
 
+  // 👉 WebRTC Refs
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const peersRef = useRef<{ [socketId: string]: RTCPeerConnection }>({});
+
   const isOwner = Boolean(contest?.canManage);
   const viewerMember = contest?.viewerMember || null;
   const canSeeProblemMeta = Boolean(contest?.visibility?.canSeeProblemMeta);
@@ -389,6 +393,38 @@ export default function ContestRoomPage() {
     setLobbyChat('');
   };
 
+  // 👉 WebRTC Toggle Logic
+  const toggleVoice = async () => {
+    if (!contest?.viewerMember?.teamId) return toast.error("You must be in a team to use voice chat.");
+
+    if (voiceStatus === 'connected' || voiceStatus === 'connecting') {
+      setVoiceStatus('disconnected');
+      socketRef.current?.emit('leave-voice', contest.viewerMember.teamId);
+      
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      
+      Object.values(peersRef.current).forEach(pc => pc.close());
+      peersRef.current = {};
+      toast.success("Voice disconnected.");
+    } else {
+      setVoiceStatus('connecting');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        localStreamRef.current = stream;
+        setVoiceStatus('connected');
+        socketRef.current?.emit('join-voice', contest.viewerMember.teamId);
+        toast.success("Voice channel joined!");
+      } catch (err) {
+        console.error('Mic access denied:', err);
+        setVoiceStatus('disconnected');
+        toast.error("Microphone access denied.");
+      }
+    }
+  };
+
   useEffect(() => { loadContest(); loadSubmissions(); }, [id, session?.user?.email, session?.user?.name]);
   
   useEffect(() => {
@@ -430,7 +466,81 @@ export default function ContestRoomPage() {
       loadSubmissions();
     });
 
-    return () => { socket.disconnect(); socketRef.current = null; };
+    // 👉 WebRTC Socket Handlers
+    socket.on('user-joined-voice', async (peerId) => {
+      if (!localStreamRef.current) return;
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      peersRef.current[peerId] = pc;
+      
+      localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
+      
+      pc.ontrack = (event) => {
+        const audio = new Audio();
+        audio.srcObject = event.streams[0];
+        audio.autoplay = true;
+        audio.play().catch(e => console.log('Audio play blocked:', e));
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) socket.emit('voice-ice-candidate', { to: peerId, candidate: event.candidate });
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit('voice-offer', { to: peerId, offer });
+    });
+
+    socket.on('voice-offer', async ({ from, offer }) => {
+      if (!localStreamRef.current) return;
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      peersRef.current[from] = pc;
+      
+      localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
+      
+      pc.ontrack = (event) => {
+        const audio = new Audio();
+        audio.srcObject = event.streams[0];
+        audio.autoplay = true;
+        audio.play().catch(e => console.log('Audio play blocked:', e));
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) socket.emit('voice-ice-candidate', { to: from, candidate: event.candidate });
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit('voice-answer', { to: from, answer });
+    });
+
+    socket.on('voice-answer', async ({ from, answer }) => {
+      const pc = peersRef.current[from];
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
+    socket.on('voice-ice-candidate', async ({ from, candidate }) => {
+      const pc = peersRef.current[from];
+      if (pc && pc.remoteDescription) {
+         try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){}
+      }
+    });
+
+    socket.on('user-left-voice', (peerId) => {
+      if (peersRef.current[peerId]) {
+        peersRef.current[peerId].close();
+        delete peersRef.current[peerId];
+      }
+    });
+
+    return () => { 
+      socket.disconnect(); 
+      socketRef.current = null;
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      Object.values(peersRef.current).forEach(pc => pc.close());
+    };
   }, [id, session, isFinal, contest?.viewerMember?.teamId]);
   
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -537,7 +647,6 @@ export default function ContestRoomPage() {
         )}
       </AnimatePresence>
 
-      {/* DETAILED MEMBER MODAL RESTORED */}
       {selectedMember && (
         <div style={overlay}>
           <div style={{...overlayModal, width: '90%', maxWidth: 900, maxHeight: '85vh', display: 'flex', flexDirection: 'column'}}>
@@ -571,7 +680,6 @@ export default function ContestRoomPage() {
         <nav style={nav}>
           <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
             <a href="/" style={link}>DivineCode</a>
-            {/* OWNER MODE TOGGLE */}
             {isOwner && !isFinal && (
               <div style={{ background: '#0f172a', borderRadius: 8, padding: 4, display: 'flex', border: '1px solid #334155' }}>
                 <button onClick={() => setOwnerMode('ADMIN')} style={{ ...ghostButton, margin: 0, background: ownerMode === 'ADMIN' ? '#38bdf8' : 'transparent', color: ownerMode === 'ADMIN' ? '#000' : '#94a3b8', border: 'none' }}>🛡️ Edit Mode</button>
@@ -600,7 +708,6 @@ export default function ContestRoomPage() {
           </div>
         </div>
 
-        {/* Post Contest Stats RESTORED WITH PERCENTILE & TIPS */}
         {isFinal && viewerMember && (
           <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ ...panel, marginBottom: 18, background: 'linear-gradient(145deg, #0f172a, #1e1b4b)', border: '1px solid #6366f1' }}>
             <h2 style={{ color: '#a5b4fc', margin: '0 0 15px 0' }}>🏆 Post-Contest Performance Report</h2>
@@ -636,7 +743,6 @@ export default function ContestRoomPage() {
               ))}
             </div>
 
-            {/* ✅ Issue #12 / #15 Fixed: AI Report Included with percentiles! */}
             <div style={{ background: 'rgba(56, 189, 248, 0.05)', border: '1px solid rgba(56, 189, 248, 0.3)', padding: 15, borderRadius: 12, marginTop: 20 }}>
               <h3 style={{ margin: '0 0 10px 0', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 8 }}>🤖 AI Mentor Analysis</h3>
               <p style={{ color: '#e2e8f0', margin: 0, lineHeight: 1.6 }}>
@@ -650,7 +756,6 @@ export default function ContestRoomPage() {
 
         <PostContestAiRecommendations contestId={id as string} contestStatus={contest.status || (isFinal ? 'ENDED' : 'RUNNING')} />
 
-        {/* CODEFORCES STYLE LOBBY REGISTRATION */}
         {!isActuallyOwnerMode && !viewerMember && contest.status !== 'ENDED' && (
           <section style={{ ...panel, marginBottom: 18, border: '1px solid #38bdf8', background: 'linear-gradient(180deg, #0f172a, rgba(56, 189, 248, 0.05))', textAlign: 'center' }}>
             <h2 style={{color: '#38bdf8', margin: '0 0 10px 0', fontSize: 28}}>Register for {contest.title}</h2>
@@ -683,7 +788,6 @@ export default function ContestRoomPage() {
               <button onClick={registerForContest} disabled={isRegistering} style={{...primaryButton, marginTop: 15}}>{isRegistering ? 'Registering...' : 'Complete Registration'}</button>
             </div>
 
-            {/* ✅ Issue #3 Fixed: Global Lobby Chat & Participant Listing */}
             <div style={{ marginTop: 40, borderTop: '1px solid #334155', paddingTop: 20 }}>
                <h3 style={{color: '#67e8f9'}}>Lobby & Invite Codes</h3>
                <p style={{color: '#94a3b8', fontSize: 14}}>Ask current participants for an invite code to join their team.</p>
@@ -731,7 +835,6 @@ export default function ContestRoomPage() {
              <p style={{color: '#a8b3c7', fontSize: 18}}>Problems will be revealed when the countdown reaches zero.</p>
              <div style={{fontSize: 48, fontWeight: 'bold', color: '#67e8f9', marginTop: 20, fontFamily: 'monospace'}}>{formatCountdown(startTimeMs - nowTick)}</div>
              
-             {/* ✅ Issue #1 Fixed: Unregister Button moved out so players can unregister even if contest scheduled */}
              {canUnregister && (
                <div style={{ marginTop: 30 }}>
                  <button onClick={unregisterFromContest} style={{...dangerButton, width: 'auto'}}>Unregister from Contest</button>
@@ -971,14 +1074,11 @@ export default function ContestRoomPage() {
           {isChatOpen ? (
             <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
               
-              {/* ✅ Issue #13 Fixed: Added Voice Chat Channel UI */}
+              {/* WebRTC Voice Chat Controls */}
               <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
                 <strong style={{ color: '#a5b4fc' }}>Team Chat</strong>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => {
-                     if(voiceStatus === 'disconnected') { setVoiceStatus('connecting'); setTimeout(() => setVoiceStatus('connected'), 1500); }
-                     else setVoiceStatus('disconnected');
-                  }} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)', color: voiceStatus === 'connected' ? '#4ade80' : '#fff', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
+                  <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)', color: voiceStatus === 'connected' ? '#4ade80' : '#fff', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
                     {voiceStatus === 'connected' ? '🟢 Voice On' : voiceStatus === 'connecting' ? '⏳ Connecting...' : '🎤 Join Voice'}
                   </button>
                   <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>

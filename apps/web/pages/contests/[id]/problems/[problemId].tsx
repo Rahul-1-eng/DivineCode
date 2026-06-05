@@ -20,10 +20,8 @@ function useContestTimer(startTime?: string | Date, endTime?: string | Date) {
   
   useEffect(() => {
     if (!startTime || !endTime) return;
-    
     const start = new Date(startTime).getTime();
     const end = new Date(endTime).getTime();
-    
     if (isNaN(start) || isNaN(end)) return;
 
     const interval = setInterval(() => {
@@ -69,16 +67,19 @@ export default function ContestProblemWorkspace() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // MCQ Specific States
   const [mcqData, setMcqData] = useState<any>(null);
   const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
 
-  // Team Chat States
+  // 👉 WebRTC and Chat Refs
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const peersRef = useRef<{ [socketId: string]: RTCPeerConnection }>({});
+  
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
+  const [voiceStatus, setVoiceStatus] = useState('disconnected');
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {
@@ -115,10 +116,8 @@ export default function ContestProblemWorkspace() {
   const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
   
-  // Identify if this is a theory question
   const isMCQ = problem?.platform === 'DIVINECODE' && !!problem?.interviewQuestionId;
 
-  // Fetch MCQ Data if applicable
   useEffect(() => {
     if (isMCQ && problem?.interviewQuestionId) {
       fetch(`${API_V2_BASE_URL}/interview/questions`, {
@@ -131,7 +130,38 @@ export default function ContestProblemWorkspace() {
     }
   }, [isMCQ, problem, session]);
 
-  // WebSocket Connection
+  // 👉 WebRTC Toggle Logic
+  const toggleVoice = async () => {
+    if (!contest?.viewerMember?.teamId) return toast.error("You must be in a team to use voice chat.");
+
+    if (voiceStatus === 'connected' || voiceStatus === 'connecting') {
+      setVoiceStatus('disconnected');
+      socketRef.current?.emit('leave-voice', contest.viewerMember.teamId);
+      
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      
+      Object.values(peersRef.current).forEach(pc => pc.close());
+      peersRef.current = {};
+      toast.success("Voice disconnected.");
+    } else {
+      setVoiceStatus('connecting');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        localStreamRef.current = stream;
+        setVoiceStatus('connected');
+        socketRef.current?.emit('join-voice', contest.viewerMember.teamId);
+        toast.success("Voice channel joined!");
+      } catch (err) {
+        console.error('Mic access denied:', err);
+        setVoiceStatus('disconnected');
+        toast.error("Microphone access denied.");
+      }
+    }
+  };
+
   useEffect(() => {
     if (!id || !session || !contest?.viewerMember?.teamId) return;
     socketRef.current = io(API_BASE_URL, { transports: ['websocket'], reconnection: true });
@@ -156,7 +186,81 @@ export default function ContestProblemWorkspace() {
       }
     });
 
-    return () => { socket.disconnect(); socketRef.current = null; };
+    // 👉 WebRTC Socket Handlers
+    socket.on('user-joined-voice', async (peerId) => {
+      if (!localStreamRef.current) return;
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      peersRef.current[peerId] = pc;
+      
+      localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
+      
+      pc.ontrack = (event) => {
+        const audio = new Audio();
+        audio.srcObject = event.streams[0];
+        audio.autoplay = true;
+        audio.play().catch(e => console.log('Audio play blocked:', e));
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) socket.emit('voice-ice-candidate', { to: peerId, candidate: event.candidate });
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit('voice-offer', { to: peerId, offer });
+    });
+
+    socket.on('voice-offer', async ({ from, offer }) => {
+      if (!localStreamRef.current) return;
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      peersRef.current[from] = pc;
+      
+      localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
+      
+      pc.ontrack = (event) => {
+        const audio = new Audio();
+        audio.srcObject = event.streams[0];
+        audio.autoplay = true;
+        audio.play().catch(e => console.log('Audio play blocked:', e));
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) socket.emit('voice-ice-candidate', { to: from, candidate: event.candidate });
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit('voice-answer', { to: from, answer });
+    });
+
+    socket.on('voice-answer', async ({ from, answer }) => {
+      const pc = peersRef.current[from];
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
+    socket.on('voice-ice-candidate', async ({ from, candidate }) => {
+      const pc = peersRef.current[from];
+      if (pc && pc.remoteDescription) {
+         try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){}
+      }
+    });
+
+    socket.on('user-left-voice', (peerId) => {
+      if (peersRef.current[peerId]) {
+        peersRef.current[peerId].close();
+        delete peersRef.current[peerId];
+      }
+    });
+
+    return () => { 
+      socket.disconnect(); 
+      socketRef.current = null; 
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      Object.values(peersRef.current).forEach(pc => pc.close());
+    };
   }, [id, session, contest?.viewerMember?.teamId]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -173,7 +277,6 @@ export default function ContestProblemWorkspace() {
     setChatInput('');
   };
 
-  // 👉 CPH Integration
   const sendToCPH = async () => {
     if (!problem) return;
     const cphPayload = {
@@ -454,7 +557,7 @@ export default function ContestProblemWorkspace() {
                   </div>
                 ) : (
                   <div style={{ padding: 20 }}>
-                    <div dangerouslySetInnerHTML={{ __html: problem.description || 'No description provided.' }} />
+                    <div dangerouslySetInnerHTML={{ __html: problem.description || problem.customDescription || 'No description provided.' }} />
                   </div>
                 )}
               </>
@@ -600,42 +703,23 @@ export default function ContestProblemWorkspace() {
         </section>
       </div>
 
-      {showCfModal && (
-        <div style={modalOverlay}>
-          <div style={modalContent}>
-            <h2 style={{ margin: '0 0 15px 0', color: '#38bdf8' }}>Codeforces Submission Automator</h2>
-            <p style={{ color: '#cbd5e1', lineHeight: '1.6', marginBottom: 20 }}>
-              To ensure fairness without scraping penalties, submit this via Codeforces. We will instantly sync the result.
-            </p>
-            <ol style={{ color: '#e2e8f0', lineHeight: '1.8', marginBottom: 25, paddingLeft: 20 }}>
-              <li><strong>Copy</strong> your code.</li>
-              <li><strong>Click the link</strong> to open Codeforces directly to the Submit page.</li>
-              <li><strong>Submit</strong> the code.</li>
-              <li>Click <strong>"Sync Verdict"</strong>.</li>
-            </ol>
-            
-            <div style={{ display: 'flex', gap: 10, marginBottom: 25 }}>
-              <button onClick={() => navigator.clipboard.writeText(code).then(() => toast.success('Code copied!'))} style={secondaryBtn}>📋 Copy Code</button>
-              <a href={problem.externalUrl || 'https://codeforces.com/problemset/submit'} target="_blank" rel="noreferrer" style={primaryBtn}>↗ Open CF Submit Page</a>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid #334155', paddingTop: 20 }}>
-              <button onClick={() => setShowCfModal(false)} style={cancelBtn}>Cancel</button>
-              <button onClick={handleSyncCodeforces} disabled={isSyncing} style={syncBtn}>{isSyncing ? 'Syncing via API...' : '🔄 Sync Verdict'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Global Team Chat Embedded in Workspace */}
       {contest?.viewerMember?.teamId && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
           {isChatOpen ? (
             <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+              
+              {/* WebRTC Voice Chat Controls */}
               <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
-                <strong style={{ color: '#a5b4fc' }}>Team Chat ({contest.viewerMember.teamName || 'Team'})</strong>
-                <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>
+                <strong style={{ color: '#a5b4fc' }}>Team Chat</strong>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)', color: voiceStatus === 'connected' ? '#4ade80' : '#fff', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
+                    {voiceStatus === 'connected' ? '🟢 Voice On' : voiceStatus === 'connecting' ? '⏳ Connecting...' : '🎤 Join Voice'}
+                  </button>
+                  <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>
+                </div>
               </div>
+
               <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
                 {messages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No messages yet. Say hi!</p> : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

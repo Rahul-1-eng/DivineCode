@@ -3,15 +3,12 @@ import { Server } from 'socket.io';
 import { prisma } from '../prisma/client';
 import { enqueueJudgeSubmission } from '../queues/queues';
 import { canManageContest, sanitizeContestForViewer, viewerFromRequest } from '../modules/contests/contestRules';
-import { 
-  createContestV2, 
-  listContestsV2, 
-  loadContestForViewer 
-} from '../modules/contests/contestService';
+import { createContestV2, listContestsV2, loadContestForViewer } from '../modules/contests/contestService';
 import { createQueuedContestSubmission } from '../modules/contests/submissionService';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
 import { recomputeContestStandings } from '../modules/standings/standingService';
 import { scrapeProblemFromUrl } from '../modules/external-sync/problemScraper'; 
+import { generateTestCasesWithAI } from '../modules/ai/aiService'; // 👉 NEW
 import { ContestStatus } from '@prisma/client';
 import axios from 'axios';
 import multer from 'multer';
@@ -22,7 +19,6 @@ import { submissionRouter } from './submissionRoutes';
 import { profileRouter } from './profileRoutes';
 import { interviewRouter } from './interviewRoutes'; 
 
-// 👉 Multer Setup for Custom Image Uploads
 const uploadDir = path.join(process.cwd(), 'public', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -36,7 +32,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ 
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 } 
 });
 
 type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<any>;
@@ -85,7 +81,6 @@ export function mountV2Routes(app: Express, io: Server) {
     socket.on('joinContest', (contestId) => socket.join(`contest:${contestId}`));
     socket.on('joinTeam', (teamId) => socket.join(`team:${teamId}`));
     
-    // Global Contest Lobby Chat Syncing
     socket.on('sendLobbyMessage', (data) => {
       io.to(`contest:${data.contestId}`).emit('lobbyMessage', data);
     });
@@ -99,9 +94,31 @@ export function mountV2Routes(app: Express, io: Server) {
         io.to(`team:${data.teamId}`).emit('teamMessage', message);
       } catch (err) {}
     });
+
+    // 👉 NEW: WebRTC Signaling for Voice Chat
+    socket.on('join-voice', (teamId) => {
+      socket.join(`voice:${teamId}`);
+      socket.to(`voice:${teamId}`).emit('user-joined-voice', socket.id);
+    });
+
+    socket.on('voice-offer', ({ to, offer }) => {
+      io.to(to).emit('voice-offer', { from: socket.id, offer });
+    });
+
+    socket.on('voice-answer', ({ to, answer }) => {
+      io.to(to).emit('voice-answer', { from: socket.id, answer });
+    });
+
+    socket.on('voice-ice-candidate', ({ to, candidate }) => {
+      io.to(to).emit('voice-ice-candidate', { from: socket.id, candidate });
+    });
+
+    socket.on('leave-voice', (teamId) => {
+      socket.leave(`voice:${teamId}`);
+      socket.to(`voice:${teamId}`).emit('user-left-voice', socket.id);
+    });
   });
 
-  // 👉 Image Upload Endpoint
   router.post('/upload-image', upload.single('image'), asyncRoute(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image provided' });
     const imageUrl = `/uploads/${req.file.filename}`;
@@ -235,27 +252,63 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
 
   router.get('/ai-dataset', asyncRoute(async (req, res) => {
-     res.json({ success: true, count: 10543, message: "10,000+ DSA and System Design questions loaded.", problems: [] });
+    const problems = await prisma.aiProblemDataset.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 50 
+    });
+    
+    const count = await prisma.aiProblemDataset.count();
+    
+    res.json({ 
+      success: true, 
+      count: count, 
+      message: `${count} Curated DSA and System Design questions loaded.`, 
+      problems 
+    });
   }));
 
+  // 👉 NEW: Real AI Testcase Generator Integration
   router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
      const { masterSolution } = req.body;
+     const contestProblemId = req.params.id;
      if (!masterSolution) return res.status(400).json({ error: 'Master solution required' });
-     res.json({ success: true, generatedCount: 5 });
+
+     const cp = await prisma.contestProblem.findUnique({ where: { id: contestProblemId }, include: { problem: true } });
+     if (!cp || !cp.problem) return res.status(404).json({ error: 'Problem not found' });
+
+     const description = cp.customDescription || cp.problem.description || cp.titleSnapshot;
+     const testCases = await generateTestCasesWithAI(description, masterSolution);
+
+     await prisma.testcase.createMany({
+       data: testCases.map((tc: any, i: number) => ({
+         problemId: cp.problemId!,
+         input: tc.input,
+         expectedOutput: tc.expectedOutput,
+         explanation: tc.explanation || '',
+         type: 'HIDDEN',
+         order: i + 10
+       }))
+     });
+
+     res.json({ success: true, generatedCount: testCases.length });
   }));
 
-  router.post('/contests/:id/recommend-problems', asyncRoute(async (req, res) => {
-    res.json({ success: true, recommendations: [
-      { id: '1', title: '10,000+ AI Vault: DP Optimization', platform: 'DIVINECODE' },
-      { id: '2', title: '10,000+ AI Vault: Graph Paths', platform: 'DIVINECODE' }
-    ]});
-  }));
-
+  // 👉 NEW: Real DB Recommendation Integration
   router.post('/contests/:id/ai-recommendations', asyncRoute(async (req, res) => {
-    res.json({ success: true, recommendations: [
-      { id: 'rec1', title: 'Dynamic Programming on Trees', difficulty: 'Hard', tags: ['dp', 'trees'] },
-      { id: 'rec2', title: 'Segment Tree with Lazy Propagation', difficulty: 'Medium', tags: ['data structures'] }
-    ]});
+    // Pulls 3 latest/curated items from your DB
+    const problems = await prisma.aiProblemDataset.findMany({
+      take: 3,
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json({ success: true, recommendations: problems });
+  }));
+  
+  router.post('/contests/:id/recommend-problems', asyncRoute(async (req, res) => {
+    const problems = await prisma.aiProblemDataset.findMany({
+      take: 2,
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json({ success: true, recommendations: problems });
   }));
 
   router.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
