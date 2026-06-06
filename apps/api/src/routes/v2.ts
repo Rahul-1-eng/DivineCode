@@ -118,7 +118,23 @@ export function mountV2Routes(app: Express, io: Server) {
       socket.to(`voice:${teamId}`).emit('user-left-voice', socket.id);
     });
   });
+  router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    const contestId = req.params.id;
+    
+    // Find the participant entry
+    const participant = await prisma.contestParticipant.findFirst({
+        where: { contestId, userId: viewer.userId }
+    });
 
+    if (participant) {
+        await prisma.contestParticipant.delete({ where: { id: participant.id } });
+        await recomputeContestStandings(contestId);
+    }
+    
+    const updatedContest = await loadContestForViewer(contestId);
+    res.json(sanitizeContestForViewer(updatedContest!, viewer));
+  }));
   router.post('/upload-image', upload.single('image'), asyncRoute(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image provided' });
     const imageUrl = `/uploads/${req.file.filename}`;

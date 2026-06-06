@@ -163,14 +163,32 @@ export default function ContestRoomPage() {
     }
   }
 
-  async function unregisterFromContest() {
-    if (!confirm("Are you sure you want to unregister? You will lose access to submit.")) return;
-    setLoadingText('Unregistering...'); setSyncing(true);
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/unregister`, { method: 'POST', headers: viewerHeaders(session) });
+ async function unregisterFromContest() {
+  if (!confirm("Are you sure you want to unregister?")) return;
+  
+  setLoadingText('Unregistering...'); 
+  setSyncing(true);
+
+  try {
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/unregister`, { 
+      method: 'POST', 
+      headers: viewerHeaders(session) 
+    });
+    
+    if (res.ok) {
+      toast.success('Successfully unregistered.');
+      // CRITICAL: Refresh the whole page state so the register button reappears
+      await loadContest(); 
+    } else {
+      const data = await res.json();
+      toast.error(data.error || 'Failed to unregister');
+    }
+  } catch (err) {
+    toast.error('Network error.');
+  } finally {
     setSyncing(false);
-    if(res.ok) { toast.success('Successfully unregistered.'); loadContest(); } 
-    else { const data = await res.json(); toast.error(data.error || 'Failed to unregister'); }
   }
+}
 
   async function loadContest() {
     if (!id) return;

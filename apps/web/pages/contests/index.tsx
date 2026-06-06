@@ -10,7 +10,7 @@ function getDynamicStatus(contest: any) {
   const end = start + (contest.durationMinutes * 60000);
   const now = Date.now();
   if (now > end) return 'ENDED';
-  if (now >= start && now <= end) return 'RUNNING';
+  if (now >= start) return 'RUNNING';
   return 'SCHEDULED';
 }
 export default function ContestsList() {
