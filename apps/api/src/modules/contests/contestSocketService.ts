@@ -4,27 +4,19 @@ import { prisma } from '../../prisma/client';
 export function setupContestSockets(io: Server) {
   io.on('connection', (socket: Socket) => {
     
-    // 1. User enters the GLOBAL contest room (for Leaderboard/Standings updates)
+    // Global contest room for standings/live updates
     socket.on('joinContest', (contestId: string) => {
       socket.join(`contest:${contestId}`);
-      console.log(`[Socket] Client ${socket.id} joined contest room: contest:${contestId}`);
     });
 
-    // 2. User enters their STRICT, PRIVATE team room (for Chat and AC Sync)
+    // STRICT PRIVATE TEAM ROOM (For Chat + Voice)
     socket.on('joinTeam', (teamId: string) => {
       socket.join(`team:${teamId}`);
-      console.log(`[Socket] Client ${socket.id} joined team room: team:${teamId}`);
     });
 
-    // 3. User tracks a SPECIFIC submission (Crucial for Live Code Execution View)
-    socket.on('trackSubmission', (submissionId: string) => {
-      socket.join(`submission:${submissionId}`);
-    });
-
-    // 4. Secure Team Chat Routing & Persistence
+    // Team Chat Routing
     socket.on('sendTeamMessage', async (data: { contestId: string, teamId: string, senderId: string, content: string }) => {
       try {
-        // Save the message to the database for historical persistence
         const message = await prisma.teamMessage.create({
           data: {
             contestId: data.contestId,
@@ -35,28 +27,30 @@ export function setupContestSockets(io: Server) {
           include: { sender: { select: { id: true, username: true, avatarUrl: true } } }
         });
         
-        // Broadcast STRICTLY to the private team room (No one else can intercept this)
         io.to(`team:${data.teamId}`).emit('teamMessage', message);
       } catch (err) {
         console.error('[Socket] Failed to route team message', err);
       }
     });
 
-    // 👉 NEW: Broadcast Accepted Solutions exclusively to the solver's group
+    // Notify team of a teammate's success
     socket.on('broadcastTeamSolve', (data: { teamId: string, solverName: string, problemLabel: string }) => {
-      io.to(`team:${data.teamId}`).emit('teamNotification', {
-        type: 'ACCEPTED',
-        message: `${data.solverName} just got an Accepted verdict for Problem ${data.problemLabel}! 🚀`
+      io.to(`team:${data.teamId}`).emit('team_problem_solved', {
+        userId: data.solverName,
+        message: `${data.solverName} just solved Problem ${data.problemLabel}!`
       });
     });
 
-    // 5. Leave rooms dynamically (prevent memory leaks)
-    socket.on('leaveSubmission', (submissionId: string) => {
-      socket.leave(`submission:${submissionId}`);
+    // WebRTC Signaling
+    socket.on('join-voice', (teamId) => {
+      socket.join(`voice:${teamId}`);
+      socket.to(`voice:${teamId}`).emit('user-joined-voice', socket.id);
     });
 
-    socket.on('disconnect', () => {
-       // Socket.io automatically cleans up room memberships on disconnect.
-    });
+    socket.on('voice-offer', ({ to, offer }) => { io.to(to).emit('voice-offer', { from: socket.id, offer }); });
+    socket.on('voice-answer', ({ to, answer }) => { io.to(to).emit('voice-answer', { from: socket.id, answer }); });
+    socket.on('voice-ice-candidate', ({ to, candidate }) => { io.to(to).emit('voice-ice-candidate', { from: socket.id, candidate }); });
+
+    socket.on('disconnect', () => {});
   });
 }

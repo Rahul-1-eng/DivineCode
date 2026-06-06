@@ -76,11 +76,10 @@ export default function JudgePage() {
       
       const data = await res.json();
       
-      // 👉 SAFE PARSING: Check if data exists before calling atob
       let actualOut = 'No Output';
       if (data.stdout) {
          try { actualOut = atob(data.stdout).trim(); } 
-         catch { actualOut = data.stdout.trim(); } // Fallback if not base64
+         catch { actualOut = data.stdout.trim(); } 
       } else if (data.stderr || data.compileError) {
          actualOut = data.stderr || data.compileError;
          newCases[index].status = 'error';
@@ -99,6 +98,7 @@ export default function JudgePage() {
     setTestcases([...newCases]);
   };
 
+  // Serially runs the tests mapping to visual UI dots sequentially
   const runAllTestcases = async () => {
     for (let i = 0; i < testcases.length; i++) {
       await runTestCase(i);
@@ -118,11 +118,9 @@ export default function JudgePage() {
          window.open(data.url, '_blank');
          return;
       }
-      // 👉 FIX: The backend now returns { requiresRedirect: true, url }
 
       if (!res.ok) throw new Error();
       
-      // If direct proxy succeeded (not redirected), it returned html string
       const html = await res.text();
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, 'text/html');
@@ -228,11 +226,17 @@ export default function JudgePage() {
                 </div>
 
                 <div style={{ padding: 15 }}>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 15 }}>
+                     {testcases.map((tc, idx) => (
+                        <div key={`dot-${idx}`} style={{ width: 10, height: 10, borderRadius: '50%', background: tc.status === 'passed' ? '#22c55e' : tc.status === 'failed' || tc.status === 'error' ? '#ef4444' : tc.status === 'running' ? '#eab308' : '#334155' }} title={`Test ${idx+1}`} />
+                     ))}
+                  </div>
+
                   {testcases.map((tc, idx) => (
                     <div key={tc.id} style={tcCard}>
                       <div style={tcHeader}>
                         <strong>Test Case {idx + 1}</strong>
-                        <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' || tc.status === 'error' ? '#f87171' : '#94a3b8' }}>{tc.status.toUpperCase()}</span>
+                        <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' || tc.status === 'error' ? '#f87171' : '#eab308' }}>{tc.status.toUpperCase()}</span>
                       </div>
                       <div style={{ display: 'flex', gap: 10, padding: 10 }}>
                         <div style={{ flex: 1 }}><div style={tcLabel}>Input</div><textarea value={tc.input} onChange={e => { const n = [...testcases]; n[idx].input = e.target.value; setTestcases(n); }} style={tcBox} /></div>

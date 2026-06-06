@@ -8,41 +8,42 @@ datasource db {
 }
 
 model User {
-  id                          String                 @id @default(cuid())
-  username                    String                 @unique
-  email                       String                 @unique
-  passwordHash                String?
-  name                        String?
-  avatarUrl                   String?
-  role                        UserRole               @default(USER)
-  rating                      Int                    @default(1200)
-  duelRating                  Int                    @default(1200)
-  globalRating                Int                    @default(1200)
-  coins                       Int                    @default(0)
-  createdAt                   DateTime               @default(now())
-  updatedAt                   DateTime               @updatedAt
+  id                  String                 @id @default(cuid())
+  username            String                 @unique
+  email               String                 @unique
+  passwordHash        String?
+  name                String?
+  avatarUrl           String?
+  role                UserRole               @default(USER)
+  rating              Int                    @default(1200)
+  duelRating          Int                    @default(1200)
+  globalRating        Int                    @default(1200)
+  coins               Int                    @default(0)
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
   
-  auditLogs                   AuditLog[]
-  createdContests             Contest[]
-  contestParticipants         ContestParticipant[]
-  contestProblemsAdded        ContestProblem[]
-  duelMatchesCreated          DuelMatch[]
-  duelPlayers                 DuelPlayer[]
-  externalHandles             ExternalHandle[]
-  interviewProgress           InterviewProgress[]
-  authoredProblems            Problem[]
-  ratingHistory               RatingHistory[]
-  recommendationSnapshots     RecommendationSnapshot[]
-  submissions                 Submission[]
-  topicMastery                TopicMastery[]
-  submissionReports           SubmissionReport[]
+  auditLogs           AuditLog[]
+  createdContests     Contest[]
+  contestParticipants ContestParticipant[]
+  contestProblemsAdded ContestProblem[]
+  duelMatchesCreated  DuelMatch[]
+  duelPlayers         DuelPlayer[]
+  externalHandles     ExternalHandle[]
+  interviewProgress   InterviewProgress[]
+  authoredProblems    Problem[]
+  ratingHistory       RatingHistory[]
+  recommendationSnapshots RecommendationSnapshot[]
+  submissions         Submission[]
+  topicMastery        TopicMastery[]
+  submissionReports   SubmissionReport[]
   submittedInterviewQuestions InterviewQuestion[]  
-  teamMessages                TeamMessage[]          
-  firstTeamSolves             TeamProblemSolve[]     // Tracks when this user scored the group point
+  teamMessages        TeamMessage[]          
+  firstTeamSolves     TeamProblemSolve[]     
+  unlockedTestcases   UnlockedTestcase[]     // NEW: Track unlocked hints/cases
 }
 
 model ExternalHandle {
-  id                 String                   @id @default(cuid())
+  id                 String                  @id @default(cuid())
   userId             String
   platform           Platform
   handle             String
@@ -92,8 +93,27 @@ model Testcase {
   
   testResults    SubmissionTestResult[]
   problem        Problem              @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  unlockedBy     UnlockedTestcase[]   // NEW: Relation for point deductions
 
   @@index([problemId, type])
+}
+
+// NEW: Track which users/teams paid 50 points to unlock specific testcases
+model UnlockedTestcase {
+  id               String   @id @default(cuid())
+  userId           String
+  teamId           String?
+  contestProblemId String
+  testcaseId       String
+  unlockedAt       DateTime @default(now())
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  testcase       Testcase       @relation(fields: [testcaseId], references: [id], onDelete: Cascade)
+  contestProblem ContestProblem @relation(fields: [contestProblemId], references: [id], onDelete: Cascade)
+  team           ContestTeam?   @relation(fields: [teamId], references: [id])
+
+  @@unique([userId, testcaseId])
+  @@index([teamId])
 }
 
 model Problem {
@@ -109,7 +129,7 @@ model Problem {
   authorId          String?
   boilerplateJson   String?
   description       String             @db.Text
-  imageUrl          String?            // Added for OCR/Image uploads at global level
+  imageUrl          String?            
   problemCode       String             @unique
   rating            Int?
   url               String?
@@ -143,7 +163,6 @@ model Submission {
   memoryKb             Int?
   judgeMessage         String?              @db.Text
   
-  // NEW: AI Analysis Fields
   aiFeedback           String?              @db.Text
   aiComplexity         String?
   aiSimilarityScore    Float?
@@ -234,24 +253,24 @@ model ContestTeam {
   participants   ContestParticipant[]
   submissions    Submission[]
   messages       TeamMessage[]
-  solvedProblems TeamProblemSolve[]   // NEW: Explicitly tracks which problems the team has scored on
+  solvedProblems TeamProblemSolve[]   
+  unlockedCases  UnlockedTestcase[]   
 
   @@index([contestId])
 }
 
-// NEW MODEL: To ensure only the FIRST solve in a team counts for group points
 model TeamProblemSolve {
   id               String         @id @default(cuid())
   teamId           String
   contestProblemId String
-  firstSolverId    String         // Links to the User who solved it first for the team
+  firstSolverId    String         
   solvedAt         DateTime       @default(now())
 
   team             ContestTeam    @relation(fields: [teamId], references: [id], onDelete: Cascade)
   contestProblem   ContestProblem @relation(fields: [contestProblemId], references: [id], onDelete: Cascade)
   firstSolver      User           @relation(fields: [firstSolverId], references: [id], onDelete: Cascade)
 
-  @@unique([teamId, contestProblemId]) // Prevents a team from scoring the same problem twice
+  @@unique([teamId, contestProblemId]) 
 }
 
 model TeamMessage {
@@ -342,9 +361,9 @@ model ContestProblem {
   platform            Platform           @default(DIVINECODE)
   externalId          String?
   externalUrl         String?
-  imageUrl            String?            // NEW: Uploaded image for custom OCR problems
-  requiresRedirect    Boolean            @default(false) // NEW: True if local judge fails and must redirect to platform
-  aiExtractionStatus  ExtractionStatus   @default(COMPLETED) // NEW: Tracks if AI is currently parsing the URL/Image
+  imageUrl            String?            
+  requiresRedirect    Boolean            @default(false) 
+  aiExtractionStatus  ExtractionStatus   @default(COMPLETED) 
   index               Int
   label               String
   points              Int                @default(1000)
@@ -357,10 +376,11 @@ model ContestProblem {
   problem             Problem?           @relation(fields: [problemId], references: [id])
   interviewQuestion   InterviewQuestion? @relation(fields: [interviewQuestionId], references: [id])
   submissions         Submission[]
-  teamSolves          TeamProblemSolve[] // NEW: Relation tracking which teams solved this
+  teamSolves          TeamProblemSolve[] 
+  unlockedCases       UnlockedTestcase[] 
   customTitle         String?
   customDescription   String?            @db.Text
-  customTestCases     Json?              // Array of { input: string, expectedOutput: string, isHidden: boolean }
+  customTestCases     Json?              
   order               Int                @default(0)
   
   @@unique([contestId, index])
@@ -571,16 +591,16 @@ model TopicMastery {
 }
 
 model RecommendationSnapshot {
-  id           String   @id @default(cuid())
-  userId       String
-  reason       String
-  ratingFloor  Int
-  ratingCeil   Int
+  id          String   @id @default(cuid())
+  userId      String
+  reason      String
+  ratingFloor Int
+  ratingCeil  Int
   topicWeights Json
-  problemIds   String[]
-  createdAt    DateTime @default(now())
+  problemIds  String[]
+  createdAt   DateTime @default(now())
   
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
 }

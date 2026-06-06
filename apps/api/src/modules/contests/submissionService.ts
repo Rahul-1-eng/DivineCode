@@ -32,7 +32,8 @@ export async function createQueuedContestSubmission(input: {
 
   const contestProblem = contest.problems.find((problem) => problem.id === input.contestProblemId);
   if (!contestProblem) throw new Error('Contest problem not found');
-if (contestProblem.requiresRedirect && contestProblem.externalUrl) {
+  
+  if (contestProblem.requiresRedirect && contestProblem.externalUrl) {
     return { 
       redirectUrl: contestProblem.externalUrl,
       status: 'REDIRECT_REQUIRED' 
@@ -45,7 +46,6 @@ if (contestProblem.requiresRedirect && contestProblem.externalUrl) {
     data: {
       userId: participant.userId!,
       participantId: participant.id,
-      // 👉 NEW: This now securely links the submission to the relational ContestTeam model
       teamId: participant.teamId, 
       problemId: contestProblem.problemId,
       contestId: contest.id,
@@ -57,6 +57,60 @@ if (contestProblem.requiresRedirect && contestProblem.externalUrl) {
       code: input.code!
     }
   });
+}
+
+// 👉 STEP 4: Point Deduction & Unlocking Logic
+export async function unlockHiddenTestCase(contestId: string, contestProblemId: string, viewer: ViewerContext) {
+  const contest = await prisma.contest.findUnique({
+    where: { id: contestId }, include: { participants: true, teams: true }
+  });
+  if (!contest) throw new Error("Contest not found");
+
+  const participant = findViewerParticipant(contest, viewer);
+  if (!participant) throw new Error("Participant not found");
+
+  const contestProblem = await prisma.contestProblem.findUnique({ where: { id: contestProblemId } });
+  if (!contestProblem || !contestProblem.problemId) throw new Error("Problem dataset missing");
+
+  const hiddenTest = await prisma.testcase.findFirst({
+    where: { problemId: contestProblem.problemId, type: 'HIDDEN' },
+    orderBy: { order: 'asc' }
+  });
+
+  if (!hiddenTest) throw new Error("No hidden testcases available for this problem");
+
+  // Check if they already unlocked it to prevent double deduction
+  const existingUnlock = await prisma.unlockedTestcase.findUnique({
+    where: { userId_testcaseId: { userId: participant.userId!, testcaseId: hiddenTest.id } }
+  });
+
+  if (!existingUnlock) {
+    // 50 point deduction on Standing and Team models
+    await prisma.$transaction(async (tx) => {
+      await tx.contestStanding.updateMany({
+        where: { participantId: participant.id },
+        data: { testcasePenalty: { increment: 50 }, score: { decrement: 50 }, individualScore: { decrement: 50 } }
+      });
+      
+      if (participant.teamId) {
+        await tx.contestTeam.update({
+          where: { id: participant.teamId },
+          data: { penalty: { increment: 50 }, score: { decrement: 50 } }
+        });
+      }
+
+      await tx.unlockedTestcase.create({
+        data: {
+          userId: participant.userId!,
+          teamId: participant.teamId,
+          contestProblemId: contestProblemId,
+          testcaseId: hiddenTest.id
+        }
+      });
+    });
+  }
+
+  return hiddenTest;
 }
 
 export async function getContestSubmissions(input: {
@@ -75,21 +129,17 @@ export async function getContestSubmissions(input: {
 
   let whereClause: any = { contestId: input.contestId };
 
-  // 👉 ENFORCING PRIVACY BOUNDARIES WITH NEW TEAM ARCHITECTURE
   if (!isOwner) {
     if (contest.status === ContestStatus.RUNNING) {
       if (!participant) throw new Error('Only active participants can view submissions during the contest.');
       
-      // Only allow group viewing if the creator enabled it AND they are actually in a strict relational team
       if (contest.allowTeamSubmissionView && participant.teamId) {
-        // Massive optimization: We can query the Submission table directly by teamId now!
         whereClause.teamId = participant.teamId;
       } else {
-        // Strict isolation: User can only see their own submissions
         whereClause.participantId = participant.id; 
       }
     } else if (contest.status === ContestStatus.ENDED) {
-      // Contest ended: Everyone sees everything, no extra filters added.
+      // Unrestricted reading
     } else {
       throw new Error('Submissions are not visible at this time. Contest is not active.');
     }
@@ -98,16 +148,9 @@ export async function getContestSubmissions(input: {
   return prisma.submission.findMany({
     where: whereClause,
     include: {
-      user: {
-        select: { username: true, avatarUrl: true, name: true }
-      },
-      participant: {
-        select: { displayName: true, teamId: true }
-      },
-      // 👉 NEW: Pulls the official team name right out of the joined table
-      team: {
-        select: { name: true } 
-      },
+      user: { select: { username: true, avatarUrl: true, name: true } },
+      participant: { select: { displayName: true, teamId: true } },
+      team: { select: { name: true } },
       reports: isOwner ? true : false, 
     },
     orderBy: { createdAt: 'desc' }

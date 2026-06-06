@@ -83,6 +83,48 @@ export async function extractProblemFromTextOrImage(rawTextOrUrl: string) {
   }
 }
 
+// 👉 NEW: Direct Base64 Multimodal Extraction for Problem Images
+export async function extractProblemFromImageBase64(base64Data: string, mimeType: string = 'image/jpeg') {
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
+
+  const cleanBase64 = base64Data.replace(/^data:image\/\w+;base64,/, "");
+
+  const prompt = `
+    You are an expert Optical Character Recognition (OCR) system and competitive programming parser.
+    I have provided an image of a coding problem. 
+    1. Extract all text accurately.
+    2. Format the problem description beautifully into HTML (use <h3>, <p>, <ul>, and <pre> tags for constraints and code).
+    3. Identify the sample inputs and outputs.
+    4. Generate 5 additional tricky hidden test cases based on the constraints.
+
+    Respond strictly with JSON:
+    {
+      "title": "Extracted Problem Title",
+      "descriptionHtml": "<div class='problem-statement'>...</div>",
+      "testcases": [{"input": "...", "expectedOutput": "..."}]
+    }
+  `;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const { data } = await axios.post(url, {
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inlineData: { mimeType, data: cleanBase64 } }
+        ]
+      }],
+      generationConfig: { responseMimeType: "application/json" }
+    });
+
+    return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
+  } catch (error: any) {
+    console.error("AI Image OCR Error:", error.response?.data || error.message);
+    throw new Error("Failed to parse problem from image.");
+  }
+}
+
 export async function generateTestCasesWithAI(problemDescription: string, masterSolution: string) {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
@@ -93,7 +135,7 @@ export async function generateTestCasesWithAI(problemDescription: string, master
     Master Solution (Always Correct):
     ${masterSolution}
 
-    Generate 5 tricky, edge-case system test cases for this problem. Include edge cases like 0, negative numbers, maximum constraints, or empty arrays where applicable.
+    Generate 20 tricky, edge-case system test cases for this problem. Include edge cases like 0, negative numbers, maximum constraints, or empty arrays where applicable. This is for the serial judge system.
     Respond strictly with a JSON array of objects. Do not include markdown formatting.
     Format: [{"input": "...", "expectedOutput": "...", "explanation": "..."}]
   `;
@@ -183,7 +225,7 @@ export async function generateToughTestCases(problemDescriptionHtml: string) {
     Read the following problem description:
     ${problemDescriptionHtml}
 
-    Generate exactly 3 tricky, edge-case system test cases for this problem (e.g., maximum constraints, zeroes, empty inputs).
+    Generate exactly 20 tricky, edge-case system test cases for this problem to feed the serial judge.
     Respond strictly with a JSON array of objects. Do not include markdown formatting.
     Format: [{"input": "...", "expectedOutput": "..."}]
   `;

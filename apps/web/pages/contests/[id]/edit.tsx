@@ -38,7 +38,6 @@ export default function ContestEditPage() {
   const [newProblemPlatform, setNewProblemPlatform] = useState('Codeforces');
   const [newProblemUrl, setNewProblemUrl] = useState(''); 
   
-  // 👉 Custom Problem States
   const [customTitle, setCustomTitle] = useState('');
   const [customDescription, setCustomDescription] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -123,7 +122,6 @@ export default function ContestEditPage() {
     } catch (e: any) { toast.error(e.message || 'Scrape failed'); }
   }
 
-  // 👉 Custom Image Uploader handler
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
@@ -134,7 +132,7 @@ export default function ContestEditPage() {
     try {
       const res = await fetch(`${API_V2_BASE_URL}/upload-image`, {
         method: 'POST',
-        body: formData // DO NOT set Content-Type header manually for FormData
+        body: formData 
       });
       const data = await res.json();
       if (data.success) {
@@ -147,7 +145,7 @@ export default function ContestEditPage() {
       toast.error("Image upload failed.");
     } finally {
       setUploadingImage(false);
-      e.target.value = ''; // reset input
+      e.target.value = ''; 
     }
   };
 
@@ -205,6 +203,23 @@ export default function ContestEditPage() {
       setContest(data);
       toast.success('Problem removed!');
     } catch (e: any) { toast.error(e.message || 'Could not remove problem'); }
+  }
+
+  // 👉 NEW: API request to reorder live questions in Editor Mode
+  async function moveProblem(problemId: string, direction: 'UP' | 'DOWN') {
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}/reorder`, {
+        method: 'PUT',
+        headers: viewerHeaders(session),
+        body: JSON.stringify({ direction })
+      });
+      const data = await res.json();
+      if (!res.ok) return toast.error(data.error || 'Could not reorder problem');
+      setContest(data);
+      toast.success('Reordered successfully!');
+    } catch (e: any) {
+      toast.error('Network error during reordering');
+    }
   }
 
   async function deleteContest() {
@@ -281,7 +296,6 @@ export default function ContestEditPage() {
             </div>
           </div>
 
-          {/* 👉 NEW: Option 3 Custom Problem creation with Image Upload */}
           <div style={{ borderTop: '1px solid #1e293b', paddingTop: 20 }}>
             <label style={{ display: 'block', marginBottom: 5, color: '#94a3b8' }}>Option 3: Create Custom Problem</label>
             <input value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} placeholder="Custom Problem Title" style={input} />
@@ -313,7 +327,14 @@ export default function ContestEditPage() {
           <h2>Problems</h2>
           {contest.problems.map((problem: any, index: number) => (
             <div key={problem.id} style={row}>
-              <strong style={{ fontSize: 24, color: '#e2e8f0' }}>{String.fromCharCode(65 + index)}</strong>
+              <strong style={{ fontSize: 24, color: '#e2e8f0', minWidth: 30 }}>{String.fromCharCode(65 + index)}</strong>
+              
+              {/* 👉 NEW: Reorder arrows mapped here */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginRight: 15 }}>
+                 <button onClick={() => moveProblem(problem.id, 'UP')} disabled={index === 0} style={{...ghost, padding: '2px 6px', fontSize: 10}}>▲</button>
+                 <button onClick={() => moveProblem(problem.id, 'DOWN')} disabled={index === contest.problems.length - 1} style={{...ghost, padding: '2px 6px', fontSize: 10}}>▼</button>
+              </div>
+
               <div style={{ flex: 1 }}>
                 <b style={{ fontSize: 18 }}>{problem.titleSnapshot || problem.title}</b>
                 <p style={{ margin: '4px 0 0', color: '#94a3b8' }}>{problem.platform} - Rating {problem.rating || problem.difficulty || 'Practice'}</p>

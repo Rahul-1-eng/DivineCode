@@ -68,7 +68,6 @@ function evaluateVerdict(status: string, stdout: string | null | undefined, expe
   return Verdict.JUDGE_ERROR;
 }
 
-// 👉 FIX 1: Added problem: true to the include block
 async function finalizeVerdict(submissionId: string, verdict: Verdict) {
   const submission = await prisma.submission.findUnique({
     where: { id: submissionId }, 
@@ -79,7 +78,6 @@ async function finalizeVerdict(submissionId: string, verdict: Verdict) {
 
   await prisma.submission.update({ where: { id: submissionId }, data: { verdict } });
 
-  // Handle Penalties
   if (verdict !== Verdict.ACCEPTED && verdict !== Verdict.COMPILATION_ERROR) {
     await prisma.contestStanding.updateMany({ 
       where: { participantId: submission.participantId }, 
@@ -92,7 +90,6 @@ async function finalizeVerdict(submissionId: string, verdict: Verdict) {
     return;
   }
 
-  // Handle Accepted Solves
   if (verdict === Verdict.ACCEPTED) {
     const teamId = submission.teamId;
     const problemId = submission.contestProblemId;
@@ -100,20 +97,14 @@ async function finalizeVerdict(submissionId: string, verdict: Verdict) {
     if (teamId && problemId) {
       try {
         await prisma.teamProblemSolve.create({
-          data: {
-            teamId: teamId,
-            contestProblemId: problemId,
-            firstSolverId: submission.userId
-          }
+          data: { teamId: teamId, contestProblemId: problemId, firstSolverId: submission.userId }
         });
         
         await prisma.contestTeam.update({ 
           where: { id: teamId }, 
           data: { score: { increment: submission.problem?.rating || 100 } } 
         });
-      } catch (err) {
-        // Unique constraint failed -> Another group member already solved it.
-      }
+      } catch (err) {}
     }
 
     await prisma.contestStanding.updateMany({ 
@@ -131,7 +122,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
 
   if (!submission) throw new Error('Submission not found');
   
-  // MCQ Handling
   if (submission.language === 'mcq') {
     const mcq = await prisma.interviewQuestion.findUnique({ where: { id: submission.contestProblem!.interviewQuestionId! } });
     let isCorrect = false;
@@ -149,7 +139,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
     return { submission: judged, standings };
   }
 
-  // External Redirect Fallback Check
   if (submission.contestProblem?.requiresRedirect) {
     const judged = await prisma.submission.update({
       where: { id: submission.id },
@@ -174,36 +163,47 @@ export async function judgeQueuedSubmission(submissionId: string) {
   
   let finalVerdict: Verdict = Verdict.ACCEPTED;
   let detailedMessage = '';
+  let fullTestResults = [];
 
+  // 👉 STEP 4: Iterating all test cases without breaking to form an Array Result
   for (const [index, testcase] of testcases.entries()) {
     const result = await submitToWandbox({ sourceCode: submission.code, language: submission.language, stdin: testcase.input });
     const localVerdict = evaluateVerdict(result.status, result.stdout, testcase.expectedOutput, submission.problem?.checkerType || CheckerType.EXACT);
     
-    if (localVerdict !== Verdict.ACCEPTED) {
+    fullTestResults.push({
+      submissionId: submission.id,
+      testcaseId: testcase.id,
+      index,
+      verdict: localVerdict,
+      stdout: result.stdout?.substring(0, 500) || null,
+      stderr: result.stderr?.substring(0, 500) || result.compile_output?.substring(0, 500) || null
+    });
+
+    if (localVerdict !== Verdict.ACCEPTED && finalVerdict === Verdict.ACCEPTED) {
       finalVerdict = localVerdict;
       detailedMessage = result.compile_output || result.stderr || `Failed on testcase ${index + 1}`;
-      break;
     }
   }
 
+  // Bulk save all 100+ serial cases to Database
+  await prisma.submissionTestResult.createMany({ data: fullTestResults });
+
   const judged = await prisma.submission.update({
     where: { id: submission.id },
-    data: { status: 'FINISHED', verdict: finalVerdict, judgeMessage: detailedMessage || 'Accepted', judgedAt: new Date() }
+    data: { status: 'FINISHED', verdict: finalVerdict, judgeMessage: detailedMessage || `Passed all ${testcases.length} system tests!`, judgedAt: new Date() }
   });
 
   await finalizeVerdict(judged.id, finalVerdict);
   const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
   
-  // Asynchronous AI Check for Accepted Solutions
   if (finalVerdict === Verdict.ACCEPTED && submission.problem) {
     analyzeSubmissionLogic(judged.id, submission.problem.description, submission.code)
       .catch(err => console.error("AI Analysis failed in background:", err));
   }
 
-  return { submission: judged, standings };
+  return { submission: judged, standings, testResults: fullTestResults };
 }
 
-// 👉 FIX 2: Restored the executeSubmission function used by the scratchpad UI
 export async function executeSubmission(sourceCode: string, language: string, input: string, expectedOutput?: string) {
   const result = await submitToWandbox({ sourceCode, language, stdin: input });
   

@@ -3,12 +3,12 @@ import { Server } from 'socket.io';
 import { prisma } from '../prisma/client';
 import { enqueueJudgeSubmission } from '../queues/queues';
 import { canManageContest, sanitizeContestForViewer, viewerFromRequest } from '../modules/contests/contestRules';
-import { createContestV2, listContestsV2, loadContestForViewer } from '../modules/contests/contestService';
-import { createQueuedContestSubmission } from '../modules/contests/submissionService';
+import { createContestV2, listContestsV2, loadContestForViewer, reorderContestProblemV2 } from '../modules/contests/contestService';
+import { createQueuedContestSubmission, unlockHiddenTestCase } from '../modules/contests/submissionService';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
 import { recomputeContestStandings } from '../modules/standings/standingService';
 import { scrapeProblemFromUrl } from '../modules/external-sync/problemScraper'; 
-import { generateTestCasesWithAI } from '../modules/ai/aiService'; // 👉 NEW
+import { generateTestCasesWithAI } from '../modules/ai/aiService'; 
 import { ContestStatus } from '@prisma/client';
 import axios from 'axios';
 import multer from 'multer';
@@ -95,7 +95,7 @@ export function mountV2Routes(app: Express, io: Server) {
       } catch (err) {}
     });
 
-    // 👉 NEW: WebRTC Signaling for Voice Chat
+    // WebRTC Signaling for Voice Chat
     socket.on('join-voice', (teamId) => {
       socket.join(`voice:${teamId}`);
       socket.to(`voice:${teamId}`).emit('user-joined-voice', socket.id);
@@ -219,6 +219,19 @@ export function mountV2Routes(app: Express, io: Server) {
     res.status(400).json({ error: 'Bad type parsing' });
   }));
 
+  // 👉 STEP 1: REST Endpoint for Reordering Questions
+  router.put('/contests/:id/problems/:problemId/reorder', asyncRoute(async (req, res) => {
+    const { direction } = req.body;
+    const contest = await reorderContestProblemV2(req.params.id, req.params.problemId, direction);
+    res.json(sanitizeContestForViewer(contest!, viewerFromRequest(req)));
+  }));
+
+  // 👉 STEP 4: Point deduction & testcase unlocking route
+  router.post('/contests/:id/problems/:problemId/unlock-testcase', asyncRoute(async (req, res) => {
+    const testcase = await unlockHiddenTestCase(req.params.id, req.params.problemId, viewerFromRequest(req));
+    res.json({ success: true, testcase });
+  }));
+
   router.post('/contests/:id/submissions', asyncRoute(async (req, res) => {
     const submission = await createQueuedContestSubmission({
       contestId: req.params.id, contestProblemId: String(req.body.contestProblemId || req.body.problemId || ''),
@@ -267,7 +280,6 @@ export function mountV2Routes(app: Express, io: Server) {
     });
   }));
 
-  // 👉 NEW: Real AI Testcase Generator Integration
   router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
      const { masterSolution } = req.body;
      const contestProblemId = req.params.id;
@@ -293,9 +305,7 @@ export function mountV2Routes(app: Express, io: Server) {
      res.json({ success: true, generatedCount: testCases.length });
   }));
 
-  // 👉 NEW: Real DB Recommendation Integration
   router.post('/contests/:id/ai-recommendations', asyncRoute(async (req, res) => {
-    // Pulls 3 latest/curated items from your DB
     const problems = await prisma.aiProblemDataset.findMany({
       take: 3,
       orderBy: { createdAt: 'desc' }
@@ -314,7 +324,7 @@ export function mountV2Routes(app: Express, io: Server) {
   router.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
     res.status(statusFromError(error)).json({ ok: false, error: error.message || 'Unexpected V2 API error' });
   });
-app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
+  app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
   app.use('/api/v2', router);
   app.use('/api/v2/submissions', submissionRouter); 
   app.use('/api/v2/interview', interviewRouter);

@@ -9,17 +9,14 @@ export default function GlobalNavigationAndMashupCreator() {
   const router = useRouter();
   const { data: session } = useSession();
   
-  // Navigation Tabs state
   const [navTab, setNavTab] = useState<'mashup' | 'duel' | 'interview'>('mashup');
 
-  // Creator forms state
   const [contestMode, setContestMode] = useState<'SOLO' | 'GROUP'>('GROUP');
   const [activeTab, setActiveTab] = useState<'URL' | 'IMAGE' | 'CUSTOM' | 'MCQ'>('URL');
   const [title, setTitle] = useState('DivineCode Controlled Practice Set');
   const [duration, setDuration] = useState(120);
   const [startTimeStr, setStartTimeStr] = useState('');
   
-  // Input states
   const [urlProblem, setUrlProblem] = useState('');
   const [imageBase64, setImageBase64] = useState<string>('');
   
@@ -34,15 +31,8 @@ export default function GlobalNavigationAndMashupCreator() {
   const [compiledProblems, setCompiledProblems] = useState<any[]>([]);
   const [aiBank, setAiBank] = useState<any[]>([]);
   
-  // Context-Aware Loading State
   const [isCreating, setIsCreating] = useState(false);
   const [loadingContext, setLoadingContext] = useState('');
-
-  // Added: Helper to remove problem from queue
-  const removeProblem = (index: number) => {
-    setCompiledProblems((prev) => prev.filter((_, i) => i !== index));
-    toast.success("Problem removed from queue.");
-  };
 
   useEffect(() => {
     fetch(`${API_V2}/ai-dataset`)
@@ -101,6 +91,44 @@ export default function GlobalNavigationAndMashupCreator() {
     setMcqPrompt(''); setMcqCorrect([]); setMcqOptions(['', '']);
     toast.success("Problem appended to contest batch queue!");
   }
+
+  // 👉 NEW: Problem Management Helpers (Delete, Move Up, Move Down, Edit)
+  const removeProblem = (index: number) => {
+    setCompiledProblems((prev) => prev.filter((_, i) => i !== index));
+    toast.success("Problem removed from queue.");
+  };
+
+  const moveProblem = (index: number, direction: 'UP' | 'DOWN') => {
+    if (direction === 'UP' && index === 0) return;
+    if (direction === 'DOWN' && index === compiledProblems.length - 1) return;
+    
+    const newIdx = direction === 'UP' ? index - 1 : index + 1;
+    const newArr = [...compiledProblems];
+    const temp = newArr[index];
+    newArr[index] = newArr[newIdx];
+    newArr[newIdx] = temp;
+    setCompiledProblems(newArr);
+  };
+
+  const editProblem = (index: number) => {
+    const p = compiledProblems[index];
+    removeProblem(index); // remove from array so user can re-append it after editing
+    setActiveTab(p.type);
+    
+    if (p.type === 'URL') setUrlProblem(p.url);
+    if (p.type === 'IMAGE') setImageBase64(p.imageUrl);
+    if (p.type === 'CUSTOM') {
+      setCustomTitle(p.customData.title);
+      setCustomDesc(p.customData.description);
+      setCustomCases(p.customData.testcases.length ? p.customData.testcases : [{ input: '', expectedOutput: '', isHidden: false }]);
+    }
+    if (p.type === 'MCQ') {
+      setMcqPrompt(p.mcqData.prompt);
+      setMcqOptions(p.mcqData.options);
+      setMcqCorrect(p.mcqData.correctIndices);
+    }
+    toast("Problem loaded into editor. Make your changes and click 'Append' again.", { icon: '✍️' });
+  };
 
   async function createContest() {
     if (compiledProblems.length === 0) return toast.error("Batch queue empty.");
@@ -257,16 +285,16 @@ export default function GlobalNavigationAndMashupCreator() {
               <h3 style={{ marginTop: 0, color: '#a5b4fc' }}>Queued Suite Batch ({compiledProblems.length})</h3>
               {compiledProblems.length === 0 && <p style={{color: '#64748b'}}>No problems queued.</p>}
               
-              {/* UPDATED: Mapping with delete logic */}
+              {/* 👉 NEW: Reorder and Edit UI mapped here */}
               {compiledProblems.map((p, i) => (
-                <div key={i} style={{ padding: '10px', background: '#1e293b', borderRadius: 4, margin: '8px 0', border: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '14px' }}>{p.displayTitle}</span>
-                  <button 
-                    onClick={() => removeProblem(i)}
-                    style={{ background: 'transparent', border: '1px solid #f87171', color: '#f87171', padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
-                  >
-                    Delete
-                  </button>
+                <div key={i} style={{ padding: '10px', background: '#1e293b', borderRadius: 4, margin: '8px 0', border: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{i + 1}. {p.displayTitle}</span>
+                  <div style={{ display: 'flex', gap: 5, justifyContent: 'flex-end' }}>
+                    <button onClick={() => moveProblem(i, 'UP')} disabled={i === 0} style={iconBtn}>↑</button>
+                    <button onClick={() => moveProblem(i, 'DOWN')} disabled={i === compiledProblems.length - 1} style={iconBtn}>↓</button>
+                    <button onClick={() => editProblem(i)} style={{...iconBtn, color: '#38bdf8', borderColor: '#38bdf8'}}>Edit</button>
+                    <button onClick={() => removeProblem(i)} style={{...iconBtn, color: '#f87171', borderColor: '#f87171'}}>Delete</button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -299,5 +327,6 @@ const pasNav: CSSProperties = { padding: '10px 15px', background: 'transparent',
 const inputBox = { width: '100%', padding: '12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#fff', boxSizing: 'border-box' as const, marginTop: 5 };
 const primaryBtn = { background: '#38bdf8', color: '#000', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 'bold' as const, cursor: 'pointer' };
 const ghostBtn = { background: 'transparent', color: '#38bdf8', border: '1px solid #38bdf8', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' as const };
+const iconBtn = { background: 'transparent', border: '1px solid #64748b', color: '#cbd5e1', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12 };
 const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999, flexDirection: 'column' as const };
 const overlayModal = { background: '#0f172a', padding: 40, borderRadius: 12, border: '1px solid #38bdf8', textAlign: 'center' as const, boxShadow: '0 0 30px rgba(56, 189, 248, 0.2)' };

@@ -464,7 +464,6 @@ export async function updateContestSettingsV2(contestId: string, input: { title?
     durationMinutes
   };
 
-  // ✅ Issue #2 Fixed: Saving Date Times Properly
   if (input.startTime) {
      const st = new Date(input.startTime);
      data.startTime = st;
@@ -480,6 +479,46 @@ export async function updateContestSettingsV2(contestId: string, input: { title?
     });
   });
 
+  return loadContestForViewer(contestId);
+}
+
+// 👉 NEW: Dedicated Database Function to Swap/Reorder Mashup Problems Dynamically
+export async function reorderContestProblemV2(contestId: string, contestProblemId: string, direction: 'UP' | 'DOWN', actorId?: string) {
+  const problem = await prisma.contestProblem.findFirst({ where: { id: contestProblemId, contestId } });
+  if (!problem) throw new Error('Problem not found');
+
+  await prisma.$transaction(async (tx) => {
+    const all = await tx.contestProblem.findMany({ where: { contestId }, orderBy: { index: 'asc' } });
+    const currentIndex = all.findIndex(p => p.id === contestProblemId);
+    
+    if (currentIndex === -1) return;
+
+    if (direction === 'UP' && currentIndex > 0) {
+      const prev = all[currentIndex - 1];
+      all[currentIndex - 1] = problem;
+      all[currentIndex] = prev;
+    } else if (direction === 'DOWN' && currentIndex < all.length - 1) {
+      const next = all[currentIndex + 1];
+      all[currentIndex + 1] = problem;
+      all[currentIndex] = next;
+    } else {
+      return; 
+    }
+
+    // Reapply sequential indexes and Alphabetical Labels (A, B, C...)
+    for (let i = 0; i < all.length; i++) {
+      await tx.contestProblem.update({
+        where: { id: all[i].id },
+        data: { index: i, label: LABELS[i] || `Q${i + 1}` }
+      });
+    }
+
+    await tx.auditLog.create({ 
+      data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_REORDER', entityType: 'ContestProblem', entityId: contestProblemId, before: { direction } as any } 
+    });
+  });
+
+  void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
   return loadContestForViewer(contestId);
 }
 
@@ -505,7 +544,6 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
       newTestcases = [...scraped.testcases, ...aiGeneratedCases];
     } catch (err) {
       console.warn("Scraping or AI failed, applying URL fallback.");
-      // ✅ Issue #8/9/11 Fixed: Valid fallback with links if scraper completely fails
       finalDescription = `<h3>External Problem</h3><p>Please view the problem description here: <a href="${problem.url}" target="_blank" style="color: #38bdf8;">Click here to open ${problem.url}</a></p>`;
       enrichedProblem.title = problem.title || 'Imported Problem';
     }
@@ -514,7 +552,6 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
   await prisma.$transaction(async (tx) => {
     let finalProblemId = problem.problemId || problem.id || null;
 
-    // ✅ Issue #4 Fixed: Saving the Custom HTML output physically so the UI can render it.
     if (!finalProblemId && problem.url) {
        try {
          const newProb = await tx.problem.create({
@@ -567,7 +604,6 @@ export async function removeContestProblemV2(contestId: string, contestProblemId
   const problem = await prisma.contestProblem.findFirst({ where: { id: contestProblemId, contestId } });
   if (!problem) throw new Error('Problem not found');
 
-  // ✅ Issue #6 Fixed: Middle problem deletion handling! Rebuilds indexes seamlessly.
   await prisma.$transaction(async (tx) => {
     await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_REMOVE', entityType: 'ContestProblem', entityId: contestProblemId, before: problem as any } });
     await tx.contestProblem.delete({ where: { id: contestProblemId } });
@@ -576,7 +612,7 @@ export async function removeContestProblemV2(contestId: string, contestProblemId
     for (let i = 0; i < remaining.length; i++) {
       await tx.contestProblem.update({
         where: { id: remaining[i].id },
-        data: { index: i, label: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')[i] || `Q${i + 1}` }
+        data: { index: i, label: LABELS[i] || `Q${i + 1}` }
       });
     }
   });

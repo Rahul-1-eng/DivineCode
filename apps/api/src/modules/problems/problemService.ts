@@ -110,12 +110,10 @@ export async function createInternalProblem(input: CreateProblemInput) {
   });
 }
 
-// 👉 AI Test Case Generator
 export async function generateAndAppendAITestcases(problemId: string, providedMasterSolution: string) {
   const problem = await prisma.problem.findUnique({ where: { id: problemId } });
   if (!problem) throw new Error('Problem not found');
   
-  // Use the provided solution from the frontend prompt
   const generatedCases = await generateTestCasesWithAI(problem.description || problem.title, providedMasterSolution);
 
   const testcaseRecords = generatedCases.map((tc: any, index: number) => ({
@@ -135,7 +133,6 @@ export async function generateAndAppendAITestcases(problemId: string, providedMa
 
 export async function syncTestCasesFromCodeforces(problemId: string, url: string) {
   try {
-    // 👉 FIXED: Route through mirror domain and add browser headers to bypass CF 503 Shield/Cloudflare blocks
     const targetUrl = url.replace('codeforces.com', 'mirror.codeforces.com');
     const { data } = await axios.get(targetUrl, {
       headers: {

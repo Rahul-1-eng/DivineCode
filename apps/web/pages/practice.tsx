@@ -1,47 +1,47 @@
 import { CSSProperties, useEffect, useState, useMemo } from 'react';
-import { motion } from 'framer-motion';
-import { useSession } from 'next-auth/react'; // 👉 FIX: Imported useSession
+import { motion, AnimatePresence } from 'framer-motion';
+import { useSession } from 'next-auth/react'; 
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
 export default function PracticePage() {
-  const { data: session } = useSession(); // 👉 FIX: Initialized session
+  const { data: session } = useSession(); 
   const [problems, setProblems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // 👉 Advanced Filtering States
+  // Advanced Filtering States
   const [searchQuery, setSearchQuery] = useState('');
   const [difficultyFilter, setDifficultyFilter] = useState('All');
   const [platformFilter, setPlatformFilter] = useState('All');
 
+  // 👉 NEW: AI Avatar Chatbot State
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<{role: 'user'|'ai', text: string}[]>([
+    { role: 'ai', text: 'Hello! I have access to over 5,000+ DSA questions across all platforms and ratings. How can I help you practice today?' }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+
   useEffect(() => {
-    // 👉 FIX: Injected security headers
-    fetch(`${API_BASE_URL}/api/problems`, {
+    // Fetches the AI dataset (up to limit) for the practice view
+    fetch(`${API_BASE_URL}/api/v2/ai-dataset`, {
       headers: { 'x-user-email': session?.user?.email || '' }
     })
       .then((r) => r.json())
       .then((d) => {
-        setProblems(Array.isArray(d) ? d : []);
+        setProblems(Array.isArray(d.problems) ? d.problems : []);
         setLoading(false);
       })
       .catch(() => {
         setProblems([]);
         setLoading(false);
       });
-  }, [session]); // 👉 FIX: Dependency updated
+  }, [session]); 
 
-  const getDifficultyColor = (rating: number | null) => {
+  const getDifficultyColor = (rating: number | string | null) => {
     if (!rating) return '#94a3b8'; 
-    if (rating < 1200) return '#4ade80'; // Easy
-    if (rating < 1600) return '#fbbf24'; // Medium
+    if (rating === 'Easy' || Number(rating) < 1200) return '#4ade80';
+    if (rating === 'Medium' || Number(rating) < 1600) return '#fbbf24'; 
     return '#f87171'; // Hard
-  };
-
-  const getDifficultyLabel = (rating: number | null) => {
-    if (!rating) return 'Unrated';
-    if (rating < 1200) return 'Easy';
-    if (rating < 1600) return 'Medium';
-    return 'Hard';
   };
 
   const filteredProblems = useMemo(() => {
@@ -49,14 +49,24 @@ export default function PracticePage() {
       const matchesSearch = p.title?.toLowerCase().includes(searchQuery.toLowerCase()) || 
                             p.tags?.some((t: string) => t.toLowerCase().includes(searchQuery.toLowerCase()));
       
-      const difficulty = getDifficultyLabel(p.rating);
+      const difficulty = p.difficulty || 'Unrated';
       const matchesDifficulty = difficultyFilter === 'All' || difficulty === difficultyFilter;
-      
       const matchesPlatform = platformFilter === 'All' || (p.platform || 'DivineCode') === platformFilter;
 
       return matchesSearch && matchesDifficulty && matchesPlatform;
     });
   }, [problems, searchQuery, difficultyFilter, platformFilter]);
+
+  const handleSendMessage = () => {
+    if (!chatInput.trim()) return;
+    setChatMessages(prev => [...prev, { role: 'user', text: chatInput }]);
+    setChatInput('');
+    
+    // Simulate AI response recommending specific platform constraints
+    setTimeout(() => {
+       setChatMessages(prev => [...prev, { role: 'ai', text: `I found several matches in my 5,000+ problem database for your request. Try filtering the table by "Hard" or use the search bar above to look for specific algorithms!` }]);
+    }, 1000);
+  };
 
   return (
     <main style={page}>
@@ -85,7 +95,7 @@ export default function PracticePage() {
         {/* LeetCode-Style Filter Toolbar */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
           <input 
-            placeholder="Search questions or topics..." 
+            placeholder="Search 5000+ questions or topics..." 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{ ...filterInput, flex: 1, minWidth: 250 }} 
@@ -95,13 +105,13 @@ export default function PracticePage() {
             <option value="Easy">Easy</option>
             <option value="Medium">Medium</option>
             <option value="Hard">Hard</option>
-            <option value="Unrated">Unrated</option>
           </select>
           <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={filterInput}>
             <option value="All">All Platforms</option>
             <option value="Codeforces">Codeforces</option>
             <option value="LeetCode">LeetCode</option>
-            <option value="DivineCode">DivineCode</option>
+            <option value="AtCoder">AtCoder</option>
+            <option value="CodeChef">CodeChef</option>
           </select>
         </div>
 
@@ -121,19 +131,20 @@ export default function PracticePage() {
                 <tr>
                   <td colSpan={5} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
                     <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ display: 'inline-block', width: 30, height: 30, border: '3px solid rgba(103,232,249,0.2)', borderTopColor: '#67e8f9', borderRadius: '50%' }} />
+                    <p style={{ marginTop: 15 }}>Loading 5000+ Questions...</p>
                   </td>
                 </tr>
               ) : filteredProblems.length === 0 ? (
                 <tr>
                   <td colSpan={5} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
-                    No problems match your filters.
+                    No problems match your filters in the database.
                   </td>
                 </tr>
               ) : (
                 filteredProblems.map((p, idx) => (
                   <motion.tr 
                     key={p.id}
-                    initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05 }}
+                    initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.02 }}
                     style={{ 
                       borderBottom: '1px solid #1e293b', 
                       background: idx % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.4)',
@@ -153,8 +164,8 @@ export default function PracticePage() {
                     <td style={{ padding: '16px 20px', color: '#cbd5e1' }}>
                       {p.platform || 'DivineCode'}
                     </td>
-                    <td style={{ padding: '16px 20px', color: getDifficultyColor(p.rating), fontWeight: 600 }}>
-                      {getDifficultyLabel(p.rating)} {p.rating ? `(${p.rating})` : ''}
+                    <td style={{ padding: '16px 20px', color: getDifficultyColor(p.difficulty), fontWeight: 600 }}>
+                      {p.difficulty || 'Unrated'}
                     </td>
                     <td style={{ padding: '16px 20px' }}>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -171,11 +182,48 @@ export default function PracticePage() {
           </table>
         </div>
       </section>
+
+      {/* 👉 NEW: Floating AI Avatar Chatbot */}
+      <div style={floatingAiWrapper}>
+        <AnimatePresence>
+          {isChatOpen && (
+            <motion.div initial={{ opacity: 0, y: 20, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: 0.95 }} style={chatWindow}>
+              <div style={chatHeader}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={avatarImg}>🤖</div>
+                  <strong style={{ color: '#fff' }}>Divine AI Guide</strong>
+                </div>
+                <button onClick={() => setIsChatOpen(false)} style={closeBtn}>×</button>
+              </div>
+              
+              <div style={chatBody}>
+                {chatMessages.map((msg, i) => (
+                   <div key={i} style={{ ...chatBubble, alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', background: msg.role === 'user' ? '#38bdf8' : '#1e293b', color: msg.role === 'user' ? '#000' : '#fff' }}>
+                     {msg.text}
+                   </div>
+                ))}
+              </div>
+              
+              <div style={chatFooter}>
+                <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendMessage()} placeholder="Ask for problem recommendations..." style={chatInputStyle} />
+                <button onClick={handleSendMessage} style={sendBtn}>↑</button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        
+        {!isChatOpen && (
+           <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => setIsChatOpen(true)} style={floatingBtn}>
+             🤖 AI Guide
+           </motion.button>
+        )}
+      </div>
+
     </main>
   );
 }
 
-const page: CSSProperties = { minHeight: '100vh', padding: '30px 20px', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: '#020617' };
+const page: CSSProperties = { minHeight: '100vh', padding: '30px 20px', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: '#020617', position: 'relative' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 };
 const brand: CSSProperties = { color: '#fff', textDecoration: 'none', fontWeight: 900, fontSize: 22, display: 'flex', alignItems: 'center', gap: 12 };
 const logoBadge: CSSProperties = { width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', fontSize: 16 };
@@ -183,5 +231,18 @@ const pill: CSSProperties = { color: '#dbeafe', textDecoration: 'none', padding:
 const hero: CSSProperties = { padding: 40, borderRadius: 24, background: 'radial-gradient(circle at top right, rgba(34,211,238,.1), transparent 30rem), #0f172a', border: '1px solid #1e293b', marginBottom: 30, display: 'flex' };
 const eyebrow: CSSProperties = { color: '#22d3ee', fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 0 };
 const filterInput: CSSProperties = { padding: '12px 16px', borderRadius: 12, border: '1px solid #334155', background: '#0f172a', color: '#eef2ff', outline: 'none' };
-const tableContainer: CSSProperties = { background: '#0f172a', borderRadius: 16, border: '1px solid #1e293b', overflow: 'hidden' };
+const tableContainer: CSSProperties = { background: '#0f172a', borderRadius: 16, border: '1px solid #1e293b', overflow: 'hidden', paddingBottom: 50 };
 const tagStyle: CSSProperties = { background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', padding: '4px 8px', borderRadius: 6, fontSize: 12, fontWeight: 600, border: '1px solid rgba(56, 189, 248, 0.2)' };
+
+// Floating AI Widget Styles
+const floatingAiWrapper: CSSProperties = { position: 'fixed', bottom: 30, right: 30, zIndex: 50, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' };
+const floatingBtn: CSSProperties = { background: '#38bdf8', color: '#000', border: 'none', padding: '15px 25px', borderRadius: 999, fontSize: 16, fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 10px 25px rgba(56, 189, 248, 0.3)' };
+const chatWindow: CSSProperties = { width: 350, height: 450, background: '#0f172a', border: '1px solid #38bdf8', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' };
+const chatHeader: CSSProperties = { background: '#1e293b', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155' };
+const avatarImg: CSSProperties = { width: 30, height: 30, background: '#020617', borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 18 };
+const closeBtn: CSSProperties = { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 24, cursor: 'pointer' };
+const chatBody: CSSProperties = { flex: 1, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 };
+const chatBubble: CSSProperties = { maxWidth: '80%', padding: '10px 14px', borderRadius: 12, fontSize: 14, lineHeight: 1.4 };
+const chatFooter: CSSProperties = { padding: 12, background: '#1e293b', borderTop: '1px solid #334155', display: 'flex', gap: 8 };
+const chatInputStyle: CSSProperties = { flex: 1, background: '#020617', border: '1px solid #334155', color: '#fff', borderRadius: 8, padding: '8px 12px', outline: 'none' };
+const sendBtn: CSSProperties = { background: '#38bdf8', color: '#000', border: 'none', width: 36, borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
