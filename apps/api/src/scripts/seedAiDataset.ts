@@ -1,22 +1,20 @@
-import { PrismaClient } from '@prisma/client';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as fs from 'fs';
+import { PrismaClient } from '@prisma/client';
 
-// Foolproof environment variable loader
-const possiblePaths = [
-  path.join(process.cwd(), '.env'),
-  path.join(process.cwd(), 'apps/api/.env'),
-  path.join(__dirname, '../../.env'),
-  path.join(__dirname, '../../../../.env')
-];
+// --- Robust Environment Loader ---
+const rootEnv = path.resolve(process.cwd(), '.env');
+const apiEnv = path.resolve(process.cwd(), 'apps/api/.env');
 
-for (const p of possiblePaths) {
-  if (fs.existsSync(p)) {
-    dotenv.config({ path: p });
-    console.log(`✅ Loaded environment variables from: ${p}`);
-    break;
-  }
+if (fs.existsSync(rootEnv)) {
+    dotenv.config({ path: rootEnv });
+    console.log(`✅ Loaded .env from root: ${rootEnv}`);
+} else if (fs.existsSync(apiEnv)) {
+    dotenv.config({ path: apiEnv });
+    console.log(`✅ Loaded .env from apps/api: ${apiEnv}`);
+} else {
+    console.warn("⚠️ Warning: No .env file found. Ensure DATABASE_URL is set in your environment.");
 }
 
 const prisma = new PrismaClient();
@@ -51,10 +49,10 @@ const variants = [
 ];
 
 async function main() {
-  console.log('Clearing existing dataset to avoid duplicates...');
+  console.log('Clearing existing dataset...');
   await prisma.aiProblemDataset.deleteMany({});
 
-  console.log('Generating 5,000 unique questions for the AI Avatar vault...');
+  console.log('Generating 5,000 unique questions...');
   
   const massiveBatch = [];
   let generatedCount = 0;
@@ -78,6 +76,7 @@ async function main() {
     });
     
     generatedCount++;
+    
     if (massiveBatch.length >= 1000) {
       await prisma.aiProblemDataset.createMany({ data: massiveBatch });
       console.log(`Inserted ${generatedCount}/5000 problems...`);
@@ -95,7 +94,7 @@ async function main() {
 
 main()
   .catch((e) => {
-    console.error("Failed to seed database:", e);
+    console.error("Critical failure during seeding:", e);
     process.exit(1);
   })
   .finally(async () => {

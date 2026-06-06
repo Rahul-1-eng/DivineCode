@@ -280,30 +280,26 @@ export function mountV2Routes(app: Express, io: Server) {
     });
   }));
 
-  router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
-     const { masterSolution } = req.body;
-     const contestProblemId = req.params.id;
-     if (!masterSolution) return res.status(400).json({ error: 'Master solution required' });
+ // Add this route if it is missing
+router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
+   const cp = await prisma.contestProblem.findUnique({ where: { id: req.params.id }, include: { problem: true } });
+   if (!cp || !cp.problem) return res.status(404).json({ error: 'Problem not found' });
 
-     const cp = await prisma.contestProblem.findUnique({ where: { id: contestProblemId }, include: { problem: true } });
-     if (!cp || !cp.problem) return res.status(404).json({ error: 'Problem not found' });
+   const description = cp.customDescription || cp.problem.description || cp.titleSnapshot;
+   const testCases = await generateTestCasesWithAI(description, req.body.masterSolution);
 
-     const description = cp.customDescription || cp.problem.description || cp.titleSnapshot;
-     const testCases = await generateTestCasesWithAI(description, masterSolution);
-
-     await prisma.testcase.createMany({
-       data: testCases.map((tc: any, i: number) => ({
-         problemId: cp.problemId!,
-         input: tc.input,
-         expectedOutput: tc.expectedOutput,
-         explanation: tc.explanation || '',
-         type: 'HIDDEN',
-         order: i + 10
-       }))
-     });
-
-     res.json({ success: true, generatedCount: testCases.length });
-  }));
+   await prisma.testcase.createMany({
+     data: testCases.map((tc: any, i: number) => ({
+       problemId: cp.problemId!,
+       input: tc.input,
+       expectedOutput: tc.expectedOutput,
+       explanation: tc.explanation || '',
+       type: 'HIDDEN',
+       order: i + 10
+     }))
+   });
+   res.json({ success: true, generatedCount: testCases.length });
+}));
 
   router.post('/contests/:id/ai-recommendations', asyncRoute(async (req, res) => {
     const problems = await prisma.aiProblemDataset.findMany({

@@ -5,7 +5,14 @@ import { motion } from 'framer-motion';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
-
+function getDynamicStatus(contest: any) {
+  const start = new Date(contest.startTime).getTime();
+  const end = start + (contest.durationMinutes * 60000);
+  const now = Date.now();
+  if (now > end) return 'ENDED';
+  if (now >= start && now <= end) return 'RUNNING';
+  return 'SCHEDULED';
+}
 export default function ContestsList() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -39,9 +46,10 @@ export default function ContestsList() {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
         <h3 style={{ margin: 0, color: '#eef2ff', fontSize: 20 }}>{contest.title}</h3>
-        {contest.status === 'RUNNING' && <span style={badgeLive}>🔴 Live</span>}
-        {contest.status === 'SCHEDULED' && <span style={badgeScheduled}>⏳ Scheduled</span>}
-        {contest.status === 'ENDED' && <span style={badgeEnded}>✅ Ended</span>}
+        {/* Replace your badge conditional logic with this dynamic checker */}
+{getDynamicStatus(contest) === 'RUNNING' && <span style={badgeLive}>🔴 Live</span>}
+{getDynamicStatus(contest) === 'SCHEDULED' && <span style={badgeScheduled}>⏳ Scheduled</span>}
+{getDynamicStatus(contest) === 'ENDED' && <span style={badgeEnded}>✅ Ended</span>}
       </div>
       <p style={{ color: '#94a3b8', fontSize: 14, margin: '0 0 16px 0', minHeight: 40 }}>
         {contest.description || 'No description provided.'}

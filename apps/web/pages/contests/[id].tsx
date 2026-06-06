@@ -432,7 +432,10 @@ export default function ContestRoomPage() {
   }, [id, session, isFinal, contest?.viewerMember?.teamId]);
   
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, lobbyMessages]);
-  useEffect(() => { if (!id || !contest || isFinal) return; if (timeLeft === 0 && !isScheduledLockScreen) { setTimeout(() => window.location.reload(), 2000); } }, [timeLeft, id, contest, isFinal, isScheduledLockScreen]);
+  useEffect(() => { if (!id || !contest || isFinal) return; if (timeLeft === 0 && !isScheduledLockScreen && !isFinal) { 
+  toast("Contest Ended. Redirecting...");
+  router.push(`/contests/${id}/final`); 
+} }, [timeLeft, id, contest, isFinal, isScheduledLockScreen]);
   useEffect(() => { if (isFinal) playSuccessSound(); }, [isFinal]);
 
   const problemById = useMemo(() => Object.fromEntries((contest?.problems || []).map((p: any, i: number) => [p.id, { ...p, label: String.fromCharCode(65 + i) }])), [contest]);
@@ -924,7 +927,7 @@ export default function ContestRoomPage() {
       </section>
 
       {/* 👉 FIXED: Chat Box logic - Solo players get a Global Chat, Teams get Team Chat */}
-      {!isFinal && viewerMember && (
+      {!isFinal && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
           {isChatOpen ? (
             <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
