@@ -1,6 +1,24 @@
 import { PrismaClient } from '@prisma/client';
 import * as dotenv from 'dotenv';
-dotenv.config({ path: '../../.env' }); // Adjust path to point to your .env file
+import * as path from 'path';
+import * as fs from 'fs';
+
+// Foolproof environment variable loader
+const possiblePaths = [
+  path.join(process.cwd(), '.env'),
+  path.join(process.cwd(), 'apps/api/.env'),
+  path.join(__dirname, '../../.env'),
+  path.join(__dirname, '../../../../.env')
+];
+
+for (const p of possiblePaths) {
+  if (fs.existsSync(p)) {
+    dotenv.config({ path: p });
+    console.log(`✅ Loaded environment variables from: ${p}`);
+    break;
+  }
+}
+
 const prisma = new PrismaClient();
 
 const baseProblems = [
@@ -24,38 +42,23 @@ const baseProblems = [
     tags: ["stack", "strings", "parsing"],
     difficulty: ["Easy", "Medium"],
     platform: ["LeetCode", "HackerRank", "DivineCode"]
-  },
-  {
-    titleTemplate: "Two Pointers: {variant} Analysis",
-    descriptionHtml: "<p>Compute the target area utilizing a two-pointer bounding approach in O(N) time complexity.</p>",
-    tags: ["arrays", "two-pointers", "math"],
-    difficulty: ["Medium", "Hard"],
-    platform: ["Codeforces", "LeetCode", "DivineCode"]
-  },
-  {
-    titleTemplate: "Trees: {variant} Ancestor",
-    descriptionHtml: "<p>Given a binary tree, traverse and backtrack to determine the lowest common matching node.</p>",
-    tags: ["trees", "dfs", "recursion"],
-    difficulty: ["Easy", "Medium"],
-    platform: ["AtCoder", "LeetCode", "CodeChef"]
   }
 ];
 
 const variants = [
   "Subsequence", "Matrix", "Array", "Pathing", "String", "Number", "Network", "Grid", "Island", "Sequence",
-  "Permutation", "Combination", "Cycle", "Forest", "Mountain", "River", "Valley", "Galaxy", "Star", "Planet"
+  "Permutation", "Combination", "Cycle", "Forest", "Mountain", "River"
 ];
 
 async function main() {
   console.log('Clearing existing dataset to avoid duplicates...');
   await prisma.aiProblemDataset.deleteMany({});
 
-  console.log('Generating exactly 5,000 unique questions for the AI Avatar vault...');
+  console.log('Generating 5,000 unique questions for the AI Avatar vault...');
   
   const massiveBatch = [];
   let generatedCount = 0;
 
-  // Generate 5000 problems by mixing and matching templates, variants, and platforms
   for (let i = 1; i <= 5000; i++) {
     const base = baseProblems[i % baseProblems.length];
     const variantName = variants[(i * 3) % variants.length] + ' ' + variants[(i * 7) % variants.length];
@@ -75,16 +78,13 @@ async function main() {
     });
     
     generatedCount++;
-    
-    // Batch insert every 1000 to avoid memory overflow in node process
     if (massiveBatch.length >= 1000) {
       await prisma.aiProblemDataset.createMany({ data: massiveBatch });
       console.log(`Inserted ${generatedCount}/5000 problems...`);
-      massiveBatch.length = 0; // clear batch
+      massiveBatch.length = 0; 
     }
   }
 
-  // Insert any remainders
   if (massiveBatch.length > 0) {
     await prisma.aiProblemDataset.createMany({ data: massiveBatch });
   }
@@ -95,7 +95,7 @@ async function main() {
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error("Failed to seed database:", e);
     process.exit(1);
   })
   .finally(async () => {

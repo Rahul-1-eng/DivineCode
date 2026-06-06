@@ -16,13 +16,10 @@ export function PostContestAiRecommendations({ contestId, contestStatus }: { con
 
   useEffect(() => {
     if (contestStatus !== 'ENDED') return;
-
     setLoading(true);
     fetch(`${API_V2_BASE_URL}/contests/${contestId}/ai-recommendations`, { method: 'POST' })
       .then(r => r.json())
-      .then(data => {
-        if (data.success) setRecommendations(data.recommendations || []);
-      })
+      .then(data => { if (data.success) setRecommendations(data.recommendations || []); })
       .catch(err => console.error(err))
       .finally(() => setLoading(false));
   }, [contestId, contestStatus]);
@@ -31,37 +28,15 @@ export function PostContestAiRecommendations({ contestId, contestStatus }: { con
 
   return (
     <div style={{ marginBottom: '18px', background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.3)', padding: '24px', borderRadius: '16px' }}>
-      <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#a5b4fc', margin: '0 0 10px 0' }}>
-        🤖 AI Tutor Recommendations
-      </h2>
-      <p style={{ color: '#94a3b8', marginBottom: '20px' }}>
-        The contest is over! Based on the mechanics of today's problems, the DivineCode AI suggests practicing these to level up your rating before the next round:
-      </p>
-
-      {loading ? (
-        <div style={{ color: '#64748b' }}>Analyzing contest data...</div>
-      ) : (
+      <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#a5b4fc', margin: '0 0 10px 0' }}>🤖 AI Tutor Recommendations</h2>
+      <p style={{ color: '#94a3b8', marginBottom: '20px' }}>Based on the mechanics of today's problems, practice these to level up:</p>
+      {loading ? ( <div style={{ color: '#64748b' }}>Analyzing contest data...</div> ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '15px' }}>
           {recommendations.map((prob) => (
-            <a 
-              key={prob.id} 
-              href={prob.originalUrl || '#'} 
-              target="_blank" 
-              rel="noreferrer"
-              style={{ display: 'block', background: '#0f172a', border: '1px solid #1e293b', padding: '16px', borderRadius: '12px', textDecoration: 'none', transition: 'transform 0.2s' }}
-              onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-              onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
-            >
+            <a key={prob.id} href={prob.originalUrl || '#'} target="_blank" rel="noreferrer" style={{ display: 'block', background: '#0f172a', border: '1px solid #1e293b', padding: '16px', borderRadius: '12px', textDecoration: 'none' }}>
               <h3 style={{ margin: '0 0 8px 0', color: '#e2e8f0', fontSize: '16px' }}>{prob.title}</h3>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '11px', background: '#3b82f633', color: '#38bdf8', padding: '2px 8px', borderRadius: '12px', fontWeight: 'bold' }}>
-                  {prob.difficulty}
-                </span>
-                {prob.tags?.slice(0, 2).map((tag: string) => (
-                  <span key={tag} style={{ fontSize: '11px', background: '#1e293b', color: '#94a3b8', padding: '2px 8px', borderRadius: '12px' }}>
-                    {tag}
-                  </span>
-                ))}
+                <span style={{ fontSize: '11px', background: '#3b82f633', color: '#38bdf8', padding: '2px 8px', borderRadius: '12px', fontWeight: 'bold' }}>{prob.difficulty}</span>
               </div>
             </a>
           ))}
@@ -80,11 +55,7 @@ function viewerQuery(session: any) {
 }
 
 function viewerHeaders(session: any) {
-  return {
-    'Content-Type': 'application/json',
-    'x-user-email': session?.user?.email || '',
-    'x-user-name': session?.user?.name || ''
-  };
+  return { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '', 'x-user-name': session?.user?.name || '' };
 }
 
 export default function ContestRoomPage() {
@@ -134,7 +105,6 @@ export default function ContestRoomPage() {
   const [lobbyChat, setLobbyChat] = useState('');
   const [lobbyMessages, setLobbyMessages] = useState<any[]>([]);
 
-  // 👉 WebRTC Refs
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<{ [socketId: string]: RTCPeerConnection }>({});
 
@@ -142,14 +112,16 @@ export default function ContestRoomPage() {
   const viewerMember = contest?.viewerMember || null;
   const canSeeProblemMeta = Boolean(contest?.visibility?.canSeeProblemMeta);
 
+  // Dynamic End Time logic
   const startTimeMs = contest ? new Date(contest.startTime).getTime() : 0;
+  const isEndedDynamically = contest ? Date.now() > startTimeMs + (contest.durationMinutes * 60000) : false;
+  const displayStatus = isEndedDynamically ? 'ENDED' : contest?.status;
+
   const isScheduledLockScreen = nowTick < startTimeMs;
   const halfTimeMs = startTimeMs + ((contest?.durationMinutes || 0) * 60000 / 2);
-  const canUnregister = viewerMember && !isOwner && nowTick < halfTimeMs;
+  const canUnregister = viewerMember && !isOwner && nowTick < halfTimeMs && displayStatus !== 'ENDED';
 
-  const playSuccessSound = () => {
-    try { new Audio('/accepted.mp3').play().catch(()=>{}); } catch (e) {}
-  };
+  const playSuccessSound = () => { try { new Audio('/accepted.mp3').play().catch(()=>{}); } catch (e) {} };
 
   function formatCountdown(ms: number) {
     if (ms <= 0) return '00:00:00';
@@ -165,51 +137,35 @@ export default function ContestRoomPage() {
     return parts.join(' : ');
   }
 
-  useEffect(() => {
-    const ticker = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(ticker);
-  }, []);
+  useEffect(() => { const ticker = setInterval(() => setNowTick(Date.now()), 1000); return () => clearInterval(ticker); }, []);
 
   async function registerForContest() {
     if (!id || !session || !regHandle.trim()) return toast.error("Codeforces handle is required");
     if (regMode === 'TEAM_NEW' && !regTeamName.trim()) return toast.error("Team name required");
     if (regMode === 'TEAM_JOIN' && !regInviteCode.trim()) return toast.error("Invite code required");
 
-    setIsRegistering(true);
-    setLoadingText('Connecting to Lobby...');
-    setSyncing(true);
+    setIsRegistering(true); setLoadingText('Connecting to Lobby...'); setSyncing(true);
 
     const payload: any = { codeforcesHandle: regHandle.trim() };
     if (regMode === 'TEAM_NEW') payload.teamName = regTeamName.trim();
     if (regMode === 'TEAM_JOIN') payload.teamInviteCode = regInviteCode.trim();
 
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/register`, {
-      method: 'POST', headers: viewerHeaders(session), body: JSON.stringify(payload)
-    });
-    
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/register`, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify(payload) });
     const data = await res.json();
-    setIsRegistering(false);
-    setSyncing(false);
+    setIsRegistering(false); setSyncing(false);
 
     if (!res.ok) return toast.error(data.error || 'Failed to register');
     
-    setContest(data);
-    await loadSubmissions();
-    playSuccessSound();
-    toast.success("Successfully registered!");
-
+    setContest(data); await loadSubmissions(); playSuccessSound(); toast.success("Successfully registered!");
     if (regMode === 'TEAM_NEW') {
       const myTeam = data.participants?.find((p: any) => p.userId === session.user?.email || p.user?.email === session.user?.email)?.team;
-      if (myTeam?.inviteCode) {
-        alert(`Team Created! Share this invite code with your friends: ${myTeam.inviteCode}`);
-      }
+      if (myTeam?.inviteCode) alert(`Team Created! Share this invite code with your friends: ${myTeam.inviteCode}`);
     }
   }
 
   async function unregisterFromContest() {
     if (!confirm("Are you sure you want to unregister? You will lose access to submit.")) return;
-    setLoadingText('Unregistering...');
-    setSyncing(true);
+    setLoadingText('Unregistering...'); setSyncing(true);
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/unregister`, { method: 'POST', headers: viewerHeaders(session) });
     setSyncing(false);
     if(res.ok) { toast.success('Successfully unregistered.'); loadContest(); } 
@@ -224,10 +180,7 @@ export default function ContestRoomPage() {
     
     if (!data.viewerMember && session?.user && (data.participants || data.members)) {
       const arr = data.participants || data.members || [];
-      data.viewerMember = arr.find((p: any) => 
-        (session.user?.email && p.user?.email === session.user?.email) || 
-        (session.user?.name && p.displayName === session.user?.name)
-      );
+      data.viewerMember = arr.find((p: any) => (session.user?.email && p.user?.email === session.user?.email) || (session.user?.name && p.displayName === session.user?.name));
     }
     
     setContest(data);
@@ -248,11 +201,9 @@ export default function ContestRoomPage() {
     if (!silent) { setLoadingText('Syncing Submissions...'); setSyncing(true); }
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/sync/codeforces`, { method: 'POST', headers: viewerHeaders(session) });
     const data = await res.json();
-    syncingRef.current = false;
-    setSyncing(false);
+    syncingRef.current = false; setSyncing(false);
     if (!res.ok) { if (!silent) toast.error(data.error || 'Sync failed'); return; }
-    await loadContest();
-    await loadSubmissions();
+    await loadContest(); await loadSubmissions();
     setLastSync(data.queued ? `${new Date().toLocaleTimeString()} - sync queued` : `${new Date().toLocaleTimeString()} - ${data.synced?.length || 0} accepted`);
     if (!silent) toast.success(data.queued ? 'Codeforces sync queued.' : `Synced ${data.synced?.length || 0} accepted submission(s).`);
   }
@@ -291,9 +242,7 @@ export default function ContestRoomPage() {
       const data = await res.json();
       setSyncing(false);
       if (!res.ok) return toast.error(data.error || 'Could not add problem');
-      toast.success('Problem added successfully.');
-      setContest(data);
-      setNewProblemCode('');
+      toast.success('Problem added successfully.'); setContest(data); setNewProblemCode('');
     } catch (e: any) { setSyncing(false); toast.error(e.message || 'Could not add problem'); }
   }
 
@@ -341,8 +290,7 @@ export default function ContestRoomPage() {
       const data = await res.json();
       setSyncing(false);
       if (!res.ok) return toast.error(data.error || 'Could not replace problem');
-      toast.success('Problem replaced successfully.');
-      setContest(data);
+      toast.success('Problem replaced successfully.'); setContest(data);
     } catch (e: any) { setSyncing(false); toast.error(e.message || 'Could not replace problem'); }
   }
 
@@ -360,9 +308,7 @@ export default function ContestRoomPage() {
     const data = await res.json();
     setSyncing(false);
     if (!res.ok) return toast.error(data.error || 'Could not finalize contest');
-    playSuccessSound();
-    toast.success(data.message || 'Contest finalized!');
-    router.push(`/contests/${id}/final`);
+    playSuccessSound(); toast.success(data.message || 'Contest finalized!'); router.push(`/contests/${id}/final`);
   }
 
   async function submitOverride() {
@@ -370,19 +316,22 @@ export default function ContestRoomPage() {
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions/${selectedSubmission.id}/override`, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify({ manualPoints: Number(overridePoints) }) });
     if (res.ok) {
       toast.success('Points overridden successfully. Standings will recalculate instantly.');
-      setSelectedSubmission(null);
-      await loadSubmissions(); await loadContest(); 
-    } else {
-      const data = await res.json(); toast.error(data.error || 'Failed to override points');
-    }
+      setSelectedSubmission(null); await loadSubmissions(); await loadContest(); 
+    } else { const data = await res.json(); toast.error(data.error || 'Failed to override points'); }
   }
 
+  // 👉 FIXED: Ensure Chatbox is available to everyone!
   const handleSendMessage = () => {
-    if (!chatInput.trim() || !contest?.viewerMember?.teamId) return;
-    if (socketRef.current) {
+    if (!chatInput.trim()) return;
+    
+    if (contest?.viewerMember?.teamId && socketRef.current) {
+      // Send to Private Team Room
       socketRef.current.emit('sendTeamMessage', {
         contestId: id, teamId: contest.viewerMember.teamId, senderId: contest.viewerMember.user?.id || contest.viewerMember.userId, content: chatInput.trim()
       });
+    } else if (socketRef.current) {
+      // Send to Global Lobby (Solo players)
+      socketRef.current.emit('sendLobbyMessage', { contestId: id, sender: session?.user?.name || 'Guest', text: chatInput.trim(), time: Date.now() });
     }
     setChatInput('');
   };
@@ -393,34 +342,24 @@ export default function ContestRoomPage() {
     setLobbyChat('');
   };
 
-  // 👉 WebRTC Toggle Logic
   const toggleVoice = async () => {
-    if (!contest?.viewerMember?.teamId) return toast.error("You must be in a team to use voice chat.");
+    if (!contest?.viewerMember?.teamId) return toast.error("You must be in a team to use voice chat. Solos can only use Text Chat.");
 
     if (voiceStatus === 'connected' || voiceStatus === 'connecting') {
       setVoiceStatus('disconnected');
       socketRef.current?.emit('leave-voice', contest.viewerMember.teamId);
-      
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-        localStreamRef.current = null;
-      }
-      
-      Object.values(peersRef.current).forEach(pc => pc.close());
-      peersRef.current = {};
+      if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(track => track.stop()); localStreamRef.current = null; }
+      Object.values(peersRef.current).forEach(pc => pc.close()); peersRef.current = {};
       toast.success("Voice disconnected.");
     } else {
       setVoiceStatus('connecting');
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        localStreamRef.current = stream;
-        setVoiceStatus('connected');
+        localStreamRef.current = stream; setVoiceStatus('connected');
         socketRef.current?.emit('join-voice', contest.viewerMember.teamId);
         toast.success("Voice channel joined!");
       } catch (err) {
-        console.error('Mic access denied:', err);
-        setVoiceStatus('disconnected');
-        toast.error("Microphone access denied.");
+        console.error('Mic access denied:', err); setVoiceStatus('disconnected'); toast.error("Microphone access denied.");
       }
     }
   };
@@ -435,15 +374,10 @@ export default function ContestRoomPage() {
     
     socket.on('connect', () => { 
       socket.emit('joinContest', id); 
-      if (contest.viewerMember?.teamId) {
-        socket.emit('joinTeam', contest.viewerMember.teamId);
-      }
+      if (contest.viewerMember?.teamId) socket.emit('joinTeam', contest.viewerMember.teamId);
     });
 
-    socket.on('lobbyMessage', (msg) => {
-      setLobbyMessages(prev => [...prev, msg]);
-    });
-
+    socket.on('lobbyMessage', (msg) => { setLobbyMessages(prev => [...prev, msg]); });
     socket.on('standings:update', () => { loadContest(); });
     
     socket.on('submission:judged', (sub) => { 
@@ -460,91 +394,45 @@ export default function ContestRoomPage() {
 
     socket.on('team_problem_solved', (data) => {
       if (data.userId !== (session.user?.name || session.user?.email)) {
-        toast.success(`🎉 A teammate just solved a problem!`, { duration: 5000, icon: '🚀' });
-        playSuccessSound();
+        toast.success(`🎉 A teammate just solved a problem!`, { duration: 5000, icon: '🚀' }); playSuccessSound();
       }
       loadSubmissions();
     });
 
-    // 👉 WebRTC Socket Handlers
     socket.on('user-joined-voice', async (peerId) => {
       if (!localStreamRef.current) return;
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       peersRef.current[peerId] = pc;
-      
       localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
-      
-      pc.ontrack = (event) => {
-        const audio = new Audio();
-        audio.srcObject = event.streams[0];
-        audio.autoplay = true;
-        audio.play().catch(e => console.log('Audio play blocked:', e));
-      };
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) socket.emit('voice-ice-candidate', { to: peerId, candidate: event.candidate });
-      };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socket.emit('voice-offer', { to: peerId, offer });
+      pc.ontrack = (event) => { const audio = new Audio(); audio.srcObject = event.streams[0]; audio.autoplay = true; audio.play().catch(e => console.log('Audio play blocked:', e)); };
+      pc.onicecandidate = (event) => { if (event.candidate) socket.emit('voice-ice-candidate', { to: peerId, candidate: event.candidate }); };
+      const offer = await pc.createOffer(); await pc.setLocalDescription(offer); socket.emit('voice-offer', { to: peerId, offer });
     });
 
     socket.on('voice-offer', async ({ from, offer }) => {
       if (!localStreamRef.current) return;
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       peersRef.current[from] = pc;
-      
       localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
-      
-      pc.ontrack = (event) => {
-        const audio = new Audio();
-        audio.srcObject = event.streams[0];
-        audio.autoplay = true;
-        audio.play().catch(e => console.log('Audio play blocked:', e));
-      };
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) socket.emit('voice-ice-candidate', { to: from, candidate: event.candidate });
-      };
-
+      pc.ontrack = (event) => { const audio = new Audio(); audio.srcObject = event.streams[0]; audio.autoplay = true; audio.play().catch(e => console.log('Audio play blocked:', e)); };
+      pc.onicecandidate = (event) => { if (event.candidate) socket.emit('voice-ice-candidate', { to: from, candidate: event.candidate }); };
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socket.emit('voice-answer', { to: from, answer });
+      const answer = await pc.createAnswer(); await pc.setLocalDescription(answer); socket.emit('voice-answer', { to: from, answer });
     });
 
-    socket.on('voice-answer', async ({ from, answer }) => {
-      const pc = peersRef.current[from];
-      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
-    });
-
-    socket.on('voice-ice-candidate', async ({ from, candidate }) => {
-      const pc = peersRef.current[from];
-      if (pc && pc.remoteDescription) {
-         try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){}
-      }
-    });
-
-    socket.on('user-left-voice', (peerId) => {
-      if (peersRef.current[peerId]) {
-        peersRef.current[peerId].close();
-        delete peersRef.current[peerId];
-      }
-    });
+    socket.on('voice-answer', async ({ from, answer }) => { const pc = peersRef.current[from]; if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer)); });
+    socket.on('voice-ice-candidate', async ({ from, candidate }) => { const pc = peersRef.current[from]; if (pc && pc.remoteDescription) { try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){} } });
+    socket.on('user-left-voice', (peerId) => { if (peersRef.current[peerId]) { peersRef.current[peerId].close(); delete peersRef.current[peerId]; } });
 
     return () => { 
-      socket.disconnect(); 
-      socketRef.current = null;
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-      }
+      socket.disconnect(); socketRef.current = null;
+      if (localStreamRef.current) localStreamRef.current.getTracks().forEach(track => track.stop());
       Object.values(peersRef.current).forEach(pc => pc.close());
     };
   }, [id, session, isFinal, contest?.viewerMember?.teamId]);
   
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
-  useEffect(() => { if (!id || !contest || isFinal) return; if (timeLeft === 0 && !isScheduledLockScreen) router.push(`/contests/${id}/final`); }, [timeLeft, id, contest, isFinal, isScheduledLockScreen]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, lobbyMessages]);
+  useEffect(() => { if (!id || !contest || isFinal) return; if (timeLeft === 0 && !isScheduledLockScreen) { setTimeout(() => window.location.reload(), 2000); } }, [timeLeft, id, contest, isFinal, isScheduledLockScreen]);
   useEffect(() => { if (isFinal) playSuccessSound(); }, [isFinal]);
 
   const problemById = useMemo(() => Object.fromEntries((contest?.problems || []).map((p: any, i: number) => [p.id, { ...p, label: String.fromCharCode(65 + i) }])), [contest]);
@@ -693,9 +581,9 @@ export default function ContestRoomPage() {
         <div style={hero}>
           <div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
-               {contest.status === 'SCHEDULED' && <span style={badgeScheduled}>⏳ Scheduled</span>}
-               {contest.status === 'RUNNING' && <span style={badgeLive}>🔴 Ongoing Live</span>}
-               {contest.status === 'ENDED' && <span style={badgeEnded}>✅ Completed</span>}
+               {displayStatus === 'SCHEDULED' && <span style={badgeScheduled}>⏳ Scheduled</span>}
+               {displayStatus === 'RUNNING' && <span style={badgeLive}>🔴 Ongoing Live</span>}
+               {displayStatus === 'ENDED' && <span style={badgeEnded}>✅ Completed</span>}
                <p style={{...eyebrow, margin: 0}}>{isFinal ? 'Final standings' : isActuallyOwnerMode ? 'Owner control room' : 'Player contest room'}</p>
             </div>
             <h1 style={{ fontSize: 46, margin: 0 }}>{contest.title}</h1>
@@ -703,8 +591,8 @@ export default function ContestRoomPage() {
             <p style={{ color: '#67e8f9' }}>{isFinal ? 'Read-only final board' : `Last sync: ${lastSync}`}</p>
           </div>
           <div style={timerCard}>
-            <strong>{isFinal ? 'FINAL' : isScheduledLockScreen ? 'WAITING' : `${Math.floor(timeLeft / 60)}:${String(timeLeft % 60).padStart(2, '0')}`}</strong>
-            <span>{isFinal ? 'standings' : isScheduledLockScreen ? 'to start' : 'remaining'}</span>
+            <strong>{displayStatus === 'ENDED' || isFinal ? 'FINAL' : isScheduledLockScreen ? 'WAITING' : `${Math.floor(timeLeft / 60)}:${String(timeLeft % 60).padStart(2, '0')}`}</strong>
+            <span>{displayStatus === 'ENDED' || isFinal ? 'standings' : isScheduledLockScreen ? 'to start' : 'remaining'}</span>
           </div>
         </div>
 
@@ -754,9 +642,9 @@ export default function ContestRoomPage() {
           </motion.section>
         )}
 
-        <PostContestAiRecommendations contestId={id as string} contestStatus={contest.status || (isFinal ? 'ENDED' : 'RUNNING')} />
+        <PostContestAiRecommendations contestId={id as string} contestStatus={displayStatus} />
 
-        {!isActuallyOwnerMode && !viewerMember && contest.status !== 'ENDED' && (
+        {!isActuallyOwnerMode && !viewerMember && displayStatus !== 'ENDED' && (
           <section style={{ ...panel, marginBottom: 18, border: '1px solid #38bdf8', background: 'linear-gradient(180deg, #0f172a, rgba(56, 189, 248, 0.05))', textAlign: 'center' }}>
             <h2 style={{color: '#38bdf8', margin: '0 0 10px 0', fontSize: 28}}>Register for {contest.title}</h2>
             <p style={{color: '#a8b3c7', marginBottom: 25}}>Configure your play style to enter the lobby.</p>
@@ -786,40 +674,6 @@ export default function ContestRoomPage() {
               )}
 
               <button onClick={registerForContest} disabled={isRegistering} style={{...primaryButton, marginTop: 15}}>{isRegistering ? 'Registering...' : 'Complete Registration'}</button>
-            </div>
-
-            <div style={{ marginTop: 40, borderTop: '1px solid #334155', paddingTop: 20 }}>
-               <h3 style={{color: '#67e8f9'}}>Lobby & Invite Codes</h3>
-               <p style={{color: '#94a3b8', fontSize: 14}}>Ask current participants for an invite code to join their team.</p>
-
-               <div style={{ display: 'flex', gap: 20, textAlign: 'left', flexWrap: 'wrap' }}>
-                 <div style={{ flex: 1, minWidth: 250, background: '#020617', padding: 15, borderRadius: 12 }}>
-                    <h4 style={{margin: '0 0 10px 0', color: '#e2e8f0'}}>Players in Lobby</h4>
-                    {contest.participants?.length === 0 ? <p style={{color: '#64748b'}}>No one here yet.</p> : (
-                      <ul style={{ paddingLeft: 20, color: '#94a3b8', margin: 0 }}>
-                        {contest.participants?.map((p: any) => (
-                           <li key={p.id}>{p.displayName} <span style={{fontSize: 12, color: '#38bdf8'}}>({p.teamName || 'Solo'})</span></li>
-                        ))}
-                      </ul>
-                    )}
-                 </div>
-
-                 <div style={{ flex: 1, minWidth: 250, background: '#020617', padding: 15, borderRadius: 12, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ flex: 1, minHeight: 120, maxHeight: 150, overflowY: 'auto', marginBottom: 10, fontSize: 13 }}>
-                      {lobbyMessages.map((m, i) => (
-                        <div key={i} style={{ marginBottom: 6 }}>
-                          <strong style={{color: '#a5b4fc'}}>{m.sender}: </strong>
-                          <span style={{color: '#e2e8f0'}}>{m.text}</span>
-                        </div>
-                      ))}
-                      {lobbyMessages.length === 0 && <p style={{color: '#64748b'}}>Be the first to say hi!</p>}
-                    </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                       <input value={lobbyChat} onChange={e=>setLobbyChat(e.target.value)} onKeyDown={e => e.key==='Enter' && sendLobbyMsg()} placeholder="Ask for invite code..." style={{...smallInput, margin: 0}} />
-                       <button onClick={sendLobbyMsg} style={{...primaryButton, width: 'auto', margin: 0, padding: '8px 12px'}}>Send</button>
-                    </div>
-                 </div>
-               </div>
             </div>
           </section>
         )}
@@ -907,7 +761,7 @@ export default function ContestRoomPage() {
                           </div>
                         )}
 
-                        {!isFinal && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {!isFinal && displayStatus !== 'ENDED' && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <a href={safeProblemHref} style={primaryLink}>{isSolvedByTeam ? 'Review problem' : 'Open problem'}</a>
                           {isActuallyOwnerMode && (
                             <>
@@ -1069,33 +923,51 @@ export default function ContestRoomPage() {
         )}
       </section>
 
-      {!isFinal && contest?.viewerMember?.teamId && (
+      {/* 👉 FIXED: Chat Box logic - Solo players get a Global Chat, Teams get Team Chat */}
+      {!isFinal && viewerMember && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
           {isChatOpen ? (
             <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
               
-              {/* WebRTC Voice Chat Controls */}
               <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
-                <strong style={{ color: '#a5b4fc' }}>Team Chat</strong>
+                <strong style={{ color: '#a5b4fc' }}>{viewerMember.teamId ? 'Team Chat' : 'Global Contest Chat'}</strong>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)', color: voiceStatus === 'connected' ? '#4ade80' : '#fff', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
-                    {voiceStatus === 'connected' ? '🟢 Voice On' : voiceStatus === 'connecting' ? '⏳ Connecting...' : '🎤 Join Voice'}
-                  </button>
+                  {viewerMember.teamId && (
+                    <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)', color: voiceStatus === 'connected' ? '#4ade80' : '#fff', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
+                      {voiceStatus === 'connected' ? '🟢 Voice On' : voiceStatus === 'connecting' ? '⏳ Connecting...' : '🎤 Join Voice'}
+                    </button>
+                  )}
                   <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>
                 </div>
               </div>
 
               <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
-                {messages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No messages yet. Say hi!</p> : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {messages.map(msg => (
-                      <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}><strong style={{ color: '#67e8f9' }}>{msg.sender?.username || 'Teammate'}</strong><span style={{ color: '#64748b' }}>{new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
-                        <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.content}</div>
-                      </motion.div>
-                    ))}
-                    <div ref={messagesEndRef} />
-                  </div>
+                {viewerMember.teamId ? (
+                  // Team Message UI
+                  messages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No messages yet. Say hi!</p> : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {messages.map(msg => (
+                        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}><strong style={{ color: '#67e8f9' }}>{msg.sender?.username || 'Teammate'}</strong><span style={{ color: '#64748b' }}>{new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+                          <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.content}</div>
+                        </motion.div>
+                      ))}
+                      <div ref={messagesEndRef} />
+                    </div>
+                  )
+                ) : (
+                  // Global Message UI (Solo Player)
+                  lobbyMessages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No global messages yet.</p> : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {lobbyMessages.map((msg, i) => (
+                        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={i} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}><strong style={{ color: '#a5b4fc' }}>{msg.sender}</strong></div>
+                          <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.text}</div>
+                        </motion.div>
+                      ))}
+                      <div ref={messagesEndRef} />
+                    </div>
+                  )
                 )}
               </div>
               <div style={{ padding: 12, borderTop: '1px solid #334155', display: 'flex', gap: 8 }}>

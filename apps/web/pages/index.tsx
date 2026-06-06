@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/router';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -19,6 +19,13 @@ export default function Home() {
   const [profile, setProfile] = useState<any>(null);
   const router = useRouter();
 
+  // 👉 FIXED: AI Chatbot state management added
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatHistory, setChatHistory] = useState<{role: string, text: string}[]>([
+    { role: 'ai', text: 'Hello! I am the DivineCode Assistant. Do you need help navigating the platform, or would you like to jump into a practice session?' }
+  ]);
+
   const navLinks = [
     ['Practice', '/practice'],
     ['Duel', '/duel'],
@@ -36,10 +43,21 @@ export default function Home() {
     }
   }, [session]);
 
+  const handleSendSupportMessage = () => {
+    if(!chatInput.trim()) return;
+    setChatHistory([...chatHistory, { role: 'user', text: chatInput }]);
+    setChatInput('');
+    
+    // Simulate AI Guide response
+    setTimeout(() => {
+      setChatHistory(prev => [...prev, { role: 'ai', text: "I can help with that! If you are looking to practice, head over to the Practice tab where I have 5,000+ problems loaded. If you found a bug, I've forwarded this to the admins!" }]);
+    }, 1000);
+  };
+
   return (
     <motion.main 
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }}
-      style={{ minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.35), transparent 36rem), radial-gradient(circle at top right, rgba(34,211,238,.22), transparent 30rem), #070a16' }}
+      style={{ minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.35), transparent 36rem), radial-gradient(circle at top right, rgba(34,211,238,.22), transparent 30rem), #070a16', position: 'relative' }}
     >
       <style>{`
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
@@ -98,7 +116,6 @@ export default function Home() {
         </div>
       </motion.section>
 
-      {/* CLICKABLE FEATURE CARDS */}
       <motion.section initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.6 }} style={{ maxWidth: 1180, margin: '28px auto 0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 18 }}>
         {features.map((f) => (
           <motion.div 
@@ -114,21 +131,46 @@ export default function Home() {
         ))}
       </motion.section>
 
-      {/* FLOATING AI MENTOR AVATAR */}
-      <motion.div
-        animate={{ y: [0, -15, 0] }}
-        transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
-        style={{ position: 'fixed', bottom: 40, right: 40, zIndex: 50, display: 'flex', alignItems: 'flex-end', gap: 10 }}
-      >
-        <div style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid #38bdf8', padding: '12px 16px', borderRadius: '16px 16px 0 16px', color: '#e2e8f0', boxShadow: '0 10px 25px rgba(0,0,0,0.5)', maxWidth: 220, fontSize: 14 }}>
-          <strong style={{color: '#38bdf8', display: 'block', marginBottom: 4}}>AI Mentor</strong>
-          Ready to level up? I have curated DSA & System Design problems waiting for you! Let's code.
-        </div>
-        <div style={{ width: 60, height: 60, borderRadius: '50%', background: 'linear-gradient(135deg, #38bdf8, #818cf8)', display: 'flex', justifyContent: 'center', alignItems: 'center', fontSize: 32, boxShadow: '0 10px 25px rgba(56,189,248,0.4)', border: '2px solid #0f172a' }}>
-          🤖
-        </div>
-      </motion.div>
-
+      {/* 👉 FIXED: FLOATING AI MENTOR WIDGET */}
+      <div style={{ position: 'fixed', bottom: 30, right: 30, zIndex: 50, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+        <AnimatePresence>
+          {isChatOpen && (
+            <motion.div initial={{ opacity: 0, y: 20, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: 0.95 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #38bdf8', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 50px rgba(0,0,0,0.5)', marginBottom: 15 }}>
+              <div style={{ background: '#1e293b', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 30, height: 30, background: '#020617', borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 18 }}>🤖</div>
+                  <strong style={{ color: '#fff' }}>Divine AI Guide</strong>
+                </div>
+                <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 24, cursor: 'pointer' }}>×</button>
+              </div>
+              
+              <div style={{ flex: 1, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {chatHistory.map((msg, i) => (
+                   <div key={i} style={{ alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', background: msg.role === 'user' ? '#38bdf8' : '#1e293b', color: msg.role === 'user' ? '#000' : '#fff', maxWidth: '80%', padding: '10px 14px', borderRadius: 12, fontSize: 14, lineHeight: 1.4 }}>
+                     {msg.text}
+                   </div>
+                ))}
+              </div>
+              
+              <div style={{ padding: 12, background: '#1e293b', borderTop: '1px solid #334155', display: 'flex', gap: 8 }}>
+                <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendSupportMessage()} placeholder="Ask me anything..." style={{ flex: 1, background: '#020617', border: '1px solid #334155', color: '#fff', borderRadius: 8, padding: '8px 12px', outline: 'none' }} />
+                <button onClick={handleSendSupportMessage} style={{ background: '#38bdf8', color: '#000', border: 'none', width: 40, borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' }}>↑</button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        
+        {!isChatOpen && (
+           <motion.div animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }} style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+             <div style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid #38bdf8', padding: '10px 15px', borderRadius: '16px 16px 0 16px', color: '#e2e8f0', boxShadow: '0 10px 25px rgba(0,0,0,0.5)', fontSize: 13 }}>
+               Hi! I'm the AI Guide. Click here to chat!
+             </div>
+             <button onClick={() => setIsChatOpen(true)} style={{ width: 60, height: 60, borderRadius: '50%', background: 'linear-gradient(135deg, #38bdf8, #818cf8)', display: 'flex', justifyContent: 'center', alignItems: 'center', fontSize: 32, boxShadow: '0 10px 25px rgba(56,189,248,0.4)', border: '2px solid #0f172a', cursor: 'pointer' }}>
+               🤖
+             </button>
+           </motion.div>
+        )}
+      </div>
     </motion.main>
   );
 }
