@@ -122,7 +122,6 @@ export function mountV2Routes(app: Express, io: Server) {
     });
   });
 
-  // 👉 FIXED: Missing Registration Route
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contest = await registerForContestV2(req.params.id, {
@@ -133,13 +132,14 @@ export function mountV2Routes(app: Express, io: Server) {
     });
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
-  // 👉 NEW: Approve Participant Route for Group Joins
+  
   router.post('/contests/:id/participants/:participantId/approve', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     if (!viewer.userId) throw new Error("Unauthorized");
     const updated = await approveParticipant(req.params.id, req.params.participantId, viewer.userId);
     res.json({ success: true, participant: updated });
   }));
+
   router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contestId = req.params.id;
@@ -178,15 +178,19 @@ export function mountV2Routes(app: Express, io: Server) {
     }
   });
 
-  // 👉 FIXED: Missing Problem Lookup Endpoints for editing/adding
+  // 👉 FIXED: Lookup endpoint cleanly replaces spaces out of codes so "800 A" maps to "800A" correctly on your frontend creation table
   router.get('/problems/lookup', asyncRoute(async (req, res) => {
     const { platform, code } = req.query;
+    const cleanCode = String(code).replace(/\s+/g, '').toUpperCase();
+    
     res.json({ 
-      title: `${platform} Problem ${code}`, 
+      title: `${platform} Problem ${cleanCode}`, 
       platform, 
-      code, 
-      externalId: code, 
-      url: platform === 'Codeforces' ? `https://codeforces.com/problemset/problem/${(code as string).match(/^\d+/)?.[0]}/${(code as string).match(/[A-Z]+$/)?.[0]}` : '' 
+      code: cleanCode, 
+      externalId: cleanCode, 
+      url: platform === 'Codeforces' 
+        ? `https://codeforces.com/problemset/problem/${cleanCode.match(/^\d+/)?.[0]}/${cleanCode.match(/[A-Z0-9]+$/)?.[0]}` 
+        : '' 
     });
   }));
 

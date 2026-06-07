@@ -12,7 +12,7 @@ export default function GlobalNavigationAndMashupCreator() {
   const [navTab, setNavTab] = useState<'mashup' | 'duel' | 'interview'>('mashup');
 
   const [contestMode, setContestMode] = useState<'SOLO' | 'GROUP'>('GROUP');
-const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
+  const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
   const [title, setTitle] = useState('DivineCode Controlled Practice Set');
   const [duration, setDuration] = useState(120);
   const [startTimeStr, setStartTimeStr] = useState('');
@@ -63,9 +63,21 @@ const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
     let payload: any = { type: activeTab };
     
     if (activeTab === 'URL') {
-      if (!urlProblem) return toast.error('Enter URL');
-      payload.url = urlProblem;
-      payload.displayTitle = urlProblem.split('/').pop() || 'External Problem';
+      let finalUrl = urlProblem.trim();
+      
+      // 👉 FIXED: Auto-convert "800 A" or "1500B" into Codeforces URLs on the fly
+      if (!finalUrl.startsWith('http') && /^\d+\s*[a-zA-Z][0-9]?$/.test(finalUrl)) {
+         const clean = finalUrl.replace(/\s+/g, '').toUpperCase();
+         const num = clean.match(/^\d+/)?.[0];
+         const letter = clean.match(/[A-Z0-9]+$/)?.[0];
+         finalUrl = `https://codeforces.com/problemset/problem/${num}/${letter}`;
+      } else if (!finalUrl.startsWith('http')) {
+         return toast.error('Enter a valid URL or Codeforces Code (e.g., 800A)');
+      }
+
+      payload.url = finalUrl;
+      payload.title = finalUrl.split('/').pop() || 'External Problem';
+      payload.displayTitle = payload.title;
       
     } else if (activeTab === 'CUSTOM') {
       if (!customTitle) return toast.error('Enter custom title');
@@ -91,7 +103,6 @@ const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
     toast.success("Problem appended to contest batch queue!");
   }
 
-  // 👉 NEW: Problem Management Helpers (Delete, Move Up, Move Down, Edit)
   const removeProblem = (index: number) => {
     setCompiledProblems((prev) => prev.filter((_, i) => i !== index));
     toast.success("Problem removed from queue.");
@@ -111,7 +122,7 @@ const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
 
   const editProblem = (index: number) => {
     const p = compiledProblems[index];
-    removeProblem(index); // remove from array so user can re-append it after editing
+    removeProblem(index); 
     setActiveTab(p.type);
     
     if (p.type === 'URL') setUrlProblem(p.url);
@@ -161,23 +172,34 @@ const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
         style: { background: '#38bdf8', color: '#000', fontWeight: 'bold' } 
       });
 
+      let failedAny = false;
+
+      // 👉 FIXED: This loop now checks `res.ok` to alert you exactly which questions fail
       for (let i = 0; i < compiledProblems.length; i++) {
         setLoadingContext(`Adding problem ${i + 1}/${compiledProblems.length}...`);
         try {
-          await fetch(`${API_V2}/contests/${contest.id}/problems/mashup`, {
+          const mRes = await fetch(`${API_V2}/contests/${contest.id}/problems/mashup`, {
             method: 'POST', 
             headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' }, 
             body: JSON.stringify(compiledProblems[i])
           });
+
+          if (!mRes.ok) {
+            failedAny = true;
+            const errData = await mRes.json();
+            toast.error(`Failed to add '${compiledProblems[i].displayTitle}': Scraper Error or Timeout`);
+          }
         } catch (err) {
-          console.error(`Failed to add problem ${i}:`, err);
+          failedAny = true;
+          toast.error(`Network error on problem '${compiledProblems[i].displayTitle}'`);
         }
       }
       
-      toast.success("Mashup fully synchronized!");
+      if (!failedAny) toast.success("Mashup fully synchronized!");
+      else toast.error("Mashup created, but some external problems failed to scrape.", { duration: 6000 });
+      
       router.push(`/contests/${contest.id}`);
     } catch (err: any) {
-      console.error(err);
       toast.error("Could not create contest shell.");
       setIsCreating(false);
     } 
@@ -229,18 +251,15 @@ const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
             </div>
 
             <div style={{ display: 'flex', gap: 10, marginBottom: 20, borderBottom: '1px solid #1e293b', paddingBottom: 10 }}>
-             
               {['URL', 'CUSTOM', 'MCQ'].map(t => (
                 <button key={t} onClick={() => setActiveTab(t as any)} style={{ padding: '8px 16px', background: activeTab === t ? '#38bdf8' : '#1e293b', color: activeTab === t ? '#000' : '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}>{t}</button>
               ))}
             </div>
 
-            {activeTab === 'URL' && <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste External Problem Link..." />}
+            {activeTab === 'URL' && <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste Link or Codeforces Code (e.g. 1500A)" />}
             
-
             {activeTab === 'CUSTOM' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* ADDED IMAGE UPLOAD INSIDE CUSTOM */}
                 <div style={{ background: '#0f172a', padding: 15, borderRadius: 8, border: '1px solid #334155' }}>
                   <label style={{ fontSize: 12, fontWeight: 'bold' }}>Optional: Problem Image (OCR)</label>
                   <input type="file" accept="image/*" onChange={handleImageUpload} style={{ color: '#fff', marginTop: 5, width: '100%' }} />
@@ -249,8 +268,6 @@ const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
 
                 <input value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} placeholder="Title" />
                 <textarea value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, height: 80, resize: 'vertical'}} placeholder="Markdown Statement Content" />
-                
-                {/* ... existing customCases rendering logic ... */}
               </div>
             )}
 
@@ -277,7 +294,6 @@ const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
               <h3 style={{ marginTop: 0, color: '#a5b4fc' }}>Queued Suite Batch ({compiledProblems.length})</h3>
               {compiledProblems.length === 0 && <p style={{color: '#64748b'}}>No problems queued.</p>}
               
-              {/* 👉 NEW: Reorder and Edit UI mapped here */}
               {compiledProblems.map((p, i) => (
                 <div key={i} style={{ padding: '10px', background: '#1e293b', borderRadius: 4, margin: '8px 0', border: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{i + 1}. {p.displayTitle}</span>
@@ -301,7 +317,8 @@ const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
                       <span style={{ fontSize: 10, background: '#3b82f633', color: '#38bdf8', padding: '2px 6px', borderRadius: 4 }}>{p.platform}</span>
                       <span style={{ fontSize: 10, background: '#1e293b', color: '#94a3b8', padding: '2px 6px', borderRadius: 4 }}>{p.difficulty}</span>
                     </div>
-                    <button onClick={() => setCompiledProblems([...compiledProblems, { type: 'URL', url: p.originalUrl, displayTitle: p.title }])} style={{ background: '#38bdf8', color: '#000', fontWeight: 'bold', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>+ Import to Mashup</button>
+                    {/* 👉 FIXED: Properly mapping the title into the payload so the backend doesn't overwrite it */}
+                    <button onClick={() => setCompiledProblems([...compiledProblems, { type: 'URL', url: p.originalUrl, title: p.title, displayTitle: p.title }])} style={{ background: '#38bdf8', color: '#000', fontWeight: 'bold', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>+ Import to Mashup</button>
                   </div>
                 ))}
               </div>

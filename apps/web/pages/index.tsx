@@ -48,10 +48,14 @@ export default function Home() {
     setChatHistory([...chatHistory, { role: 'user', text: chatInput }]);
     setChatInput('');
     
-    // Simulate AI Guide response
-    setTimeout(() => {
-      setChatHistory(prev => [...prev, { role: 'ai', text: "I can help with that! If you are looking to practice, head over to the Practice tab where I have 5,000+ problems loaded. If you found a bug, I've forwarded this to the admins!" }]);
-    }, 1000);
+   // Call your actual backend AI endpoint
+  const res = await fetch(`${API_BASE_URL}/api/v2/ai/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: chatInput })
+  });
+  const data = await res.json();
+  setChatHistory(prev => [...prev, { role: 'ai', text: data.reply }]);
   };
 
   return (

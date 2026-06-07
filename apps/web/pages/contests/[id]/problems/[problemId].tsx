@@ -116,9 +116,12 @@ export default function ContestProblemWorkspace() {
   const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
   
-  const isMCQ = !!problem?.interviewQuestionId;
+  const isMCQ = useMemo(() => !!problem?.interviewQuestionId, [problem]);
+  
   useEffect(() => {
-    if (isMCQ && problem?.interviewQuestionId) {
+    if (isMCQ && problem?.interviewQuestion) {
+      setMcqData(problem.interviewQuestion);
+    } else if (isMCQ && problem?.interviewQuestionId) {
       fetch(`${API_V2_BASE_URL}/interview/questions`, {
         headers: { 'x-user-email': session?.user?.email || '' }
       })
@@ -267,7 +270,6 @@ export default function ContestProblemWorkspace() {
   const handleSendMessage = () => {
     if (!chatInput.trim() || !contest?.viewerMember?.teamId) return;
     if (socketRef.current) {
-      // 👉 FIXED: Ensure senderId is properly fetched
       const senderIdentifier = contest.viewerMember.userId || contest.viewerMember.user?.id || session?.user?.email;
       
       socketRef.current.emit('sendTeamMessage', {
@@ -515,14 +517,13 @@ export default function ContestProblemWorkspace() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
           <button onClick={() => router.push(`/contests/${id}`)} style={btnDark}>← Standings</button>
           
-          {/* 👉 FIXED: Re-added AI Avatar specific redirect logic */}
           <strong style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
             {problem.titleSnapshot}
             {problem.externalUrl && (
               <button 
                 onClick={() => window.open(problem.externalUrl, '_blank')} 
                 style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }} 
-                title="View Original Problem on Native Platform">
+                title="Go to Original Platform">
                 🤖
               </button>
             )}
@@ -563,28 +564,27 @@ export default function ContestProblemWorkspace() {
               </div>
             ) : (
               <>
-                // REPLACE WITH THIS LOGIC:
-<div style={{ padding: 20, flex: 1, overflowY: 'auto' }}>
-  {/* Priority 1: Always show internal description if it exists */}
-  {problem.description || problem.customDescription ? (
-      <div dangerouslySetInnerHTML={{ __html: problem.description || problem.customDescription }} />
-  ) : problem.externalUrl ? (
-      /* Priority 2: Fallback to external URL iframe/links if no internal description */
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <iframe src={problemIframeUrl} style={{...iframeStyle, height: '60vh'}} title="Problem Statement" />
-          <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center' }}>
-              <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: 'bold' }}>
-                ↗ View Original Problem
-              </a>
-          </div>
-      </div>
-  ) : (
-      /* Priority 3: Final fallback */
-      <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>
-        No description provided for this problem.
-      </div>
-  )}
-</div>
+                <div style={{ padding: 20, flex: 1, overflowY: 'auto' }}>
+                  {/* Priority 1: Always show internal description if it exists */}
+                  {(problem?.problem?.description || problem?.customDescription) ? (
+                      <div dangerouslySetInnerHTML={{ __html: problem.customDescription || problem.problem?.description }} />
+                  ) : problem?.externalUrl ? (
+                      /* Priority 2: Fallback to external URL iframe/links if no internal description */
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                          <iframe src={problemIframeUrl} style={{...iframeStyle, height: '60vh'}} title="Problem Statement" />
+                          <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center' }}>
+                              <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: 'bold' }}>
+                                ↗ View Original Problem
+                              </a>
+                          </div>
+                      </div>
+                  ) : (
+                      /* Priority 3: Final fallback */
+                      <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>
+                        No description provided for this problem.
+                      </div>
+                  )}
+                </div>
               </>
             )}
           </div>

@@ -92,7 +92,9 @@ export default function ContestEditPage() {
   async function addProblem() {
     if (!id || !session || !newProblemCode.trim()) return toast.error('Enter a problem code.');
     try {
-      const p = await lookupProblem(newProblemPlatform, newProblemCode);
+      // 👉 FIXED: Forcibly strip spacing to prevent "800 A" lookup failure logic
+      const cleanCode = newProblemCode.replace(/\s+/g, '').toUpperCase();
+      const p = await lookupProblem(newProblemPlatform, cleanCode);
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems`, { 
         method: 'POST', 
         headers: viewerHeaders(session), 
@@ -106,14 +108,25 @@ export default function ContestEditPage() {
     } catch (e: any) { toast.error(e.message || 'Could not add problem'); }
   }
 
-  // 👉 FIXED: Now correctly points to /mashup with the right payload, solving the JSON error
   async function addProblemFromUrl() {
     if (!id || !session || !newProblemUrl.trim()) return toast.error('Enter a problem URL.');
+    
+    // 👉 FIXED: Auto-convert Codeforces strings into URLs inside the edit page as well!
+    let finalUrl = newProblemUrl.trim();
+    if (!finalUrl.startsWith('http') && /^\d+\s*[a-zA-Z][0-9]?$/.test(finalUrl)) {
+       const clean = finalUrl.replace(/\s+/g, '').toUpperCase();
+       const num = clean.match(/^\d+/)?.[0];
+       const letter = clean.match(/[A-Z0-9]+$/)?.[0];
+       finalUrl = `https://codeforces.com/problemset/problem/${num}/${letter}`;
+    } else if (!finalUrl.startsWith('http')) {
+       return toast.error('Enter a valid URL or Codeforces code');
+    }
+
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/mashup`, { 
         method: 'POST', 
         headers: viewerHeaders(session), 
-        body: JSON.stringify({ type: 'URL', url: newProblemUrl }) 
+        body: JSON.stringify({ type: 'URL', url: finalUrl }) 
       });
       const data = await res.json();
       if (!res.ok) return toast.error(data.error || 'Could not scrape problem. Check URL.');
@@ -179,7 +192,9 @@ export default function ContestEditPage() {
     const code = prompt('Enter new problem code (e.g. 1500A):');
     if (!code) return;
     try {
-      const p = await lookupProblem(newProblemPlatform, code);
+      // 👉 FIXED: Strip spacing here too!
+      const cleanCode = code.replace(/\s+/g, '').toUpperCase();
+      const p = await lookupProblem(newProblemPlatform, cleanCode);
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, {
         method: 'PUT',
         headers: viewerHeaders(session),

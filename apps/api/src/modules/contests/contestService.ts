@@ -65,13 +65,14 @@ function toPlatform(value: string | undefined) {
 }
 
 function parseCodeforcesCode(problem: ProblemInput) {
-  const code = String(problem.code || problem.externalId || '').trim().toUpperCase();
+  // 👉 FIXED: Automatically strip spaces so "800 A" becomes "800A"
+  const code = String(problem.code || problem.externalId || '').replace(/\s+/g, '').toUpperCase();
   if (problem.contestCode && problem.problemIndex) {
-    return { contestCode: String(problem.contestCode), problemIndex: String(problem.problemIndex).toUpperCase() };
+    return { contestCode: String(problem.contestCode).trim(), problemIndex: String(problem.problemIndex).replace(/\s+/g, '').toUpperCase() };
   }
 
   const match = code.match(/^(\d+)([A-Z][0-9]?)$/);
-  if (!match) return { contestCode: String(problem.contestCode || code), problemIndex: String(problem.problemIndex || '') };
+  if (!match) return { contestCode: String(problem.contestCode || code).trim(), problemIndex: String(problem.problemIndex || '').replace(/\s+/g, '').toUpperCase() };
   return { contestCode: match[1], problemIndex: match[2] };
 }
 
@@ -243,7 +244,8 @@ export async function loadContestForViewer(contestId: string) {
           include: {
             problem: {
               include: { editorial: true, officialSolutions: true, testcases: true }
-            }
+            },
+            interviewQuestion: true // 👉 ADDED THIS INCLUSION
           },
           orderBy: { index: 'asc' }
         },
