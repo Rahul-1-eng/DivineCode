@@ -1,19 +1,32 @@
 import axios from 'axios';
 import { prisma } from '../../prisma/client';
 
-// Helper to strip markdown JSON formatting from LLM responses
-function parseAiJsonResponse(text: string) {
-  const cleanStr = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-  return JSON.parse(cleanStr);
+// Helper to safely parse AI JSON, preventing crashes if the LLM hallucinated
+function parseAiJsonResponse(text: string, isArray = false) {
+  try {
+    const cleanStr = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    return JSON.parse(cleanStr);
+  } catch (err) {
+    console.error("AI JSON Parse Error. Raw Text:", text);
+    return isArray ? [] : {};
+  }
+}
+
+// Cleans base64 images from HTML descriptions so we don't blow up the Gemini Token limit
+function sanitizeDescriptionForPrompt(html: string) {
+  if (!html) return '';
+  return html.replace(/<img[^>]*src="data:image[^>]*>/g, '[Image omitted for token limits]');
 }
 
 export async function analyzeSubmissionLogic(submissionId: string, problemDescription: string, userCode: string) {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) return;
 
+  const safeDesc = sanitizeDescriptionForPrompt(problemDescription);
+
   const prompt = `
     You are an expert code reviewer.
-    Problem Description: ${problemDescription}
+    Problem Description: ${safeDesc}
     Submitted Code:
     ${userCode}
 
@@ -39,10 +52,10 @@ export async function analyzeSubmissionLogic(submissionId: string, problemDescri
     await prisma.submission.update({
       where: { id: submissionId },
       data: {
-        aiFeedback: result.feedback,
-        aiComplexity: result.complexity,
-        aiSimilarityScore: result.similarityScore,
-        isPlagiarized: result.isPlagiarized
+        aiFeedback: result.feedback || 'No feedback generated.',
+        aiComplexity: result.complexity || 'O(?)',
+        aiSimilarityScore: result.similarityScore || 0,
+        isPlagiarized: result.isPlagiarized || false
       }
     });
   } catch (error: any) {
@@ -83,7 +96,6 @@ export async function extractProblemFromTextOrImage(rawTextOrUrl: string) {
   }
 }
 
-// 👉 NEW: Direct Base64 Multimodal Extraction for Problem Images
 export async function extractProblemFromImageBase64(base64Data: string, mimeType: string = 'image/jpeg') {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
@@ -129,9 +141,11 @@ export async function generateTestCasesWithAI(problemDescription: string, master
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
 
+  const safeDesc = sanitizeDescriptionForPrompt(problemDescription);
+
   const prompt = `
     You are an expert competitive programming judge.
-    Problem Description: ${problemDescription}
+    Problem Description: ${safeDesc}
     Master Solution (Always Correct):
     ${masterSolution}
 
@@ -147,10 +161,10 @@ export async function generateTestCasesWithAI(problemDescription: string, master
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
+    return parseAiJsonResponse(data.candidates[0].content.parts[0].text, true);
   } catch (error: any) {
     console.error("AI Generation Error from Google:", error.response?.data || error.message);
-    throw new Error("Failed to parse AI test cases.");
+    return [];
   }
 }
 
@@ -158,9 +172,11 @@ export async function findFailingTestCaseWithAI(problemDescription: string, user
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
 
+  const safeDesc = sanitizeDescriptionForPrompt(problemDescription);
+
   const prompt = `
     You are an expert competitive programming tutor.
-    Problem Description: ${problemDescription}
+    Problem Description: ${safeDesc}
     User's Failing Code:
     ${userCode}
 
@@ -192,9 +208,11 @@ export async function generateSolutionExplanationWithAI(problemDescription: stri
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
 
+  const safeDesc = sanitizeDescriptionForPrompt(problemDescription);
+
   const prompt = `
     You are an AI programming tutor. A student is stuck on this problem:
-    ${problemDescription}
+    ${safeDesc}
 
     Break down the optimal approach step-by-step. Do not just output raw code. 
     Explain the logic, data structures used, and time complexity.
@@ -218,12 +236,14 @@ export async function generateSolutionExplanationWithAI(problemDescription: stri
 
 export async function generateToughTestCases(problemDescriptionHtml: string) {
   const apiKey = process.env.AI_API_KEY;
-  if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
+  if (!apiKey) return [];
+
+  const safeDesc = sanitizeDescriptionForPrompt(problemDescriptionHtml);
 
   const prompt = `
     You are an expert competitive programming judge. 
     Read the following problem description:
-    ${problemDescriptionHtml}
+    ${safeDesc}
 
     Generate exactly 20 tricky, edge-case system test cases for this problem to feed the serial judge.
     Respond strictly with a JSON array of objects. Do not include markdown formatting.
@@ -237,7 +257,7 @@ export async function generateToughTestCases(problemDescriptionHtml: string) {
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
+    return parseAiJsonResponse(data.candidates[0].content.parts[0].text, true);
   } catch (error: any) {
     console.error("AI Generation Error from Google:", error.response?.data || error.message);
     return []; 

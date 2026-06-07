@@ -3,7 +3,10 @@ import { Server } from 'socket.io';
 import { prisma } from '../prisma/client';
 import { enqueueJudgeSubmission } from '../queues/queues';
 import { canManageContest, sanitizeContestForViewer, viewerFromRequest } from '../modules/contests/contestRules';
-import { createContestV2, listContestsV2, loadContestForViewer, reorderContestProblemV2 } from '../modules/contests/contestService';
+import { 
+  createContestV2, listContestsV2, loadContestForViewer, reorderContestProblemV2, 
+  addContestProblemV2, removeContestProblemV2, replaceContestProblemV2, registerForContestV2 
+} from '../modules/contests/contestService';
 import { createQueuedContestSubmission, unlockHiddenTestCase } from '../modules/contests/submissionService';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
 import { recomputeContestStandings } from '../modules/standings/standingService';
@@ -118,11 +121,23 @@ export function mountV2Routes(app: Express, io: Server) {
       socket.to(`voice:${teamId}`).emit('user-left-voice', socket.id);
     });
   });
+
+  // 👉 FIXED: Missing Registration Route
+  router.post('/contests/:id/register', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    const contest = await registerForContestV2(req.params.id, {
+      ...req.body,
+      userId: viewer.userId,
+      email: viewer.email,
+      name: viewer.name
+    });
+    res.json(sanitizeContestForViewer(contest!, viewer));
+  }));
+
   router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contestId = req.params.id;
     
-    // Find the participant entry
     const participant = await prisma.contestParticipant.findFirst({
         where: { contestId, userId: viewer.userId }
     });
@@ -135,6 +150,7 @@ export function mountV2Routes(app: Express, io: Server) {
     const updatedContest = await loadContestForViewer(contestId);
     res.json(sanitizeContestForViewer(updatedContest!, viewer));
   }));
+
   router.post('/upload-image', upload.single('image'), asyncRoute(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image provided' });
     const imageUrl = `/uploads/${req.file.filename}`;
@@ -155,6 +171,36 @@ export function mountV2Routes(app: Express, io: Server) {
       res.json({ requiresRedirect: true, url }); 
     }
   });
+
+  // 👉 FIXED: Missing Problem Lookup Endpoints for editing/adding
+  router.get('/problems/lookup', asyncRoute(async (req, res) => {
+    const { platform, code } = req.query;
+    res.json({ 
+      title: `${platform} Problem ${code}`, 
+      platform, 
+      code, 
+      externalId: code, 
+      url: platform === 'Codeforces' ? `https://codeforces.com/problemset/problem/${(code as string).match(/^\d+/)?.[0]}/${(code as string).match(/[A-Z]+$/)?.[0]}` : '' 
+    });
+  }));
+
+  router.post('/contests/:id/problems', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    const contest = await addContestProblemV2(req.params.id, req.body, viewer.userId);
+    res.json(sanitizeContestForViewer(contest!, viewer));
+  }));
+
+  router.put('/contests/:id/problems/:problemId', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    const contest = await replaceContestProblemV2(req.params.id, req.params.problemId, req.body, viewer.userId);
+    res.json(sanitizeContestForViewer(contest!, viewer));
+  }));
+
+  router.delete('/contests/:id/problems/:problemId', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    const contest = await removeContestProblemV2(req.params.id, req.params.problemId, viewer.userId);
+    res.json(sanitizeContestForViewer(contest!, viewer));
+  }));
 
   router.get('/contests', async (req, res) => {
     const contests = await listContestsV2();
@@ -235,14 +281,12 @@ export function mountV2Routes(app: Express, io: Server) {
     res.status(400).json({ error: 'Bad type parsing' });
   }));
 
-  // 👉 STEP 1: REST Endpoint for Reordering Questions
   router.put('/contests/:id/problems/:problemId/reorder', asyncRoute(async (req, res) => {
     const { direction } = req.body;
     const contest = await reorderContestProblemV2(req.params.id, req.params.problemId, direction);
     res.json(sanitizeContestForViewer(contest!, viewerFromRequest(req)));
   }));
 
-  // 👉 STEP 4: Point deduction & testcase unlocking route
   router.post('/contests/:id/problems/:problemId/unlock-testcase', asyncRoute(async (req, res) => {
     const testcase = await unlockHiddenTestCase(req.params.id, req.params.problemId, viewerFromRequest(req));
     res.json({ success: true, testcase });
@@ -296,26 +340,25 @@ export function mountV2Routes(app: Express, io: Server) {
     });
   }));
 
- // Add this route if it is missing
-router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
-   const cp = await prisma.contestProblem.findUnique({ where: { id: req.params.id }, include: { problem: true } });
-   if (!cp || !cp.problem) return res.status(404).json({ error: 'Problem not found' });
+  router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
+     const cp = await prisma.contestProblem.findUnique({ where: { id: req.params.id }, include: { problem: true } });
+     if (!cp || !cp.problem) return res.status(404).json({ error: 'Problem not found' });
 
-   const description = cp.customDescription || cp.problem.description || cp.titleSnapshot;
-   const testCases = await generateTestCasesWithAI(description, req.body.masterSolution);
+     const description = cp.customDescription || cp.problem.description || cp.titleSnapshot;
+     const testCases = await generateTestCasesWithAI(description, req.body.masterSolution);
 
-   await prisma.testcase.createMany({
-     data: testCases.map((tc: any, i: number) => ({
-       problemId: cp.problemId!,
-       input: tc.input,
-       expectedOutput: tc.expectedOutput,
-       explanation: tc.explanation || '',
-       type: 'HIDDEN',
-       order: i + 10
-     }))
-   });
-   res.json({ success: true, generatedCount: testCases.length });
-}));
+     await prisma.testcase.createMany({
+       data: testCases.map((tc: any, i: number) => ({
+         problemId: cp.problemId!,
+         input: tc.input,
+         expectedOutput: tc.expectedOutput,
+         explanation: tc.explanation || '',
+         type: 'HIDDEN',
+         order: i + 10
+       }))
+     });
+     res.json({ success: true, generatedCount: testCases.length });
+  }));
 
   router.post('/contests/:id/ai-recommendations', asyncRoute(async (req, res) => {
     const problems = await prisma.aiProblemDataset.findMany({
@@ -336,6 +379,7 @@ router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) =
   router.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
     res.status(statusFromError(error)).json({ ok: false, error: error.message || 'Unexpected V2 API error' });
   });
+  
   app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
   app.use('/api/v2', router);
   app.use('/api/v2/submissions', submissionRouter); 

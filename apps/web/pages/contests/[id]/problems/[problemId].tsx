@@ -116,7 +116,7 @@ export default function ContestProblemWorkspace() {
   const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
   
-const isMCQ = !!problem?.interviewQuestionId;
+  const isMCQ = !!problem?.interviewQuestionId;
   useEffect(() => {
     if (isMCQ && problem?.interviewQuestionId) {
       fetch(`${API_V2_BASE_URL}/interview/questions`, {
@@ -267,9 +267,12 @@ const isMCQ = !!problem?.interviewQuestionId;
   const handleSendMessage = () => {
     if (!chatInput.trim() || !contest?.viewerMember?.teamId) return;
     if (socketRef.current) {
+      // 👉 FIXED: Ensure senderId is properly fetched
+      const senderIdentifier = contest.viewerMember.userId || contest.viewerMember.user?.id || session?.user?.email;
+      
       socketRef.current.emit('sendTeamMessage', {
         contestId: id, teamId: contest.viewerMember.teamId,
-        senderId: contest.viewerMember.userId || contest.viewerMember.user?.id,
+        senderId: senderIdentifier,
         content: chatInput.trim()
       });
     }
@@ -511,7 +514,19 @@ const isMCQ = !!problem?.interviewQuestionId;
       <header style={headerBar}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
           <button onClick={() => router.push(`/contests/${id}`)} style={btnDark}>← Standings</button>
-          <strong style={{ color: '#fff' }}>{problem.titleSnapshot}</strong>
+          
+          {/* 👉 FIXED: Re-added AI Avatar specific redirect logic */}
+          <strong style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
+            {problem.titleSnapshot}
+            {problem.externalUrl && (
+              <button 
+                onClick={() => window.open(problem.externalUrl, '_blank')} 
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }} 
+                title="View Original Problem on Native Platform">
+                🤖
+              </button>
+            )}
+          </strong>
         </div>
         <div style={timerBox}>{timer.text}</div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -536,16 +551,27 @@ const isMCQ = !!problem?.interviewQuestionId;
         {/* LEFT PANE */}
         <section style={{ width: '40%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #1e293b', background: '#0f172a' }}>
           <div style={paneHeader}>Problem Description</div>
-          <div style={{ flex: 1, padding: 0, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, padding: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
             {isMCQ ? (
               <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8', marginTop: '10vh' }}>
                 <svg width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ margin: '0 auto 20px', color: '#38bdf8' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                 <h2 style={{ color: '#eef2ff' }}>Theory Assessment</h2>
                 <p>Read the question carefully and select the correct option(s) in the workspace on the right.</p>
+                <div style={{ marginTop: 30, fontSize: 24, fontWeight: 'bold', color: '#fbbf24', background: '#1e293b', padding: '10px 20px', borderRadius: 8, display: 'inline-block' }}>
+                   {timer.text}
+                </div>
               </div>
             ) : (
               <>
-                {problem.externalUrl ? (
+                {problem.externalUrl && !problem.externalUrl.includes('codeforces') && problem.platform !== 'CODEFORCES' ? (
+                  <div style={{ padding: 40, textAlign: 'center' }}>
+                     <h2 style={{ color: '#eef2ff', marginBottom: 20 }}>External Problem</h2>
+                     <p style={{ color: '#94a3b8', marginBottom: 30 }}>This problem description could not be scraped natively. Click below to view the full question.</p>
+                     <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', padding: '16px 32px', background: '#38bdf8', color: '#000', borderRadius: 12, fontWeight: 'bold', textDecoration: 'none', fontSize: 18 }}>
+                       View Problem Description ↗
+                     </a>
+                  </div>
+                ) : problem.externalUrl ? (
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                     <iframe src={problemIframeUrl} style={{...iframeStyle, flex: 1}} title="Problem Statement" />
                     <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center' }}>
@@ -771,9 +797,7 @@ const modalOverlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right:
 const modalContent: CSSProperties = { background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b', width: '90%', maxWidth: 500, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' };
 const secondaryBtn: CSSProperties = { background: '#334155', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
 const primaryBtn: CSSProperties = { background: '#0284c7', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', textDecoration: 'none', textAlign: 'center', display: 'inline-block' };
-const cancelBtn: CSSProperties = { background: 'transparent', color: '#94a3b8', border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 'bold' };
-const syncBtn: CSSProperties = { background: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
 const tcCard: CSSProperties = { background: '#020617', border: '1px solid #334155', borderRadius: 8, overflow: 'hidden', marginBottom: 15 };
 const tcHeader: CSSProperties = { background: '#1e293b', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', fontSize: 13 };
 const tcBox: CSSProperties = { width: '100%', height: 60, background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#fff', fontFamily: 'monospace', padding: 8, fontSize: 13, resize: 'none' };
-const tcLabel: CSSProperties = { fontSize: 12, color: '#94a3b8', marginBottom: 4 };
+const tcLabel: CSSProperties = { fontSize: 12, color: '#94a3b8', marginBottom: 4, display: 'block' };

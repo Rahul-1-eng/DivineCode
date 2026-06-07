@@ -177,7 +177,6 @@ export default function ContestRoomPage() {
     
     if (res.ok) {
       toast.success('Successfully unregistered.');
-      // CRITICAL: Refresh the whole page state so the register button reappears
       await loadContest(); 
     } else {
       const data = await res.json();
@@ -338,17 +337,14 @@ export default function ContestRoomPage() {
     } else { const data = await res.json(); toast.error(data.error || 'Failed to override points'); }
   }
 
-  // 👉 FIXED: Ensure Chatbox is available to everyone!
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
     
     if (contest?.viewerMember?.teamId && socketRef.current) {
-      // Send to Private Team Room
       socketRef.current.emit('sendTeamMessage', {
-        contestId: id, teamId: contest.viewerMember.teamId, senderId: contest.viewerMember.user?.id || contest.viewerMember.userId, content: chatInput.trim()
+        contestId: id, teamId: contest.viewerMember.teamId, senderId: contest.viewerMember.user?.id || contest.viewerMember.userId || session?.user?.email, content: chatInput.trim()
       });
     } else if (socketRef.current) {
-      // Send to Global Lobby (Solo players)
       socketRef.current.emit('sendLobbyMessage', { contestId: id, sender: session?.user?.name || 'Guest', text: chatInput.trim(), time: Date.now() });
     }
     setChatInput('');
@@ -607,8 +603,18 @@ export default function ContestRoomPage() {
                {displayStatus === 'ENDED' && <span style={badgeEnded}>✅ Completed</span>}
                <p style={{...eyebrow, margin: 0}}>{isFinal ? 'Final standings' : isActuallyOwnerMode ? 'Owner control room' : 'Player contest room'}</p>
             </div>
+            
             <h1 style={{ fontSize: 46, margin: 0 }}>{contest.title}</h1>
-            <p style={{ color: '#a8b3c7' }}>{isActuallyOwnerMode ? 'You are viewing as Admin. You can edit, sync, and delete this mashup.' : 'Problem ratings and hidden tests are sealed during the live contest.'}</p>
+            
+            {/* 👉 FIXED: Persistent Team Invite Code display here */}
+            {viewerMember?.team && viewerMember.team !== 'Individuals' && viewerMember.team?.inviteCode && (
+              <div style={{ background: 'rgba(2,6,23,0.5)', border: '1px dashed #38bdf8', padding: '8px 16px', borderRadius: 8, display: 'inline-block', marginTop: 12 }}>
+                <span style={{ color: '#94a3b8', fontSize: 12, marginRight: 8, textTransform: 'uppercase' }}>TEAM INVITE CODE:</span>
+                <strong style={{ color: '#38bdf8', letterSpacing: 2, fontSize: 16 }}>{viewerMember.team.inviteCode}</strong>
+              </div>
+            )}
+
+            <p style={{ color: '#a8b3c7', marginTop: 12 }}>{isActuallyOwnerMode ? 'You are viewing as Admin. You can edit, sync, and delete this mashup.' : 'Problem ratings and hidden tests are sealed during the live contest.'}</p>
             <p style={{ color: '#67e8f9' }}>{isFinal ? 'Read-only final board' : `Last sync: ${lastSync}`}</p>
           </div>
           <div style={timerCard}>
@@ -702,11 +708,7 @@ export default function ContestRoomPage() {
         {isScheduledLockScreen && !isActuallyOwnerMode ? (
           <section style={{...panel, textAlign: 'center', padding: '60px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(251,191,36,0.05))'}}>
              <h2 style={{ fontSize: 32, marginBottom: 10, color: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>Contest has not started yet</h2>
-             {viewerMember?.teamName && viewerMember.teamName !== 'Individuals' && viewerMember.teamName !== 'Solo' && (
-               <p style={{ color: '#38bdf8', fontSize: 18, fontWeight: 'bold' }}>
-                 Your Team Invite Code: <span style={{ background: '#020617', padding: '4px 10px', borderRadius: 6, border: '1px dashed #38bdf8', letterSpacing: 2 }}>{viewerMember.team?.inviteCode}</span>
-               </p>
-             )}
+             {/* The invite code is safely persisted in the header now, but left here as an extra reminder */}
              <p style={{color: '#a8b3c7', fontSize: 18}}>Problems will be revealed when the countdown reaches zero.</p>
              <div style={{fontSize: 48, fontWeight: 'bold', color: '#67e8f9', marginTop: 20, fontFamily: 'monospace'}}>{formatCountdown(startTimeMs - nowTick)}</div>
              

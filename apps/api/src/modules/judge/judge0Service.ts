@@ -165,7 +165,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
   let detailedMessage = '';
   let fullTestResults = [];
 
-  // 👉 STEP 4: Iterating all test cases without breaking to form an Array Result
   for (const [index, testcase] of testcases.entries()) {
     const result = await submitToWandbox({ sourceCode: submission.code, language: submission.language, stdin: testcase.input });
     const localVerdict = evaluateVerdict(result.status, result.stdout, testcase.expectedOutput, submission.problem?.checkerType || CheckerType.EXACT);
@@ -185,7 +184,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
     }
   }
 
-  // Bulk save all 100+ serial cases to Database
   await prisma.submissionTestResult.createMany({ data: fullTestResults });
 
   const judged = await prisma.submission.update({
@@ -196,8 +194,10 @@ export async function judgeQueuedSubmission(submissionId: string) {
   await finalizeVerdict(judged.id, finalVerdict);
   const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
   
+  // 👉 FIXED: Ensures AI Analysis receives Custom Rich descriptions/URLs if missing from problem 
   if (finalVerdict === Verdict.ACCEPTED && submission.problem) {
-    analyzeSubmissionLogic(judged.id, submission.problem.description, submission.code)
+    const descriptionForAi = submission.contestProblem?.customDescription || submission.problem.description || submission.contestProblem?.titleSnapshot || 'No description available.';
+    analyzeSubmissionLogic(judged.id, descriptionForAi, submission.code)
       .catch(err => console.error("AI Analysis failed in background:", err));
   }
 

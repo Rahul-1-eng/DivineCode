@@ -21,6 +21,7 @@ export type MemberInput = {
 
 export type ProblemInput = {
   id?: string; problemId?: string; interviewQuestionId?: string; title?: string;
+  description?: string; // 👉 Explicitly expecting description here
   platform?: string; code?: string; contestCode?: string;
   problemIndex?: string; externalId?: string; url?: string; points?: number;
 };
@@ -217,6 +218,7 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
       problemId: input.problem.problemId || input.problem.id || null,
       interviewQuestionId: input.problem.interviewQuestionId || null,
       titleSnapshot: String(input.problem.title || `Problem ${label}`).trim(),
+      customDescription: input.problem.description || null, // 👉 Persist Custom Descriptions explicitly
       platform, 
       externalUrl: input.problem.url || externalUrl(input.problem, platform) || '', 
       index: input.index,
@@ -482,7 +484,6 @@ export async function updateContestSettingsV2(contestId: string, input: { title?
   return loadContestForViewer(contestId);
 }
 
-// 👉 NEW: Dedicated Database Function to Swap/Reorder Mashup Problems Dynamically
 export async function reorderContestProblemV2(contestId: string, contestProblemId: string, direction: 'UP' | 'DOWN', actorId?: string) {
   const problem = await prisma.contestProblem.findFirst({ where: { id: contestProblemId, contestId } });
   if (!problem) throw new Error('Problem not found');
@@ -505,7 +506,6 @@ export async function reorderContestProblemV2(contestId: string, contestProblemI
       return; 
     }
 
-    // Reapply sequential indexes and Alphabetical Labels (A, B, C...)
     for (let i = 0; i < all.length; i++) {
       await tx.contestProblem.update({
         where: { id: all[i].id },
@@ -531,9 +531,11 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
 
   let enrichedProblem = { ...problem };
   let newTestcases: any[] = [];
-  let finalDescription = problem.title || 'External Problem';
+  
+  // 👉 Ensure Custom HTML Descriptions are preferred over fallback text
+  let finalDescription = problem.description || problem.title || 'External Problem';
 
-  if (problem.url && !problem.id) {
+  if (problem.url && !problem.id && !problem.description) {
     try {
       const scraped = await scrapeProblemFromUrl(problem.url);
       enrichedProblem.title = scraped.title;
@@ -574,7 +576,7 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
 
     const created = await createContestProblemRow(tx, { 
       contestId, 
-      problem: enrichedProblem, 
+      problem: { ...enrichedProblem, description: finalDescription }, // Pass the rich desc down!
       index: contest.problems.length, 
       addedById: actorId || null 
     });

@@ -106,13 +106,14 @@ export default function ContestEditPage() {
     } catch (e: any) { toast.error(e.message || 'Could not add problem'); }
   }
 
+  // 👉 FIXED: Now correctly points to /mashup with the right payload, solving the JSON error
   async function addProblemFromUrl() {
     if (!id || !session || !newProblemUrl.trim()) return toast.error('Enter a problem URL.');
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/scrape`, { 
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/mashup`, { 
         method: 'POST', 
         headers: viewerHeaders(session), 
-        body: JSON.stringify({ url: newProblemUrl }) 
+        body: JSON.stringify({ type: 'URL', url: newProblemUrl }) 
       });
       const data = await res.json();
       if (!res.ok) return toast.error(data.error || 'Could not scrape problem. Check URL.');
@@ -205,7 +206,6 @@ export default function ContestEditPage() {
     } catch (e: any) { toast.error(e.message || 'Could not remove problem'); }
   }
 
-  // 👉 NEW: API request to reorder live questions in Editor Mode
   async function moveProblem(problemId: string, direction: 'UP' | 'DOWN') {
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}/reorder`, {
@@ -329,7 +329,6 @@ export default function ContestEditPage() {
             <div key={problem.id} style={row}>
               <strong style={{ fontSize: 24, color: '#e2e8f0', minWidth: 30 }}>{String.fromCharCode(65 + index)}</strong>
               
-              {/* 👉 NEW: Reorder arrows mapped here */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginRight: 15 }}>
                  <button onClick={() => moveProblem(problem.id, 'UP')} disabled={index === 0} style={{...ghost, padding: '2px 6px', fontSize: 10}}>▲</button>
                  <button onClick={() => moveProblem(problem.id, 'DOWN')} disabled={index === contest.problems.length - 1} style={{...ghost, padding: '2px 6px', fontSize: 10}}>▼</button>
@@ -365,7 +364,7 @@ export default function ContestEditPage() {
   );
 }
 
-// 📱 CSS
+// Styles
 const page: CSSProperties = { minHeight: '100vh', width: '100%', maxWidth: '100vw', overflowX: 'hidden', padding: 'clamp(16px, 4vw, 32px)', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.15), transparent 34rem), #070a16', boxSizing: 'border-box' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 };
 const link: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900, fontSize: 16 };
