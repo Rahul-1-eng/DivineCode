@@ -285,26 +285,26 @@ export async function registerForContestV2(contestId: string, input: MemberInput
     if (existing) throw new Error('User is already registered for this contest.');
 
     let teamId = null;
+    let isPending = false;
     
     // TEAM INVITE LOGIC INTEGRATION
     if (memberInput.teamInviteCode) {
       const team = await tx.contestTeam.findUnique({ where: { inviteCode: memberInput.teamInviteCode } });
       if (!team || team.contestId !== contestId) throw new Error("Invalid Team Invite Code");
       teamId = team.id;
-      memberInput.teamName = team.name; // Sync name
+      memberInput.teamName = team.name;
+    } else if (memberInput.teamName && memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo') {
+       // Logic: New request to join a team requires approval.
+       // We create the participant but set isOfficial to false (Pending).
+       isPending = true;
     } else {
-      const isRealTeam = memberInput.teamName && memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo';
-      if (isRealTeam) {
-        let team = await tx.contestTeam.findFirst({
-          where: { contestId, name: memberInput.teamName }
-        });
-        if (!team) {
-          team = await tx.contestTeam.create({
-            data: { contestId, name: memberInput.teamName! }
-          });
-        }
-        teamId = team.id;
-      }
+       // Regular join logic for individuals
+       const isRealTeam = memberInput.teamName && memberInput.teamName !== 'Individuals';
+       if (isRealTeam) {
+         let team = await tx.contestTeam.findFirst({ where: { contestId, name: memberInput.teamName } });
+         if (!team) team = await tx.contestTeam.create({ data: { contestId, name: memberInput.teamName! } });
+         teamId = team.id;
+       }
     }
 
     await tx.contestParticipant.create({
@@ -312,7 +312,8 @@ export async function registerForContestV2(contestId: string, input: MemberInput
         contestId: contest.id, userId: user.id, externalHandleId: externalHandle?.id || null,
         displayName: memberInput.displayName!, teamName: memberInput.teamName,
         teamId: teamId, 
-        role: ContestParticipantRole.PARTICIPANT, isOfficial: true
+        role: ContestParticipantRole.PARTICIPANT, 
+        isOfficial: !isPending // Set to false if pending
       }
     });
   });
@@ -522,7 +523,7 @@ export async function reorderContestProblemV2(contestId: string, contestProblemI
   return loadContestForViewer(contestId);
 }
 
-export async function addContestProblemV2(contestId: string, problem: ProblemInput, actorId?: string) {
+export async function addContestProblemV2(contestId: string, problem: ProblemInput & { mcqData?: any }, actorId?: string) {
   const contest = await prisma.contest.findUnique({
     where: { id: contestId },
     include: { participants: { include: { user: true, externalHandle: true } }, problems: true }
@@ -551,6 +552,24 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
     }
   }
 
+  let finalInterviewQuestionId = problem.interviewQuestionId;
+
+  // NEW: Handle MCQ Data creation if provided
+  if (problem.mcqData) {
+    const newMcq = await prisma.interviewQuestion.create({
+      data: {
+        trackId: 'default-track-id', // Update this based on your database defaults if necessary
+        title: problem.title || "Contest MCQ",
+        prompt: problem.mcqData.prompt,
+        options: problem.mcqData.options || [],
+        correctIndices: problem.mcqData.correctIndices || [],
+        isMultiple: problem.mcqData.correctIndices?.length > 1,
+        submittedById: actorId
+      }
+    });
+    finalInterviewQuestionId = newMcq.id;
+  }
+
   await prisma.$transaction(async (tx) => {
     let finalProblemId = problem.problemId || problem.id || null;
 
@@ -576,7 +595,8 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
 
     const created = await createContestProblemRow(tx, { 
       contestId, 
-      problem: { ...enrichedProblem, description: finalDescription }, // Pass the rich desc down!
+      // 👇 Passing the newly created or provided interviewQuestionId
+      problem: { ...enrichedProblem, description: finalDescription, interviewQuestionId: finalInterviewQuestionId }, 
       index: contest.problems.length, 
       addedById: actorId || null 
     });
@@ -722,4 +742,19 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
   } catch (error) {
     throw error;
   }
+}
+
+export async function approveParticipant(contestId: string, participantId: string, actorId: string) {
+  const contest = await prisma.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
+  const actor = contest?.participants.find(p => p.userId === actorId);
+
+  // Check if actor is a manager or owner (or team leader)
+  if (!actor || (actor.role !== ContestParticipantRole.MANAGER && actor.userId !== contest?.createdById)) {
+    throw new Error('Unauthorized: Only managers or owners can approve participants.');
+  }
+
+  return await prisma.contestParticipant.update({
+    where: { id: participantId },
+    data: { isOfficial: true }
+  });
 }

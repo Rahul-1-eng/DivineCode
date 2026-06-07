@@ -26,7 +26,10 @@ export async function recomputeContestStandings(contestId: string) {
     const contest = await tx.contest.findUnique({
       where: { id: contestId },
       include: {
-        participants: { include: { standing: true } },
+        participants: { 
+          where: { isOfficial: true }, // 👉 FIXED: Ignore pending unapproved members!
+          include: { standing: true } 
+        },
         problems: true,
         submissions: { orderBy: { createdAt: 'asc' } }
       }

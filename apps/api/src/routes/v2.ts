@@ -5,7 +5,7 @@ import { enqueueJudgeSubmission } from '../queues/queues';
 import { canManageContest, sanitizeContestForViewer, viewerFromRequest } from '../modules/contests/contestRules';
 import { 
   createContestV2, listContestsV2, loadContestForViewer, reorderContestProblemV2, 
-  addContestProblemV2, removeContestProblemV2, replaceContestProblemV2, registerForContestV2 
+  addContestProblemV2, removeContestProblemV2, replaceContestProblemV2, registerForContestV2, approveParticipant 
 } from '../modules/contests/contestService';
 import { createQueuedContestSubmission, unlockHiddenTestCase } from '../modules/contests/submissionService';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
@@ -133,7 +133,13 @@ export function mountV2Routes(app: Express, io: Server) {
     });
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
-
+  // 👉 NEW: Approve Participant Route for Group Joins
+  router.post('/contests/:id/participants/:participantId/approve', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    if (!viewer.userId) throw new Error("Unauthorized");
+    const updated = await approveParticipant(req.params.id, req.params.participantId, viewer.userId);
+    res.json({ success: true, participant: updated });
+  }));
   router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contestId = req.params.id;

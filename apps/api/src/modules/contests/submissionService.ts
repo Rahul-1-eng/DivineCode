@@ -13,12 +13,7 @@ export async function createQueuedContestSubmission(input: {
     where: { id: input.contestId },
     include: {
       createdBy: true,
-      participants: {
-        include: {
-          user: true,
-          externalHandle: true
-        }
-      },
+      participants: { include: { user: true, externalHandle: true } },
       problems: true
     }
   });
@@ -27,36 +22,41 @@ export async function createQueuedContestSubmission(input: {
 
   const participant = findViewerParticipant(contest, input.viewer);
   if (!participant) {
-    throw new Error('Only registered contest players can submit. The creator is not a player unless added separately.');
+    throw new Error('Only registered contest players can submit.');
   }
 
   const contestProblem = contest.problems.find((problem) => problem.id === input.contestProblemId);
   if (!contestProblem) throw new Error('Contest problem not found');
   
   if (contestProblem.requiresRedirect && contestProblem.externalUrl) {
-    return { 
-      redirectUrl: contestProblem.externalUrl,
-      status: 'REDIRECT_REQUIRED' 
-    };
+    return { redirectUrl: contestProblem.externalUrl, status: 'REDIRECT_REQUIRED' };
   }
-  if (!input.code?.trim()) throw new Error('Code is required');
-  if (!input.language?.trim()) throw new Error('Language is required');
 
-  return prisma.submission.create({
-    data: {
-      userId: participant.userId!,
-      participantId: participant.id,
-      teamId: participant.teamId, 
-      problemId: contestProblem.problemId,
-      contestId: contest.id,
-      contestProblemId: contestProblem.id,
-      source: SubmissionSource.INTERNAL_JUDGE,
-      status: SubmissionStatus.QUEUED,
-      verdict: Verdict.PENDING,
-      language: input.language!,
-      code: input.code!
-    }
-  });
+  // Improved Validation
+  if (!input.code || input.code.trim().length === 0) throw new Error('Submission code cannot be empty');
+  if (!input.language || input.language.trim().length === 0) throw new Error('Language must be specified');
+
+  try {
+    const submission = await prisma.submission.create({
+      data: {
+        userId: participant.userId!,
+        participantId: participant.id,
+        teamId: participant.teamId, 
+        problemId: contestProblem.problemId,
+        contestId: contest.id,
+        contestProblemId: contestProblem.id,
+        source: SubmissionSource.INTERNAL_JUDGE,
+        status: SubmissionStatus.QUEUED,
+        verdict: Verdict.PENDING,
+        language: input.language.trim(),
+        code: input.code.trim()
+      }
+    });
+    return submission;
+  } catch (error) {
+    console.error("Submission creation failed:", error);
+    throw new Error("Failed to queue submission to database.");
+  }
 }
 
 // 👉 STEP 4: Point Deduction & Unlocking Logic

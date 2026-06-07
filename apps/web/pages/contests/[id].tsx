@@ -162,7 +162,24 @@ export default function ContestRoomPage() {
       if (myTeam?.inviteCode) alert(`Team Created! Share this invite code with your friends: ${myTeam.inviteCode}`);
     }
   }
-
+ async function approveMember(participantId: string) {
+    if (!id || !session) return;
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/participants/${participantId}/approve`, {
+        method: 'POST',
+        headers: viewerHeaders(session)
+      });
+      if (res.ok) {
+        toast.success('Player approved!');
+        await loadContest(); // Refresh to show them as official
+      } else {
+        const data = await res.json();
+        toast.error(data.error || 'Failed to approve');
+      }
+    } catch (err) {
+      toast.error('Network error');
+    }
+  }
  async function unregisterFromContest() {
   if (!confirm("Are you sure you want to unregister?")) return;
   
@@ -748,10 +765,18 @@ export default function ContestRoomPage() {
 
                 <h2>Players</h2>
                 {(contest.participants || contest.members || []).map((m: any) => (
-                  <p key={m.id} style={{ color: '#cbd5e1', marginBottom: '8px', lineHeight: '1.4' }}>
-                    {m.user?.name || m.name || m.displayName || 'Unknown Player'}<br/>
-                    <span style={{ color: '#67e8f9' }}>{m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}</span>
-                  </p>
+                  <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '8px 12px', borderRadius: 8, marginBottom: 8, border: '1px solid rgba(148,163,184,.1)' }}>
+                    <p style={{ color: '#cbd5e1', margin: 0, lineHeight: '1.4' }}>
+                      <strong style={{ color: m.isOfficial ? '#fff' : '#94a3b8' }}>{m.user?.name || m.name || m.displayName || 'Unknown Player'}</strong>
+                      {!m.isOfficial && <span style={{ color: '#f87171', fontSize: 12, marginLeft: 8 }}>[PENDING APPROVAL]</span>}<br/>
+                      <span style={{ color: '#67e8f9', fontSize: 13 }}>{m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}</span>
+                    </p>
+                    {!m.isOfficial && isActuallyOwnerMode && (
+                      <button onClick={() => approveMember(m.id)} style={{ ...primaryButton, width: 'auto', margin: 0, padding: '6px 12px', fontSize: 12 }}>
+                        Approve
+                      </button>
+                    )}
+                  </div>
                 ))}
               </section>}
 

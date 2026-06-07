@@ -563,28 +563,28 @@ export default function ContestProblemWorkspace() {
               </div>
             ) : (
               <>
-                {problem.externalUrl && !problem.externalUrl.includes('codeforces') && problem.platform !== 'CODEFORCES' ? (
-                  <div style={{ padding: 40, textAlign: 'center' }}>
-                     <h2 style={{ color: '#eef2ff', marginBottom: 20 }}>External Problem</h2>
-                     <p style={{ color: '#94a3b8', marginBottom: 30 }}>This problem description could not be scraped natively. Click below to view the full question.</p>
-                     <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', padding: '16px 32px', background: '#38bdf8', color: '#000', borderRadius: 12, fontWeight: 'bold', textDecoration: 'none', fontSize: 18 }}>
-                       View Problem Description ↗
-                     </a>
-                  </div>
-                ) : problem.externalUrl ? (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                    <iframe src={problemIframeUrl} style={{...iframeStyle, flex: 1}} title="Problem Statement" />
-                    <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center' }}>
-                       <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: 'bold' }}>
-                         ↗ Open Original Problem in New Tab
-                       </a>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ padding: 20 }}>
-                    <div dangerouslySetInnerHTML={{ __html: problem.description || problem.customDescription || 'No description provided.' }} />
-                  </div>
-                )}
+                // REPLACE WITH THIS LOGIC:
+<div style={{ padding: 20, flex: 1, overflowY: 'auto' }}>
+  {/* Priority 1: Always show internal description if it exists */}
+  {problem.description || problem.customDescription ? (
+      <div dangerouslySetInnerHTML={{ __html: problem.description || problem.customDescription }} />
+  ) : problem.externalUrl ? (
+      /* Priority 2: Fallback to external URL iframe/links if no internal description */
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <iframe src={problemIframeUrl} style={{...iframeStyle, height: '60vh'}} title="Problem Statement" />
+          <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center' }}>
+              <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: 'bold' }}>
+                ↗ View Original Problem
+              </a>
+          </div>
+      </div>
+  ) : (
+      /* Priority 3: Final fallback */
+      <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>
+        No description provided for this problem.
+      </div>
+  )}
+</div>
               </>
             )}
           </div>

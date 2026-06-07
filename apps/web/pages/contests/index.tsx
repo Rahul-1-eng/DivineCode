@@ -34,9 +34,10 @@ export default function ContestsList() {
       });
   }, [session]);
 
-  const running = contests.filter(c => c.status === 'RUNNING');
-  const scheduled = contests.filter(c => c.status === 'SCHEDULED');
-  const ended = contests.filter(c => c.status === 'ENDED');
+// Use your getDynamicStatus helper to categorize dynamically
+  const running = contests.filter(c => getDynamicStatus(c) === 'RUNNING');
+  const scheduled = contests.filter(c => getDynamicStatus(c) === 'SCHEDULED');
+  const ended = contests.filter(c => getDynamicStatus(c) === 'ENDED');
 
   const ContestCard = ({ contest }: { contest: any }) => (
     <motion.div 

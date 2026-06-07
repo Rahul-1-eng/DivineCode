@@ -53,7 +53,7 @@ export default function SubmitPage() {
       .catch(() => null);
   }, [contestId, problemId, session, status]);
 
-  const isMCQ = problem?.platform === 'Interview MCQ';
+const isMCQ = !!problem?.interviewQuestionId;
   const requiresRedirect = problem?.requiresRedirect === true;
 
   async function submitCode() {
@@ -90,10 +90,10 @@ export default function SubmitPage() {
                      <button key={i} onClick={() => setSelectedOption(i)} style={selectedOption === i ? selectedOptionStyle : optionStyle}>{opt}</button>
                   ))}
                 </div>
-             ) : problem?.imageUrl ? (
+            ) : problem?.imageUrl ? (
                 <img src={problem.imageUrl} alt="Problem" style={{ width: '100%', borderRadius: 8 }} />
              ) : (
-                <div dangerouslySetInnerHTML={{ __html: proxiedHtml || problem?.problem?.description || 'No description found.' }} />
+                <div dangerouslySetInnerHTML={{ __html: proxiedHtml || problem?.customDescription || problem?.description || problem?.problem?.description || 'No description provided.' }} />
              )}
            </div>
         </aside>
