@@ -389,6 +389,7 @@ model ContestProblem {
   @@unique([contestId, label])
   @@index([contestId])
   @@index([problemId])
+  @@map("contest_problems")
 }
 
 model SubmissionTestResult {
