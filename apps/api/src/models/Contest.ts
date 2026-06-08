@@ -12,7 +12,10 @@ const ProblemSchema = new mongoose.Schema({
   expectedOutput: String,
   sourceCode: String,
   contestCode: String,
-  problemIndex: String
+  problemIndex: String,
+  isMCQ: { type: Boolean, default: false }, // Added
+  mcqTimeLimitSeconds: { type: Number, default: 0 }, // Added
+  mcqData: Object // Added
 });
 
 const MemberSchema = new mongoose.Schema({
@@ -42,7 +45,12 @@ const ContestSchema = new mongoose.Schema(
     ownerEmail: String,
     ownerHandle: String,
     members: [MemberSchema],
-    problems: [ProblemSchema],
+    problems: [{
+    ...ProblemSchema.obj,
+    isMCQ: { type: Boolean, default: false },
+    mcqTimeLimitSeconds: { type: Number, default: 0 },
+    mcqData: Object
+  }],
     solves: [SolveSchema]
   },
   { timestamps: true }

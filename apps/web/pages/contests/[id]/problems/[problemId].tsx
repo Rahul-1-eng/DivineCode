@@ -49,6 +49,8 @@ export default function ContestProblemWorkspace() {
   const { data: session, status } = useSession();
   
   const [contest, setContest] = useState<any>(null);
+  // ADD THIS LINE:
+  const [timeLeft, setTimeLeft] = useState(120);
   const [code, setCode] = useState('// Write your solution here...');
   const [language, setLanguage] = useState('cpp');
   
@@ -116,7 +118,13 @@ export default function ContestProblemWorkspace() {
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
   
   const isMCQ = useMemo(() => !!problem?.interviewQuestionId, [problem]);
-  
+  useEffect(() => {
+    if (!isMCQ || timeLeft <= 0) return;
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isMCQ, timeLeft]);
   useEffect(() => {
     if (isMCQ && problem?.interviewQuestion) {
       setMcqData(problem.interviewQuestion);
@@ -576,11 +584,18 @@ export default function ContestProblemWorkspace() {
           </div>
           <div style={{ flex: 1, padding: 20, overflowY: 'auto', color: '#e2e8f0', fontSize: '15px', lineHeight: 1.6 }}>
             {isMCQ ? (
-              <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8', marginTop: '10vh' }}>
-                <h2 style={{ color: '#eef2ff' }}>Theory Assessment</h2>
-                <div style={{ marginTop: 30, fontSize: 24, fontWeight: 'bold', color: '#fbbf24' }}>{timer.text}</div>
-              </div>
-            ) : (
+  <div style={{ padding: 40, display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <h2 style={{ color: '#eef2ff' }}>Theory Assessment</h2>
+    <div style={{ fontSize: 32, fontWeight: 'bold', color: '#fbbf24' }}>
+      {/* Dynamic MCQ Timer from Problem Data */}
+      {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+    </div>
+    <div style={{ marginTop: 20, background: '#1e293b', padding: 20, borderRadius: 8 }}>
+       <p>{mcqData?.prompt}</p>
+       {/* Map options here */}
+    </div>
+  </div>
+) : (
                (problem?.customDescription || problem?.problem?.description || problem?.description || problem?.descriptionHtml) ? (
                   <div dangerouslySetInnerHTML={{ __html: problem.customDescription || problem.problem?.description || problem.description || problem.descriptionHtml }} />
                ) : (

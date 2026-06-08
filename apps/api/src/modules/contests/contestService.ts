@@ -21,7 +21,9 @@ export type MemberInput = {
 
 export type ProblemInput = {
   id?: string; problemId?: string; interviewQuestionId?: string; title?: string;
-  description?: string; // 👉 Explicitly expecting description here
+  description?: string;
+  mcqTimeLimitSeconds?: number; // Added
+  mcqData?: any; // Added
   platform?: string; code?: string; contestCode?: string;
   problemIndex?: string; externalId?: string; url?: string; points?: number;
 };
@@ -218,6 +220,9 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
       contestId: input.contestId,
       problemId: input.problem.problemId || input.problem.id || null,
       interviewQuestionId: input.problem.interviewQuestionId || null,
+      isMCQ: !!input.problem.interviewQuestionId, // Added
+      mcqTimeLimitSeconds: input.problem.mcqTimeLimitSeconds || 0, // Added
+      mcqData: input.problem.mcqData || null, // Added
       titleSnapshot: String(input.problem.title || `Problem ${label}`).trim(),
       customDescription: input.problem.description || null, // 👉 Persist Custom Descriptions explicitly
       platform, 
@@ -597,8 +602,14 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
 
     const created = await createContestProblemRow(tx, { 
       contestId, 
-      // 👇 Passing the newly created or provided interviewQuestionId
-      problem: { ...enrichedProblem, description: finalDescription, interviewQuestionId: finalInterviewQuestionId }, 
+      // 👇 Added mcqTimeLimitSeconds and mcqData to the spread
+      problem: { 
+        ...enrichedProblem, 
+        description: finalDescription, 
+        interviewQuestionId: finalInterviewQuestionId,
+        mcqTimeLimitSeconds: problem.mcqTimeLimitSeconds || 0,
+        mcqData: problem.mcqData || null
+      }, 
       index: contest.problems.length, 
       addedById: actorId || null 
     });

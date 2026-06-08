@@ -370,7 +370,9 @@ model ContestProblem {
   isLocked            Boolean            @default(false)
   addedById           String?
   addedAt             DateTime           @default(now())
-  
+  isMCQ                 Boolean @default(false)
+  mcqTimeLimitSeconds   Int     @default(0)
+  mcqData               Json?
   addedBy             User?              @relation(fields: [addedById], references: [id])
   contest             Contest            @relation(fields: [contestId], references: [id], onDelete: Cascade)
   problem             Problem?           @relation(fields: [problemId], references: [id])

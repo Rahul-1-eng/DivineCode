@@ -68,11 +68,12 @@ export default function SubmitPage() {
 
   async function submitCode() {
     // 👉 External Platform Redirection Logic
-    if (requiresRedirect && problem?.externalUrl) {
-       toast.success("Redirecting to external platform...");
-       window.open(problem.externalUrl, '_blank');
-       return;
-    }
+   if (requiresRedirect && problem?.externalUrl) {
+    // Optionally trigger a silent 'Started' submission to track user activity
+    toast.success("Redirecting to external platform...");
+    window.location.href = problem.externalUrl; // Use this to force redirect in same tab if preferred, or window.open
+    return;
+}
 
     setSubmitting(true);
     try {
@@ -128,20 +129,39 @@ export default function SubmitPage() {
            </div>
         </aside>
 
-        <section style={rightPanelStyle}>
-           {!isMCQ && !requiresRedirect && <textarea value={code} onChange={(e) => setCode(e.target.value)} style={editor} />}
-           
-           <button onClick={submitCode} style={submitBtn} disabled={submitting}>
-             {requiresRedirect ? 'Open Platform to Submit ↗' : submitting ? 'Judging...' : 'Submit'}
-           </button>
-           
-           {verdict && (
-             <div style={{...verdictBox, borderColor: verdict.verdict === 'ACCEPTED' ? '#22c55e' : '#ef4444'}}>
-               <h3 style={{ color: verdict.verdict === 'ACCEPTED' ? '#22c55e' : '#ef4444' }}>{verdict.verdict}</h3>
-               <p>{verdict.message}</p>
-             </div>
-           )}
-        </section>
+ <section style={rightPanelStyle}>
+  <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+    {isMCQ ? (
+      <div style={{ padding: '20px', background: '#020617', borderRadius: '8px', border: '1px solid #334155' }}>
+        <h3 style={{ color: '#67e8f9' }}>MCQ Submission Section</h3>
+        <p style={{ color: '#94a3b8' }}>Select your answer from the options on the left.</p>
+        <div style={{ marginTop: '20px' }}>
+            {selectedOption !== null && (
+                <div style={{ padding: '10px', background: '#064e3b', color: '#34d399', borderRadius: '4px' }}>
+                    Option {String.fromCharCode(65 + selectedOption)} Selected
+                </div>
+            )}
+        </div>
+      </div>
+    ) : (
+      <div style={{ flex: 1 }}>
+        <h3 style={{ color: '#67e8f9', padding: '10px 0' }}>Coding Workspace</h3>
+        {!requiresRedirect && <textarea value={code} onChange={(e) => setCode(e.target.value)} style={editor} />}
+      </div>
+    )}
+  </div>
+   
+  <button onClick={submitCode} style={submitBtn} disabled={submitting}>
+    {requiresRedirect ? 'Open Platform to Submit ↗' : submitting ? 'Processing...' : 'Submit Response'}
+  </button>
+  
+  {verdict && (
+    <div style={{...verdictBox, borderColor: verdict.verdict === 'ACCEPTED' ? '#22c55e' : '#ef4444'}}>
+      <h3 style={{ color: verdict.verdict === 'ACCEPTED' ? '#22c55e' : '#ef4444' }}>{verdict.verdict}</h3>
+      <p>{verdict.message}</p>
+    </div>
+  )}
+</section>
       </div>
     </main>
   );

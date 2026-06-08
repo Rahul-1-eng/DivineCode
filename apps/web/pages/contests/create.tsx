@@ -27,6 +27,7 @@ export default function GlobalNavigationAndMashupCreator() {
   const [mcqPrompt, setMcqPrompt] = useState('');
   const [mcqOptions, setMcqOptions] = useState(['', '']);
   const [mcqCorrect, setMcqCorrect] = useState<number[]>([]);
+  const [mcqTimeLimit, setMcqTimeLimit] = useState(120); // Default 2 mins
   
   const [compiledProblems, setCompiledProblems] = useState<any[]>([]);
   const [aiBank, setAiBank] = useState<any[]>([]);
@@ -92,7 +93,9 @@ export default function GlobalNavigationAndMashupCreator() {
       
     } else {
       if (!mcqPrompt || mcqCorrect.length === 0) return toast.error('Enter question parameters');
-      payload.mcqData = { prompt: mcqPrompt, options: mcqOptions, correctIndices: mcqCorrect };
+      payload.isMCQ = true;
+      payload.mcqTimeLimitSeconds = mcqTimeLimit;
+      payload.mcqData = { prompt: mcqPrompt, options: mcqOptions, correctIndices: mcqCorrect, timeLimit: mcqTimeLimit };
       payload.displayTitle = "Theory MCQ: " + mcqPrompt.substring(0, 20) + "...";
     }
     
@@ -274,6 +277,10 @@ export default function GlobalNavigationAndMashupCreator() {
             {activeTab === 'MCQ' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <input value={mcqPrompt} onChange={e => setMcqPrompt(e.target.value)} style={inputBox} placeholder="Question Option Evaluation Prompt" />
+                <label style={{ fontSize: 12, fontWeight: 'bold' }}>Time Limit (Seconds)</label>
+                <input type="number" value={mcqTimeLimit} onChange={e => setMcqTimeLimit(Number(e.target.value))} style={inputBox} placeholder="e.g. 120" />
+                <p style={{fontSize: 12, color: '#94a3b8', margin: 0}}>Check the box next to correct options.</p>
+                <input type="number" value={mcqTimeLimit} onChange={e => setMcqTimeLimit(Number(e.target.value))} style={inputBox} placeholder="e.g. 120" />
                 <p style={{fontSize: 12, color: '#94a3b8', margin: 0}}>Check the box next to correct options.</p>
                 {mcqOptions.map((o, idx) => (
                   <div key={idx} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>

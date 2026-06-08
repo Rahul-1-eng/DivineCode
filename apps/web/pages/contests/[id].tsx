@@ -137,7 +137,16 @@ export default function ContestRoomPage() {
     return parts.join(' : ');
   }
 
-  useEffect(() => { const ticker = setInterval(() => setNowTick(Date.now()), 1000); return () => clearInterval(ticker); }, []);
+useEffect(() => { const ticker = setInterval(() => setNowTick(Date.now()), 1000); return () => clearInterval(ticker); }, []);
+
+// Add this to calculate stats
+const { mcqCount, codingCount } = useMemo(() => {
+  const problems = contest?.problems || [];
+  return {
+    mcqCount: problems.filter((p: any) => !!p.interviewQuestionId).length,
+    codingCount: problems.filter((p: any) => !p.interviewQuestionId).length
+  };
+}, [contest]);
 
   async function registerForContest() {
     if (!id || !session || !regHandle.trim()) return toast.error("Codeforces handle is required");
@@ -781,8 +790,18 @@ export default function ContestRoomPage() {
               </section>}
 
               <section style={isActuallyOwnerMode && !isFinal ? panelWide : { ...panelWide, gridColumn: '1 / -1' }}>
-                <h2>Problems</h2>
-                {contest.problems.length === 0 ? (
+  <h2>Problems</h2>
+  
+  {/* Contest Statistics */}
+  <div style={{ marginBottom: '20px', padding: '15px', background: '#0f172a', borderRadius: '8px', border: '1px solid #334155' }}>
+    <h3 style={{ margin: '0 0 10px 0', color: '#94a3b8' }}>Contest Breakdown</h3>
+    <div style={{ display: 'flex', gap: '20px' }}>
+      <span style={{ color: '#fff' }}>Coding Problems: <strong>{codingCount}</strong></span>
+      <span style={{ color: '#fff' }}>MCQ Questions: <strong>{mcqCount}</strong></span>
+    </div>
+  </div>
+
+  {contest.problems.length === 0 ? (
                   <p style={{ color: '#94a3b8' }}>No problems queued yet.</p>
                 ) : (
                   <div style={{ display: 'grid', gap: 12 }}>
@@ -790,9 +809,16 @@ export default function ContestRoomPage() {
                       const label = String.fromCharCode(65 + index);
                       const actualTitle = p.titleSnapshot || p.problem?.title || `Problem ${label}`;
                       const visibleTitle = canSeeProblemMeta ? actualTitle : `Problem ${label}`;
-                      const safeProblemHref = `/contests/${contest.id}/problems/${p.id}`; 
+                      // Redirecting to the centralized submit page
+const safeProblemHref = `/submit?contestId=${contest.id}&problemId=${p.id}`; 
                       const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
-
+                      const { mcqCount, codingCount } = useMemo(() => {
+                      const problems = contest?.problems || [];
+                      return {
+                        mcqCount: problems.filter((p: any) => !!p.interviewQuestionId).length,
+                        codingCount: problems.filter((p: any) => !p.interviewQuestionId).length
+                      };
+                    }, [contest]);
                       return <div key={p.id} style={{ ...problemRow, borderColor: isSolvedByTeam ? 'rgba(74, 222, 128, 0.4)' : 'rgba(148,163,184,.16)' }}>
                         <strong style={{ color: '#67e8f9', fontSize: 22 }}>{label}</strong>
                         <div>
