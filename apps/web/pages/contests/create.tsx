@@ -259,28 +259,36 @@ export default function GlobalNavigationAndMashupCreator() {
 
             {activeTab === 'URL' && <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste Link or Codeforces Code (e.g. 1500A)" />}
             
-          {activeTab === 'CUSTOM' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Existing Title/Desc inputs here... */}
-                
-                <h4 style={{ color: '#94a3b8' }}>Test Cases</h4>
-                {customCases.map((tc, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 5 }}>
-                        <input placeholder="Input" value={tc.input} onChange={e => {
-                            const newCases = [...customCases];
-                            newCases[i].input = e.target.value;
-                            setCustomCases(newCases);
-                        }} style={{...inputBox, flex: 1}} />
-                        <input placeholder="Expected Output" value={tc.expectedOutput} onChange={e => {
-                            const newCases = [...customCases];
-                            newCases[i].expectedOutput = e.target.value;
-                            setCustomCases(newCases);
-                        }} style={{...inputBox, flex: 1}} />
-                    </div>
-                ))}
-                <button onClick={() => setCustomCases([...customCases, {input: '', expectedOutput: '', isHidden: false}])} style={ghostBtn}>+ Add Row</button>
-              </div>
-            )}
+  // REPLACE THIS BLOCK IN apps/web/pages/contests/create.tsx
+{activeTab === 'CUSTOM' && (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <input placeholder="Problem Title" value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} />
+    <textarea placeholder="Problem Description (HTML supported)" value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, height: '100px'}} />
+    
+    <div style={{ marginTop: 10 }}>
+      <label style={{ display: 'block', marginBottom: 5 }}>Problem Image</label>
+      <input type="file" accept="image/*" onChange={handleImageUpload} />
+      {imageBase64 && <img src={imageBase64} style={{ width: '100px', marginTop: 10 }} />}
+    </div>
+
+    <h4 style={{ color: '#94a3b8', marginTop: 15 }}>Test Cases</h4>
+    {customCases.map((tc, i) => (
+        <div key={i} style={{ display: 'flex', gap: 5 }}>
+            <input placeholder="Input" value={tc.input} onChange={e => {
+                const newCases = [...customCases];
+                newCases[i].input = e.target.value;
+                setCustomCases(newCases);
+            }} style={{...inputBox, flex: 1}} />
+            <input placeholder="Expected Output" value={tc.expectedOutput} onChange={e => {
+                const newCases = [...customCases];
+                newCases[i].expectedOutput = e.target.value;
+                setCustomCases(newCases);
+            }} style={{...inputBox, flex: 1}} />
+        </div>
+    ))}
+    <button onClick={() => setCustomCases([...customCases, {input: '', expectedOutput: '', isHidden: false}])} style={ghostBtn}>+ Add Row</button>
+  </div>
+)}
 
             {activeTab === 'MCQ' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

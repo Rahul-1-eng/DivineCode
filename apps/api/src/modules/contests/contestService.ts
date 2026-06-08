@@ -400,8 +400,34 @@ export async function createContestV2(input: CreateContestInput) {
       });
     }
 
+   // REPLACE THE LOOP INSIDE createContestV2
     for (const [index, problem] of problems.entries()) {
-      await createContestProblemRow(tx, { contestId: created.id, problem, index, addedById: owner.id });
+      // 1. Prepare data just like we do in addContestProblemV2
+      const preparedProblem = {
+        ...problem,
+        description: problem.description || 'No description provided.',
+        imageUrl: problem.imageUrl || null
+      };
+
+      await createContestProblemRow(tx, { 
+        contestId: created.id, 
+        problem: preparedProblem, 
+        index, 
+        addedById: owner.id 
+      });
+
+      // 2. If testcases exist, save them
+      if (problem.testcases && problem.testcases.length > 0) {
+        await tx.testcase.createMany({
+          data: problem.testcases.map((tc: any, idx: number) => ({
+            problemId: created.id, // Ensure this maps to the correct problem
+            input: tc.input || '',
+            expectedOutput: tc.expectedOutput || '',
+            order: idx + 1,
+            type: tc.isHidden ? 'HIDDEN' : 'SAMPLE'
+          }))
+        });
+      }
     }
 
     return created;
