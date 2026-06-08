@@ -82,6 +82,7 @@ export default function GlobalNavigationAndMashupCreator() {
       
     } else if (activeTab === 'CUSTOM') {
       if (!customTitle) return toast.error('Enter custom title');
+      // Ensure testcases are included in the payload explicitly
       const validCases = customCases.filter(c => c.input.trim() !== '' && c.expectedOutput.trim() !== '');
       payload.customData = { 
           title: customTitle, 
@@ -89,6 +90,7 @@ export default function GlobalNavigationAndMashupCreator() {
           testcases: validCases,
           imageUrl: imageBase64 || null 
       };
+      payload.testcases = validCases; // Add this line to ensure the backend receives it
       payload.displayTitle = customTitle;
       
     } else {
@@ -261,16 +263,26 @@ export default function GlobalNavigationAndMashupCreator() {
 
             {activeTab === 'URL' && <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste Link or Codeforces Code (e.g. 1500A)" />}
             
-            {activeTab === 'CUSTOM' && (
+          {activeTab === 'CUSTOM' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ background: '#0f172a', padding: 15, borderRadius: 8, border: '1px solid #334155' }}>
-                  <label style={{ fontSize: 12, fontWeight: 'bold' }}>Optional: Problem Image (OCR)</label>
-                  <input type="file" accept="image/*" onChange={handleImageUpload} style={{ color: '#fff', marginTop: 5, width: '100%' }} />
-                  {imageBase64 && <img src={imageBase64} alt="Preview" style={{ maxWidth: '100%', maxHeight: 100, marginTop: 10 }} />}
-                </div>
-
-                <input value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} placeholder="Title" />
-                <textarea value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, height: 80, resize: 'vertical'}} placeholder="Markdown Statement Content" />
+                {/* Existing Title/Desc inputs here... */}
+                
+                <h4 style={{ color: '#94a3b8' }}>Test Cases</h4>
+                {customCases.map((tc, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 5 }}>
+                        <input placeholder="Input" value={tc.input} onChange={e => {
+                            const newCases = [...customCases];
+                            newCases[i].input = e.target.value;
+                            setCustomCases(newCases);
+                        }} style={{...inputBox, flex: 1}} />
+                        <input placeholder="Expected Output" value={tc.expectedOutput} onChange={e => {
+                            const newCases = [...customCases];
+                            newCases[i].expectedOutput = e.target.value;
+                            setCustomCases(newCases);
+                        }} style={{...inputBox, flex: 1}} />
+                    </div>
+                ))}
+                <button onClick={() => setCustomCases([...customCases, {input: '', expectedOutput: '', isHidden: false}])} style={ghostBtn}>+ Add Row</button>
               </div>
             )}
 

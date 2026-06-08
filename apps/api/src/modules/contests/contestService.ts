@@ -22,10 +22,11 @@ export type MemberInput = {
 export type ProblemInput = {
   id?: string; problemId?: string; interviewQuestionId?: string; title?: string;
   description?: string;
-  mcqTimeLimitSeconds?: number; // Added
-  mcqData?: any; // Added
+  mcqTimeLimitSeconds?: number;
+  mcqData?: any;
   platform?: string; code?: string; contestCode?: string;
   problemIndex?: string; externalId?: string; url?: string; points?: number;
+  testcases?: any[]; // <--- ADD THIS LINE
 };
 
 export type CreateContestInput = {
@@ -531,7 +532,7 @@ export async function reorderContestProblemV2(contestId: string, contestProblemI
   return loadContestForViewer(contestId);
 }
 
-export async function addContestProblemV2(contestId: string, problem: ProblemInput & { mcqData?: any }, actorId?: string) {
+export async function addContestProblemV2(contestId: string, problem: ProblemInput, actorId?: string) {
   const contest = await prisma.contest.findUnique({
     where: { id: contestId },
     include: { participants: { include: { user: true, externalHandle: true } }, problems: true }
@@ -539,9 +540,8 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
   if (!contest) throw new Error('Contest not found');
 
   let enrichedProblem = { ...problem };
-  let newTestcases: any[] = [];
+  let scrapedTestcases: any[] = [];
   
-  // 👉 Ensure Custom HTML Descriptions are preferred over fallback text
   let finalDescription = problem.description || problem.title || 'External Problem';
 
   if (problem.url && !problem.id && !problem.description) {
@@ -552,21 +552,19 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
       finalDescription = scraped.descriptionHtml;
       
       const aiGeneratedCases = await generateToughTestCases(scraped.descriptionHtml);
-      newTestcases = [...scraped.testcases, ...aiGeneratedCases];
+      scrapedTestcases = [...scraped.testcases, ...aiGeneratedCases];
     } catch (err) {
       console.warn("Scraping or AI failed, applying URL fallback.");
-      finalDescription = `<h3>External Problem</h3><p>Please view the problem description here: <a href="${problem.url}" target="_blank" style="color: #38bdf8;">Click here to open ${problem.url}</a></p>`;
-      enrichedProblem.title = problem.title || 'Imported Problem';
+      finalDescription = `<h3>External Problem</h3><p>View statement at: <a href="${problem.url}" target="_blank">${problem.url}</a></p>`;
     }
   }
 
   let finalInterviewQuestionId = problem.interviewQuestionId;
 
-  // NEW: Handle MCQ Data creation if provided
   if (problem.mcqData) {
     const newMcq = await prisma.interviewQuestion.create({
       data: {
-        trackId: 'default-track-id', // Update this based on your database defaults if necessary
+        trackId: 'default-track-id',
         title: problem.title || "Contest MCQ",
         prompt: problem.mcqData.prompt,
         options: problem.mcqData.options || [],
@@ -579,31 +577,9 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
   }
 
   await prisma.$transaction(async (tx) => {
-    let finalProblemId = problem.problemId || problem.id || null;
-
-    if (!finalProblemId && problem.url) {
-       try {
-         const newProb = await tx.problem.create({
-           data: {
-             title: enrichedProblem.title || 'Imported Problem',
-             description: finalDescription,
-             platform: enrichedProblem.platform as any || 'OTHER',
-             source: 'EXTERNAL',
-             url: problem.url,
-             problemCode: `EXT-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-             visibility: 'PUBLIC'
-           }
-         });
-         finalProblemId = newProb.id;
-         enrichedProblem.problemId = finalProblemId;
-       } catch(err) {
-         console.error("Failed to create fallback problem", err);
-       }
-    }
-
+    // 1. Create Problem Row
     const created = await createContestProblemRow(tx, { 
       contestId, 
-      // 👇 Added mcqTimeLimitSeconds and mcqData to the spread
       problem: { 
         ...enrichedProblem, 
         description: finalDescription, 
@@ -615,16 +591,18 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
       addedById: actorId || null 
     });
 
-    if (newTestcases.length > 0) {
-       await tx.testcase.createMany({
-         data: newTestcases.map((tc, idx) => ({
-           problemId: created.problemId || '', 
-           input: tc.input,
-           expectedOutput: tc.expectedOutput,
-           order: idx + 1,
-           type: idx >= 2 ? 'HIDDEN' : 'SAMPLE' 
-         }))
-       });
+    // 2. Save Testcases (Inside transaction, using 'created' and 'tx')
+    const allTestcases = [...(problem.testcases || []), ...scrapedTestcases];
+    if (allTestcases.length > 0) {
+        await tx.testcase.createMany({
+           data: allTestcases.map((tc: any, idx: number) => ({
+             problemId: created.id, // Linked to the newly created problem
+             input: tc.input || '',
+             expectedOutput: tc.expectedOutput || '',
+             order: idx + 1,
+             type: tc.isHidden ? 'HIDDEN' : 'SAMPLE' 
+           }))
+        });
     }
 
     await tx.auditLog.create({ 
