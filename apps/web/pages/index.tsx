@@ -43,16 +43,17 @@ export default function Home() {
     }
   }, [session]);
 
-  const handleSendSupportMessage = () => {
+  const handleSendSupportMessage = async () => { // Added 'async'
     if(!chatInput.trim()) return;
-    setChatHistory([...chatHistory, { role: 'user', text: chatInput }]);
+    const userMessage = chatInput.trim(); // Capture before clearing
+    setChatHistory([...chatHistory, { role: 'user', text: userMessage }]);
     setChatInput('');
     
    // Call your actual backend AI endpoint
   const res = await fetch(`${API_BASE_URL}/api/v2/ai/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: chatInput })
+    body: JSON.stringify({ message: userMessage }) // Use captured message
   });
   const data = await res.json();
   setChatHistory(prev => [...prev, { role: 'ai', text: data.reply }]);

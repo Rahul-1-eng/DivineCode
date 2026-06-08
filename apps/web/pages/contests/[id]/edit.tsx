@@ -24,6 +24,8 @@ function viewerHeaders(session: any) {
   };
 }
 
+// ... (keep loadContest, saveSettings standard logic from before) ...
+
 export default function ContestEditPage() {
   const router = useRouter();
   const { id } = router.query;
@@ -48,7 +50,9 @@ export default function ContestEditPage() {
   async function loadContest() {
     if (!id || status === 'loading') return;
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}${viewerQuery(session)}`);
-    const data = await res.json();
+    const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
     if (!res.ok) { setError(data.error || 'Contest not found'); return; }
     setContest(data);
     setTitle(data.title || '');
@@ -75,7 +79,9 @@ export default function ContestEditPage() {
       headers: viewerHeaders(session), 
       body: JSON.stringify(bodyPayload) 
     });
-    const data = await res.json();
+    const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
     setSaving(false);
     if (!res.ok) return toast.error(data.error || 'Could not save contest');
     setContest(data);
@@ -84,15 +90,17 @@ export default function ContestEditPage() {
 
   async function lookupProblem(platform: string, code: string) {
     const res = await fetch(`${API_BASE_URL}/api/problems/lookup?platform=${encodeURIComponent(platform)}&code=${encodeURIComponent(code)}`);
-    const data = await res.json();
+    const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
     if (!res.ok) throw new Error(data.error || 'Lookup failed');
     return data;
   }
 
+  // 👉 FIXED: Safe JSON Parsing blocks for ALL problem additions
   async function addProblem() {
     if (!id || !session || !newProblemCode.trim()) return toast.error('Enter a problem code.');
     try {
-      // 👉 FIXED: Forcibly strip spacing to prevent "800 A" lookup failure logic
       const cleanCode = newProblemCode.replace(/\s+/g, '').toUpperCase();
       const p = await lookupProblem(newProblemPlatform, cleanCode);
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems`, { 
@@ -100,7 +108,11 @@ export default function ContestEditPage() {
         headers: viewerHeaders(session), 
         body: JSON.stringify(p) 
       });
-      const data = await res.json();
+      
+      const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Received HTML instead of JSON (Status ${res.status})`); }
+
       if (!res.ok) return toast.error(data.error || 'Could not add problem');
       setContest(data);
       setNewProblemCode('');
@@ -111,7 +123,6 @@ export default function ContestEditPage() {
   async function addProblemFromUrl() {
     if (!id || !session || !newProblemUrl.trim()) return toast.error('Enter a problem URL.');
     
-    // 👉 FIXED: Auto-convert Codeforces strings into URLs inside the edit page as well!
     let finalUrl = newProblemUrl.trim();
     if (!finalUrl.startsWith('http') && /^\d+\s*[a-zA-Z][0-9]?$/.test(finalUrl)) {
        const clean = finalUrl.replace(/\s+/g, '').toUpperCase();
@@ -128,40 +139,17 @@ export default function ContestEditPage() {
         headers: viewerHeaders(session), 
         body: JSON.stringify({ type: 'URL', url: finalUrl }) 
       });
-      const data = await res.json();
+
+      const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Scrape Error: Backend crashed processing URL (Status ${res.status})`); }
+
       if (!res.ok) return toast.error(data.error || 'Could not scrape problem. Check URL.');
       setContest(data);
       setNewProblemUrl('');
       toast.success('Problem scraped and added!');
     } catch (e: any) { toast.error(e.message || 'Scrape failed'); }
   }
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
-    const formData = new FormData();
-    formData.append('image', file);
-
-    setUploadingImage(true);
-    try {
-      const res = await fetch(`${API_V2_BASE_URL}/upload-image`, {
-        method: 'POST',
-        body: formData 
-      });
-      const data = await res.json();
-      if (data.success) {
-        setCustomDescription(prev => prev + `\n<br /><img src="${API_BASE_URL}${data.url}" alt="Problem Image" style="max-width: 100%; border-radius: 8px;" />\n<br />`);
-        toast.success("Image uploaded & appended to description!");
-      } else {
-        toast.error("Image upload failed.");
-      }
-    } catch (err) {
-      toast.error("Image upload failed.");
-    } finally {
-      setUploadingImage(false);
-      e.target.value = ''; 
-    }
-  };
 
   const addCustomProblem = async () => {
     if (!id || !session || !customTitle.trim()) return toast.error('Enter a title for your custom problem.');
@@ -178,7 +166,11 @@ export default function ContestEditPage() {
           }
         })
       });
-      const data = await res.json();
+
+      const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
+
       if (!res.ok) return toast.error(data.error || 'Could not add custom problem');
       
       setCustomTitle('');
@@ -188,11 +180,39 @@ export default function ContestEditPage() {
     } catch (e: any) { toast.error(e.message || 'Custom add failed'); }
   };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    const formData = new FormData();
+    formData.append('image', file);
+
+    setUploadingImage(true);
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/upload-image`, {
+        method: 'POST',
+        body: formData 
+      });
+      const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
+      if (data.success) {
+        setCustomDescription(prev => prev + `\n<br /><img src="${API_BASE_URL}${data.url}" alt="Problem Image" style="max-width: 100%; border-radius: 8px;" />\n<br />`);
+        toast.success("Image uploaded & appended to description!");
+      } else {
+        toast.error("Image upload failed.");
+      }
+    } catch (err) {
+      toast.error("Image upload failed.");
+    } finally {
+      setUploadingImage(false);
+      e.target.value = ''; 
+    }
+  };
+
   async function replaceProblem(problemId: string) {
     const code = prompt('Enter new problem code (e.g. 1500A):');
     if (!code) return;
     try {
-      // 👉 FIXED: Strip spacing here too!
       const cleanCode = code.replace(/\s+/g, '').toUpperCase();
       const p = await lookupProblem(newProblemPlatform, cleanCode);
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, {
@@ -200,7 +220,9 @@ export default function ContestEditPage() {
         headers: viewerHeaders(session),
         body: JSON.stringify(p)
       });
-      const data = await res.json();
+      const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
       if (!res.ok) return toast.error(data.error || 'Could not replace problem');
       setContest(data);
       toast.success('Problem replaced successfully!');
@@ -214,7 +236,9 @@ export default function ContestEditPage() {
         method: 'DELETE',
         headers: viewerHeaders(session)
       });
-      const data = await res.json();
+      const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
       if (!res.ok) return toast.error(data.error || 'Could not remove problem');
       setContest(data);
       toast.success('Problem removed!');
@@ -228,7 +252,9 @@ export default function ContestEditPage() {
         headers: viewerHeaders(session),
         body: JSON.stringify({ direction })
       });
-      const data = await res.json();
+      const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
       if (!res.ok) return toast.error(data.error || 'Could not reorder problem');
       setContest(data);
       toast.success('Reordered successfully!');
@@ -246,7 +272,9 @@ export default function ContestEditPage() {
       });
       if (res.ok) router.push('/contests');
       else {
-        const data = await res.json();
+        const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
         toast.error(data.error || 'Could not delete contest');
       }
     } catch (e: any) { toast.error(e.message || 'Could not delete contest'); }

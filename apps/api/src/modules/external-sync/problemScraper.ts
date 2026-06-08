@@ -1,12 +1,14 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { extractProblemFromTextOrImage } from '../ai/aiService';
+
 export interface ScrapedProblem {
   title: string;
   descriptionHtml: string; 
   testcases: { input: string; expectedOutput: string }[];
   platform: 'CODEFORCES' | 'LEETCODE' | 'OTHER';
   originalUrl: string;
+  requiresRedirect?: boolean;
 }
 
 export async function scrapeProblemFromUrl(url: string) {
@@ -22,14 +24,13 @@ export async function scrapeProblemFromUrl(url: string) {
     return { ...genericData, success: true, requiresRedirect: false };
 
   } catch (error) {
-    console.error(`[Scraper] Full extraction failed for ${url}, using AI fallback.`);
+    console.error(`[Scraper] Full extraction failed for ${url}, enforcing redirect.`);
     
-    // 3. Fallback: Return a structure that tells the frontend to redirect
+    // 3. Fallback: Tells frontend to use `window.open` external link
     return { 
       title: 'External Platform Problem',
       descriptionHtml: `<div style="text-align:center; padding: 20px;">
-        <p>Problem description could not be extracted automatically.</p>
-        <a href="${url}" target="_blank" style="padding: 10px 15px; background: #38bdf8; color: white; border-radius: 6px; text-decoration: none;">View Original Problem ↗</a>
+        <p>Problem description could not be scraped. Submitting will redirect you.</p>
       </div>`,
       testcases: [],
       platform: 'OTHER' as const,
@@ -78,17 +79,18 @@ async function scrapeCodeforces(url: string): Promise<ScrapedProblem> {
       descriptionHtml,
       testcases,
       platform: 'CODEFORCES',
-      originalUrl: url
+      originalUrl: url,
+      requiresRedirect: false
     };
   } catch (error) {
     console.error('[Scraper] Codeforces extraction failed:', error);
-    // 👉 FALLBACK INSTEAD OF ERROR
     return {
       title: 'Codeforces Problem',
-      descriptionHtml: `<div style="text-align:center; padding: 20px;"><h3>Problem description could not be extracted automatically.</h3><p>Please view the full description and test cases directly on Codeforces.</p><br/><a href="${url}" target="_blank" style="padding: 10px 15px; background: #3b82f6; color: white; border-radius: 6px; text-decoration: none;">View Original Problem ↗</a></div>`,
+      descriptionHtml: `<div style="text-align:center; padding: 20px;"><h3>Cloudflare Blocked Request</h3><p>Please view the full description and test cases directly on Codeforces.</p></div>`,
       testcases: [],
       platform: 'CODEFORCES',
-      originalUrl: url
+      originalUrl: url,
+      requiresRedirect: true
     };
   }
 }
@@ -123,17 +125,18 @@ async function scrapeGenericPlatform(url: string): Promise<ScrapedProblem> {
       descriptionHtml: `<h3>${title}</h3><div style="margin-top: 15px;">${descriptionHtml}</div>`,
       testcases,
       platform: 'OTHER',
-      originalUrl: url
+      originalUrl: url,
+      requiresRedirect: false
     };
   } catch (error) {
     console.warn(`[Scraper] Generic extraction failed for ${url}. Using graceful fallback.`);
-    // 👉 FALLBACK INSTEAD OF ERROR
     return {
       title: 'External Problem',
-      descriptionHtml: `<div style="text-align:center; padding: 20px;"><h3>Problem description could not be extracted automatically.</h3><p>Please read the problem statement on the original platform.</p><br/><a href="${url}" target="_blank" style="padding: 10px 15px; background: #3b82f6; color: white; border-radius: 6px; text-decoration: none;">View Original Problem ↗</a></div>`,
+      descriptionHtml: `<div style="text-align:center; padding: 20px;"><h3>Scraping Blocked</h3><p>Please read the problem statement on the original platform.</p></div>`,
       testcases: [],
       platform: 'OTHER',
-      originalUrl: url
+      originalUrl: url,
+      requiresRedirect: true
     };
   }
 }

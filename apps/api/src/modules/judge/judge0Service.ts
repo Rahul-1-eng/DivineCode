@@ -1,7 +1,7 @@
 import { CheckerType, SubmissionStatus, Verdict } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
-import { analyzeSubmissionLogic } from '../ai/aiService';
+import { analyzeSubmissionLogic, generateToughTestCases } from '../ai/aiService';
 
 const WANDBOX_URL = 'https://wandbox.org/api/compile.json';
 
@@ -147,8 +147,20 @@ export async function judgeQueuedSubmission(submissionId: string) {
     return { submission: judged, standings: null };
   }
 
-  const testcases = submission.problem?.testcases || [];
+  let testcases = submission.problem?.testcases || [];
   
+  // 👉 DYNAMIC AI CUSTOM TESTCASE GENERATOR 
+  if (testcases.length === 0 && submission.problem) {
+    const descriptionForAi = submission.contestProblem?.customDescription || submission.problem.description || submission.contestProblem?.titleSnapshot || '';
+    if (descriptionForAi) {
+      await prisma.submission.update({ where: { id: submission.id }, data: { status: 'RUNNING', judgeMessage: 'Generating dynamic test cases via AI...' } });
+      const aiCases = await generateToughTestCases(descriptionForAi);
+      if (aiCases && aiCases.length > 0) {
+         testcases = aiCases.map((tc: any, i: number) => ({ id: `ai-${i}`, input: tc.input, expectedOutput: tc.expectedOutput })) as any;
+      }
+    }
+  }
+
   if (testcases.length === 0) {
     const res = await submitToWandbox({ sourceCode: submission.code, language: submission.language, stdin: "1\n" });
     const verdict = res.status === 'ACCEPTED' ? Verdict.ACCEPTED : Verdict.RUNTIME_ERROR;
@@ -194,7 +206,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
   await finalizeVerdict(judged.id, finalVerdict);
   const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
   
-  // 👉 FIXED: Ensures AI Analysis receives Custom Rich descriptions/URLs if missing from problem 
   if (finalVerdict === Verdict.ACCEPTED && submission.problem) {
     const descriptionForAi = submission.contestProblem?.customDescription || submission.problem.description || submission.contestProblem?.titleSnapshot || 'No description available.';
     analyzeSubmissionLogic(judged.id, descriptionForAi, submission.code)

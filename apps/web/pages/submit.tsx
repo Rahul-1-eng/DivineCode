@@ -34,8 +34,7 @@ export default function SubmitPage() {
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [verdict, setVerdict] = useState<any>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [executing, setExecuting] = useState(false);
-  const [activeTab, setActiveTab] = useState<'input' | 'output' | 'submit'>('input');
+  const [timeLeft, setTimeLeft] = useState(120); // 2 minute default timer for MCQs
   
   useEffect(() => {
     if (!contestId || status === 'loading') return;
@@ -53,10 +52,28 @@ export default function SubmitPage() {
       .catch(() => null);
   }, [contestId, problemId, session, status]);
 
-const isMCQ = !!problem?.interviewQuestionId;
-  const requiresRedirect = problem?.requiresRedirect === true;
+  const isMCQ = !!problem?.interviewQuestionId;
+  const requiresRedirect = problem?.requiresRedirect === true || problem?.platform === 'OTHER';
+
+  // MCQ Timer Logic
+  useEffect(() => {
+    if (isMCQ && timeLeft > 0) {
+      const timer = setTimeout(() => setTimeLeft(prev => prev - 1), 1000);
+      return () => clearTimeout(timer);
+    } else if (isMCQ && timeLeft === 0 && !submitting && !verdict) {
+      toast.error("Time's up!");
+      submitCode();
+    }
+  }, [isMCQ, timeLeft, submitting, verdict]);
 
   async function submitCode() {
+    // 👉 External Platform Redirection Logic
+    if (requiresRedirect && problem?.externalUrl) {
+       toast.success("Redirecting to external platform...");
+       window.open(problem.externalUrl, '_blank');
+       return;
+    }
+
     setSubmitting(true);
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${contestId}/submissions`, { 
@@ -69,8 +86,10 @@ const isMCQ = !!problem?.interviewQuestionId;
          const judge = await fetch(`${API_V2_BASE_URL}/submissions/${data.id}/judge?wait=true`, { method: 'POST', headers: viewerHeaders(session) });
          const jData = await judge.json();
          setVerdict({ verdict: jData.submission.verdict, message: jData.submission.judgeMessage, testResults: jData.testResults });
+      } else {
+         toast.error(data.error || "Submission failed");
       }
-    } catch (e) { toast.error("Submission failed"); }
+    } catch (e) { toast.error("Network Error during submission"); }
     finally { setSubmitting(false); }
   }
 
@@ -81,7 +100,11 @@ const isMCQ = !!problem?.interviewQuestionId;
       <Toaster />
       <div style={splitLayout}>
         <aside style={leftPanelStyle}>
-           <h1>{problem?.title || 'Problem Description'}</h1>
+           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+             <h1>{problem?.title || 'Problem Description'}</h1>
+             {isMCQ && <div style={{ color: timeLeft < 30 ? '#ef4444' : '#fbbf24', fontWeight: 'bold' }}>⏳ {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</div>}
+           </div>
+           
            <div style={problemArea}>
              {isMCQ ? (
                 <div>
@@ -95,17 +118,26 @@ const isMCQ = !!problem?.interviewQuestionId;
              ) : (
                 <div dangerouslySetInnerHTML={{ __html: proxiedHtml || problem?.customDescription || problem?.description || problem?.problem?.description || 'No description provided.' }} />
              )}
+             
+             {requiresRedirect && (
+               <div style={{ marginTop: 20, padding: 15, background: 'rgba(56, 189, 248, 0.1)', border: '1px solid #38bdf8', borderRadius: 8, textAlign: 'center' }}>
+                 <p style={{ color: '#38bdf8', margin: '0 0 10px 0' }}>This is an external problem.</p>
+                 <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#fff', textDecoration: 'underline' }}>View Original Problem ↗</a>
+               </div>
+             )}
            </div>
         </aside>
 
         <section style={rightPanelStyle}>
-           {!isMCQ && <textarea value={code} onChange={(e) => setCode(e.target.value)} style={editor} />}
+           {!isMCQ && !requiresRedirect && <textarea value={code} onChange={(e) => setCode(e.target.value)} style={editor} />}
+           
            <button onClick={submitCode} style={submitBtn} disabled={submitting}>
-             {submitting ? 'Judging...' : 'Submit'}
+             {requiresRedirect ? 'Open Platform to Submit ↗' : submitting ? 'Judging...' : 'Submit'}
            </button>
+           
            {verdict && (
-             <div style={verdictBox}>
-               <h3>{verdict.verdict}</h3>
+             <div style={{...verdictBox, borderColor: verdict.verdict === 'ACCEPTED' ? '#22c55e' : '#ef4444'}}>
+               <h3 style={{ color: verdict.verdict === 'ACCEPTED' ? '#22c55e' : '#ef4444' }}>{verdict.verdict}</h3>
                <p>{verdict.message}</p>
              </div>
            )}
@@ -120,8 +152,8 @@ const splitLayout: CSSProperties = { display: 'flex', gap: 20 };
 const leftPanelStyle: CSSProperties = { flex: 1 };
 const rightPanelStyle: CSSProperties = { flex: 1, display: 'flex', flexDirection: 'column' };
 const problemArea: CSSProperties = { background: '#0f172a', padding: 20, borderRadius: 12 };
-const editor: CSSProperties = { height: '300px', background: '#020617', color: '#fff', width: '100%', marginTop: 20 };
-const submitBtn: CSSProperties = { background: '#38bdf8', padding: 10, border: 'none', cursor: 'pointer', marginTop: 10 };
-const verdictBox: CSSProperties = { padding: 10, border: '1px solid #334155', marginTop: 10 };
-const optionStyle: CSSProperties = { display: 'block', margin: '5px 0', padding: 10, background: '#1e293b', border: 'none', color: '#fff' };
-const selectedOptionStyle: CSSProperties = { ...optionStyle, background: '#38bdf8' };
+const editor: CSSProperties = { height: '300px', background: '#020617', color: '#fff', width: '100%', marginTop: 20, padding: 10, fontFamily: 'monospace', borderRadius: 8, border: '1px solid #334155' };
+const submitBtn: CSSProperties = { background: '#38bdf8', color: '#020617', padding: 12, border: 'none', cursor: 'pointer', marginTop: 10, borderRadius: 8, fontWeight: 'bold', fontSize: 16 };
+const verdictBox: CSSProperties = { padding: 15, border: '1px solid #334155', marginTop: 15, borderRadius: 8, background: '#0f172a' };
+const optionStyle: CSSProperties = { display: 'block', margin: '8px 0', padding: 12, background: '#1e293b', border: '1px solid #334155', color: '#fff', borderRadius: 8, cursor: 'pointer', textAlign: 'left', width: '100%' };
+const selectedOptionStyle: CSSProperties = { ...optionStyle, background: 'rgba(56, 189, 248, 0.2)', borderColor: '#38bdf8' };

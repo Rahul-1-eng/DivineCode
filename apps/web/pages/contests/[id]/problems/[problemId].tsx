@@ -70,7 +70,6 @@ export default function ContestProblemWorkspace() {
   const [mcqData, setMcqData] = useState<any>(null);
   const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
 
-  // 👉 WebRTC and Chat Refs
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -132,7 +131,6 @@ export default function ContestProblemWorkspace() {
     }
   }, [isMCQ, problem, session]);
 
-  // 👉 WebRTC Toggle Logic
   const toggleVoice = async () => {
     if (!contest?.viewerMember?.teamId) return toast.error("You must be in a team to use voice chat.");
 
@@ -188,7 +186,6 @@ export default function ContestProblemWorkspace() {
       }
     });
 
-    // 👉 WebRTC Socket Handlers
     socket.on('user-joined-voice', async (peerId) => {
       if (!localStreamRef.current) return;
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
@@ -513,19 +510,39 @@ export default function ContestProblemWorkspace() {
         </div>
       )}
 
+      {/* Codeforces Sync Modal */}
+      {showCfModal && (
+        <div style={modalOverlay}>
+          <div style={modalContent}>
+            <h2 style={{ margin: '0 0 15px', color: '#fff' }}>Codeforces Submission</h2>
+            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 20 }}>
+              This is a live Codeforces problem. Submit your solution directly on their platform. Once accepted, click below to sync your points back here.
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{...primaryBtn, flex: 1, background: '#38bdf8', color: '#0f172a'}}>1. Submit on Codeforces</a>
+              <button onClick={handleSyncCodeforces} disabled={isSyncing} style={{...primaryBtn, flex: 1, background: '#10b981'}}>{isSyncing ? 'Syncing...' : '2. Sync Accepted Result'}</button>
+            </div>
+            <button onClick={() => setShowCfModal(false)} style={{...ghostBtn, width: '100%', marginTop: 10}}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       <header style={headerBar}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
           <button onClick={() => router.push(`/contests/${id}`)} style={btnDark}>← Standings</button>
           
           <strong style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
             {problem.titleSnapshot}
+            {/* 👉 AI URL Avatar Fixed! */}
             {problem.externalUrl && (
-              <button 
-                onClick={() => window.open(problem.externalUrl, '_blank')} 
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0 }} 
+              <a 
+                href={problem.externalUrl} 
+                target="_blank" 
+                rel="noreferrer" 
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0, textDecoration: 'none' }} 
                 title="Go to Original Platform">
                 🤖
-              </button>
+              </a>
             )}
           </strong>
         </div>
@@ -549,43 +566,29 @@ export default function ContestProblemWorkspace() {
 
       <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
         
-        {/* LEFT PANE */}
+       {/* LEFT PANE */}
         <section style={{ width: '40%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #1e293b', background: '#0f172a' }}>
-          <div style={paneHeader}>Problem Description</div>
-          <div style={{ flex: 1, padding: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+          <div style={paneHeader}>
+            Problem Description
+            {problem?.externalUrl && (
+              <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ float: 'right', textDecoration: 'none', fontSize: 16 }} title="View Original Problem">↗</a>
+            )}
+          </div>
+          <div style={{ flex: 1, padding: 20, overflowY: 'auto', color: '#e2e8f0', fontSize: '15px', lineHeight: 1.6 }}>
             {isMCQ ? (
               <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8', marginTop: '10vh' }}>
-                <svg width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ margin: '0 auto 20px', color: '#38bdf8' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                 <h2 style={{ color: '#eef2ff' }}>Theory Assessment</h2>
-                <p>Read the question carefully and select the correct option(s) in the workspace on the right.</p>
-                <div style={{ marginTop: 30, fontSize: 24, fontWeight: 'bold', color: '#fbbf24', background: '#1e293b', padding: '10px 20px', borderRadius: 8, display: 'inline-block' }}>
-                   {timer.text}
-                </div>
+                <div style={{ marginTop: 30, fontSize: 24, fontWeight: 'bold', color: '#fbbf24' }}>{timer.text}</div>
               </div>
             ) : (
-              <>
-                <div style={{ padding: 20, flex: 1, overflowY: 'auto' }}>
-                  {/* Priority 1: Always show internal description if it exists */}
-                  {(problem?.problem?.description || problem?.customDescription) ? (
-                      <div dangerouslySetInnerHTML={{ __html: problem.customDescription || problem.problem?.description }} />
-                  ) : problem?.externalUrl ? (
-                      /* Priority 2: Fallback to external URL iframe/links if no internal description */
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                          <iframe src={problemIframeUrl} style={{...iframeStyle, height: '60vh'}} title="Problem Statement" />
-                          <div style={{ padding: '10px', background: '#1e293b', textAlign: 'center' }}>
-                              <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: 'bold' }}>
-                                ↗ View Original Problem
-                              </a>
-                          </div>
-                      </div>
-                  ) : (
-                      /* Priority 3: Final fallback */
-                      <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8' }}>
-                        No description provided for this problem.
-                      </div>
-                  )}
-                </div>
-              </>
+               (problem?.customDescription || problem?.problem?.description || problem?.description || problem?.descriptionHtml) ? (
+                  <div dangerouslySetInnerHTML={{ __html: problem.customDescription || problem.problem?.description || problem.description || problem.descriptionHtml }} />
+               ) : (
+                  <div style={{ textAlign: 'center', padding: 20 }}>
+                     <p>Problem hosted externally.</p>
+                     <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={primaryBtn}>View on Platform ↗</a>
+                  </div>
+               )
             )}
           </div>
         </section>
