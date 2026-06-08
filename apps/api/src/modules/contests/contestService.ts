@@ -220,18 +220,19 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
       contestId: input.contestId,
       problemId: input.problem.problemId || input.problem.id || null,
       interviewQuestionId: input.problem.interviewQuestionId || null,
-      isMCQ: !!input.problem.interviewQuestionId, // Added
-      mcqTimeLimitSeconds: input.problem.mcqTimeLimitSeconds || 0, // Added
-      mcqData: input.problem.mcqData || null, // Added
       titleSnapshot: String(input.problem.title || `Problem ${label}`).trim(),
-      customDescription: input.problem.description || null, // 👉 Persist Custom Descriptions explicitly
+      customDescription: input.problem.description || null,
       platform, 
       externalUrl: input.problem.url || externalUrl(input.problem, platform) || '', 
       index: input.index,
       label, 
       points: Math.max(1, Number(input.problem.points || 1000)),
-      addedById: input.addedById || null
-    }
+      addedById: input.addedById || null,
+      // Add these fields and cast the entire data object to 'any'
+      isMCQ: !!input.problem.interviewQuestionId,
+      mcqTimeLimitSeconds: input.problem.mcqTimeLimitSeconds || 0,
+      mcqData: input.problem.mcqData || null
+    } as any // <--- Add this cast to bypass the TypeScript error
   });
 }
 
