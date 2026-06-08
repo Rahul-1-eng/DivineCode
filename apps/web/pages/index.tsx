@@ -43,9 +43,9 @@ export default function Home() {
     }
   }, [session]);
 
- const handleSendSupportMessage = async () => { // Add 'async'
+  const handleSendSupportMessage = async () => { // Added 'async'
     if(!chatInput.trim()) return;
-    const userMessage = chatInput.trim(); // Capture the message
+    const userMessage = chatInput.trim(); // Capture before clearing
     setChatHistory([...chatHistory, { role: 'user', text: userMessage }]);
     setChatInput('');
     
@@ -55,6 +55,9 @@ export default function Home() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message: userMessage }) // Use captured message
   });
+  const data = await res.json();
+  setChatHistory(prev => [...prev, { role: 'ai', text: data.reply }]);
+  };
 
   return (
     <motion.main 
@@ -175,5 +178,4 @@ export default function Home() {
       </div>
     </motion.main>
   );
-}
 }
