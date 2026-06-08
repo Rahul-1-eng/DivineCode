@@ -26,7 +26,8 @@ export type ProblemInput = {
   mcqData?: any;
   platform?: string; code?: string; contestCode?: string;
   problemIndex?: string; externalId?: string; url?: string; points?: number;
-  testcases?: any[]; // <--- ADD THIS LINE
+  testcases?: any[];
+  imageUrl?: string; // <--- ADD THIS
 };
 
 export type CreateContestInput = {
@@ -223,6 +224,8 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
       interviewQuestionId: input.problem.interviewQuestionId || null,
       titleSnapshot: String(input.problem.title || `Problem ${label}`).trim(),
       customDescription: input.problem.description || null,
+      // Add the imageUrl field to the Prisma call
+      imageUrl: (input.problem as any).imageUrl || null, 
       platform, 
       externalUrl: input.problem.url || externalUrl(input.problem, platform) || '', 
       index: input.index,
@@ -539,11 +542,13 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
   });
   if (!contest) throw new Error('Contest not found');
 
+  // 1. Initialize variables at the top of the function scope
   let enrichedProblem = { ...problem };
   let scrapedTestcases: any[] = [];
-  
+  let finalImageUrl = problem.imageUrl || null;
   let finalDescription = problem.description || problem.title || 'External Problem';
 
+  // 2. Handle URL scraping
   if (problem.url && !problem.id && !problem.description) {
     try {
       const scraped = await scrapeProblemFromUrl(problem.url);
@@ -554,7 +559,7 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
       const aiGeneratedCases = await generateToughTestCases(scraped.descriptionHtml);
       scrapedTestcases = [...scraped.testcases, ...aiGeneratedCases];
     } catch (err) {
-      console.warn("Scraping or AI failed, applying URL fallback.");
+      console.warn("Scraping failed, applying URL fallback.");
       finalDescription = `<h3>External Problem</h3><p>View statement at: <a href="${problem.url}" target="_blank">${problem.url}</a></p>`;
     }
   }
@@ -576,13 +581,14 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
     finalInterviewQuestionId = newMcq.id;
   }
 
+  // 3. Database Transaction
   await prisma.$transaction(async (tx) => {
-    // 1. Create Problem Row
     const created = await createContestProblemRow(tx, { 
       contestId, 
       problem: { 
         ...enrichedProblem, 
         description: finalDescription, 
+        imageUrl: finalImageUrl,
         interviewQuestionId: finalInterviewQuestionId,
         mcqTimeLimitSeconds: problem.mcqTimeLimitSeconds || 0,
         mcqData: problem.mcqData || null
@@ -591,12 +597,11 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
       addedById: actorId || null 
     });
 
-    // 2. Save Testcases (Inside transaction, using 'created' and 'tx')
     const allTestcases = [...(problem.testcases || []), ...scrapedTestcases];
     if (allTestcases.length > 0) {
         await tx.testcase.createMany({
            data: allTestcases.map((tc: any, idx: number) => ({
-             problemId: created.id, // Linked to the newly created problem
+             problemId: created.id,
              input: tc.input || '',
              expectedOutput: tc.expectedOutput || '',
              order: idx + 1,
@@ -604,10 +609,6 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
            }))
         });
     }
-
-    await tx.auditLog.create({ 
-      data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_ADD', entityType: 'ContestProblem', entityId: created.id, after: created as any } 
-    });
   });
 
   void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));

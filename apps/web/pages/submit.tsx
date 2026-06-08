@@ -43,6 +43,12 @@ export default function SubmitPage() {
       .then((data) => { 
         setContest(data); 
         const p = data.problems?.find((p: any) => p.id === problemId);
+        
+        // 👉 FIX: Map the backend's 'interviewQuestion' to frontend's 'mcqData'
+        if (p && p.interviewQuestion) {
+          p.mcqData = p.interviewQuestion;
+        }
+        
         setProblem(p);
         if (p?.externalUrl && p?.requiresRedirect) {
            fetch(`${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(p.externalUrl)}`)
@@ -100,48 +106,43 @@ export default function SubmitPage() {
     <main style={page}>
       <Toaster />
       <div style={splitLayout}>
-        <aside style={leftPanelStyle}>
-           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-             <h1>{problem?.title || 'Problem Description'}</h1>
-             {isMCQ && <div style={{ color: timeLeft < 30 ? '#ef4444' : '#fbbf24', fontWeight: 'bold' }}>⏳ {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</div>}
-           </div>
-           
-           <div style={problemArea}>
-             {isMCQ ? (
-                <div>
-                  <h3>{problem?.mcqData?.prompt || 'Loading MCQ...'}</h3>
-                  {problem?.mcqData?.options?.map((opt: string, i: number) => (
-                     <button key={i} onClick={() => setSelectedOption(i)} style={selectedOption === i ? selectedOptionStyle : optionStyle}>{opt}</button>
-                  ))}
-                </div>
-            ) : problem?.imageUrl ? (
-                <img src={problem.imageUrl} alt="Problem" style={{ width: '100%', borderRadius: 8 }} />
-             ) : (
-                <div dangerouslySetInnerHTML={{ __html: proxiedHtml || problem?.customDescription || problem?.description || problem?.problem?.description || 'No description provided.' }} />
-             )}
-             
-             {requiresRedirect && (
-               <div style={{ marginTop: 20, padding: 15, background: 'rgba(56, 189, 248, 0.1)', border: '1px solid #38bdf8', borderRadius: 8, textAlign: 'center' }}>
-                 <p style={{ color: '#38bdf8', margin: '0 0 10px 0' }}>This is an external problem.</p>
-                 <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#fff', textDecoration: 'underline' }}>View Original Problem ↗</a>
-               </div>
-             )}
-           </div>
-        </aside>
+       <aside style={leftPanelStyle}>
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <h1>{problem?.title || 'Problem Description'}</h1>
+  </div>
+   
+  <div style={problemArea}>
+    {/* 1. Display Prompt/Description */}
+    <h2 style={{ color: '#fff' }}>{isMCQ ? problem?.mcqData?.prompt : 'Description'}</h2>
+    
+    {!isMCQ && (
+       <div dangerouslySetInnerHTML={{ __html: proxiedHtml || problem?.customDescription || problem?.description || problem?.problem?.description || 'No description provided.' }} />
+    )}
 
- <section style={rightPanelStyle}>
+    {/* 2. Display Image if exists for both MCQ and Coding */}
+    {problem?.imageUrl && (
+      <img src={problem.imageUrl} alt="Problem" style={{ width: '100%', borderRadius: 8, marginTop: 15 }} />
+    )}
+    
+    {requiresRedirect && (
+      <div style={{ marginTop: 20, padding: 15, background: 'rgba(56, 189, 248, 0.1)', border: '1px solid #38bdf8', borderRadius: 8, textAlign: 'center' }}>
+        <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ color: '#fff', textDecoration: 'underline' }}>View Original Problem ↗</a>
+      </div>
+    )}
+  </div>
+</aside>
+
+<section style={rightPanelStyle}>
   <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
     {isMCQ ? (
       <div style={{ padding: '20px', background: '#020617', borderRadius: '8px', border: '1px solid #334155' }}>
-        <h3 style={{ color: '#67e8f9' }}>MCQ Submission Section</h3>
-        <p style={{ color: '#94a3b8' }}>Select your answer from the options on the left.</p>
-        <div style={{ marginTop: '20px' }}>
-            {selectedOption !== null && (
-                <div style={{ padding: '10px', background: '#064e3b', color: '#34d399', borderRadius: '4px' }}>
-                    Option {String.fromCharCode(65 + selectedOption)} Selected
-                </div>
-            )}
-        </div>
+        <h3 style={{ color: '#67e8f9', display: 'flex', justifyContent: 'space-between' }}>
+            Select Answer 
+            <span style={{ color: timeLeft < 30 ? '#ef4444' : '#fbbf24' }}>⏳ {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</span>
+        </h3>
+        {problem?.mcqData?.options?.map((opt: string, i: number) => (
+           <button key={i} onClick={() => setSelectedOption(i)} style={selectedOption === i ? selectedOptionStyle : optionStyle}>{opt}</button>
+        ))}
       </div>
     ) : (
       <div style={{ flex: 1 }}>

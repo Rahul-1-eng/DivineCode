@@ -82,18 +82,14 @@ export default function GlobalNavigationAndMashupCreator() {
       
     } else if (activeTab === 'CUSTOM') {
       if (!customTitle) return toast.error('Enter custom title');
-      // Ensure testcases are included in the payload explicitly
       const validCases = customCases.filter(c => c.input.trim() !== '' && c.expectedOutput.trim() !== '');
-      payload.customData = { 
-          title: customTitle, 
-          description: customDesc, 
-          testcases: validCases,
-          imageUrl: imageBase64 || null 
-      };
-      payload.testcases = validCases; // Add this line to ensure the backend receives it
-      payload.displayTitle = customTitle;
       
-    } else {
+      // Flatten the structure
+      payload.title = customTitle;
+      payload.description = customDesc;
+      payload.imageUrl = imageBase64 || null;
+      payload.testcases = validCases;
+      payload.displayTitle = customTitle;} else {
       if (!mcqPrompt || mcqCorrect.length === 0) return toast.error('Enter question parameters');
       payload.isMCQ = true;
       payload.mcqTimeLimitSeconds = mcqTimeLimit;
