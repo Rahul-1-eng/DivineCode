@@ -98,7 +98,6 @@ export function mountV2Routes(app: Express, io: Server) {
       } catch (err) {}
     });
 
-    // WebRTC Signaling for Voice Chat
     socket.on('join-voice', (teamId) => {
       socket.join(`voice:${teamId}`);
       socket.to(`voice:${teamId}`).emit('user-joined-voice', socket.id);
@@ -121,6 +120,38 @@ export function mountV2Routes(app: Express, io: Server) {
       socket.to(`voice:${teamId}`).emit('user-left-voice', socket.id);
     });
   });
+
+  // 👉 FIXED: The Missing AI Chatbot Route that powers your Avatar
+  router.post('/ai/chat', asyncRoute(async (req, res) => {
+    const { message, history } = req.body;
+    const apiKey = process.env.AI_API_KEY;
+    if (!apiKey) return res.json({ reply: "I am unable to think right now. Please check the AI_API_KEY in the environment variables." });
+
+    try {
+      const contents = [];
+      
+      // Parse history if it was sent by the frontend
+      if (Array.isArray(history)) {
+         history.forEach(msg => {
+            contents.push({
+               role: msg.role === 'user' ? 'user' : 'model',
+               parts: [{ text: msg.text || msg.content || msg.parts?.[0]?.text || '' }]
+            });
+         });
+      }
+      
+      // Append the latest user message
+      contents.push({ role: 'user', parts: [{ text: message || 'Hello' }] });
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const { data } = await axios.post(url, { contents });
+      
+      res.json({ reply: data.candidates[0].content.parts[0].text });
+    } catch (e: any) {
+      console.error('[AI Chat] Error:', e.response?.data || e.message);
+      res.json({ reply: "My neural pathways are a bit tangled right now due to a network timeout. Please try asking again!" });
+    }
+  }));
 
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
@@ -178,7 +209,6 @@ export function mountV2Routes(app: Express, io: Server) {
     }
   });
 
-  // 👉 FIXED: Lookup endpoint cleanly replaces spaces out of codes so "800 A" maps to "800A" correctly on your frontend creation table
   router.get('/problems/lookup', asyncRoute(async (req, res) => {
     const { platform, code } = req.query;
     const cleanCode = String(code).replace(/\s+/g, '').toUpperCase();
@@ -270,7 +300,7 @@ export function mountV2Routes(app: Express, io: Server) {
       });
 
       await prisma.contestProblem.create({
-        data: { contestId, interviewQuestionId: newMcq.id, points: 50, titleSnapshot: newMcq.title, index: existingCount, label: nextLabel, platform: 'DIVINECODE' }
+        data: { contestId, interviewQuestionId: newMcq.id, points: 50, titleSnapshot: newMcq.title, index: existingCount, label: nextLabel, platform: 'DIVINECODE', isMCQ: true }
       });
       return res.json({ success: true });
     }
@@ -279,7 +309,15 @@ export function mountV2Routes(app: Express, io: Server) {
       const problem = await prisma.problem.create({
         data: {
           title: customData.title, description: customData.description, platform: 'DIVINECODE', source: 'INTERNAL', problemCode: `CUSTOM-${Date.now()}`, visibility: 'PUBLIC',
-          testcases: { create: (customData.testcases || []).map((c: any, i: number) => ({ input: c.input, expectedOutput: c.output, order: i, isPublic: true, type: 'SAMPLE' })) }
+          testcases: { 
+            create: (customData.testcases || []).map((c: any, i: number) => ({ 
+              input: c.input, 
+              expectedOutput: c.expectedOutput, 
+              order: i, 
+              isPublic: c.isPublic !== false, 
+              type: c.isPublic === false ? 'HIDDEN' : 'SAMPLE' 
+            })) 
+          }
         }
       });
       await prisma.contestProblem.create({
@@ -391,6 +429,8 @@ export function mountV2Routes(app: Express, io: Server) {
   });
   
   app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
+  
+  // Base Routes
   app.use('/api/v2', router);
   app.use('/api/v2/submissions', submissionRouter); 
   app.use('/api/v2/interview', interviewRouter);

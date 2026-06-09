@@ -3,7 +3,7 @@ import { PrismaClient, InterviewTrackType } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-// Helper function to generate thousands of questions per track
+// Helper function to generate 5,000 questions per track
 function generateBatchForTopic(trackId: string, topic: string) {
   const generated = [];
   const companies = ['Google', 'Meta', 'Amazon', 'Microsoft', 'Uber', 'Apple', 'Netflix', 'Palantir', 'Stripe'];
@@ -17,15 +17,15 @@ function generateBatchForTopic(trackId: string, topic: string) {
     { title: 'Core Principles', prompt: 'Which foundational rule strictly governs the implementation of {topic}?', options: ['LIFO', 'FIFO', 'ACID', 'CAP Theorem'], correctIndex: 2 }
   ];
 
-  // 170 loops * 5 templates * 6 tracks = 5,100 generated questions
-  for (let i = 0; i < 170; i++) {
+  // 👉 FIXED: 1,000 loops * 5 templates = 5,000 generated questions per track!
+  for (let i = 0; i < 1000; i++) {
     for (const q of BASE_TEMPLATES) {
       generated.push({
         trackId,
         title: `${q.title} - Variant ${i + 1}`,
         prompt: q.prompt.replace('{topic}', topic),
         options: q.options,
-        correctIndex: q.correctIndex,
+        correctIndices: [q.correctIndex], // Mapped to array for schema validation
         isMultiple: false,
         difficulty: difficulties[Math.floor(Math.random() * difficulties.length)],
         tags: [topic.toLowerCase().replace(/[^a-z0-9]+/g, '-'), 'ai-generated'],
@@ -38,7 +38,7 @@ function generateBatchForTopic(trackId: string, topic: string) {
 }
 
 async function main() {
-  console.log('🌱 Seeding Interview Tracks and 5,000+ Questions...');
+  console.log('🌱 Seeding Interview Tracks and 30,000+ Questions (5,000 per track)...');
 
   // 1. Wipe old data safely to prevent duplicates
   await prisma.interviewQuestion.deleteMany({});
@@ -61,14 +61,14 @@ async function main() {
   const tracks = await prisma.interviewTrack.findMany();
   const getTrackId = (type: InterviewTrackType) => tracks.find(t => t.type === type)!.id;
 
-  // 3. Your Original 9 Hand-crafted Questions (FIXED: difficultyLabel -> difficulty)
+  // 3. Your Original 9 Hand-crafted Questions
   const originalQuestions = [
     {
       trackId: getTrackId(InterviewTrackType.DATABASE),
       title: 'B+ Tree Data Storage',
       prompt: 'In a standard B+ Tree index used by relational databases, where are the actual data pointers or data records strictly located?',
       options: ['Root node only', 'Internal nodes', 'Leaf nodes only', 'Distributed across all nodes'],
-      correctIndex: 2,
+      correctIndices: [2],
       difficulty: 'Hard', 
       isApproved: true
     },
@@ -77,7 +77,7 @@ async function main() {
       title: 'TCP Handshake',
       prompt: 'What is the correct sequence of control flags exchanged during a standard TCP 3-way connection establishment?',
       options: ['SYN, ACK, FIN', 'SYN, SYN-ACK, ACK', 'ACK, SYN, PSH', 'SYN, FIN-ACK, ACK'],
-      correctIndex: 1,
+      correctIndices: [1],
       difficulty: 'Easy',
       isApproved: true
     },
@@ -86,7 +86,7 @@ async function main() {
       title: 'Coffman Deadlock Conditions',
       prompt: 'Which of the following is NOT one of the four necessary Coffman conditions for a deadlock to occur?',
       options: ['Mutual Exclusion', 'Hold and Wait', 'No Preemption', 'Process Starvation'],
-      correctIndex: 3,
+      correctIndices: [3],
       difficulty: 'Medium',
       isApproved: true
     },
@@ -95,7 +95,7 @@ async function main() {
       title: 'Concurrency Mechanisms',
       prompt: 'Which synchronization primitive strictly requires the thread releasing the lock to be the same thread that acquired it?',
       options: ['Binary Semaphore', 'Counting Semaphore', 'Mutex', 'Monitor'],
-      correctIndex: 2,
+      correctIndices: [2],
       difficulty: 'Hard',
       isApproved: true
     },
@@ -104,7 +104,7 @@ async function main() {
       title: 'CAP Theorem',
       prompt: 'According to the CAP Theorem, in the presence of a network partition (P), a distributed system must choose between:',
       options: ['Consistency and Availability', 'Latency and Consistency', 'Availability and Durability', 'Consistency and Redundancy'],
-      correctIndex: 0,
+      correctIndices: [0],
       difficulty: 'Medium',
       isApproved: true
     },
@@ -113,7 +113,7 @@ async function main() {
       title: 'Algorithm Complexity',
       prompt: 'What is the worst-case time complexity of finding a specific element in an unbalanced Binary Search Tree (BST)?',
       options: ['O(1)', 'O(log n)', 'O(n log n)', 'O(n)'],
-      correctIndex: 3,
+      correctIndices: [3],
       difficulty: 'Easy',
       isApproved: true
     },
@@ -122,7 +122,7 @@ async function main() {
       title: 'Polymorphism',
       prompt: 'Method overriding in Object-Oriented Programming is an example of which type of polymorphism?',
       options: ['Compile-time Polymorphism', 'Run-time Polymorphism', 'Ad-hoc Polymorphism', 'Parametric Polymorphism'],
-      correctIndex: 1,
+      correctIndices: [1],
       difficulty: 'Medium',
       isApproved: true
     },
@@ -131,7 +131,7 @@ async function main() {
       title: 'ACID Properties',
       prompt: 'In database transactions, the property that ensures a transaction is either completely executed or not executed at all is known as:',
       options: ['Atomicity', 'Consistency', 'Isolation', 'Durability'],
-      correctIndex: 0,
+      correctIndices: [0],
       difficulty: 'Easy',
       isApproved: true
     },
@@ -140,7 +140,7 @@ async function main() {
       title: 'Subnet Masking',
       prompt: 'Given a subnet mask of 255.255.255.224, what is the maximum number of usable host IP addresses in that subnet?',
       options: ['30', '32', '62', '64'],
-      correctIndex: 0,
+      correctIndices: [0],
       difficulty: 'Expert',
       isApproved: true
     }
@@ -149,11 +149,11 @@ async function main() {
   console.log('✅ Injecting your 9 hand-crafted questions...');
   await prisma.interviewQuestion.createMany({ data: originalQuestions });
 
-  // 4. Generate the 5000+ AI Avatar Questions
+  // 4. Generate the 30,000+ AI Avatar Questions
   let totalQuestions = originalQuestions.length;
   
   for (const track of tracks) {
-    console.log(`⏳ Forging Avatar Bank for: ${track.title}...`);
+    console.log(`⏳ Forging Avatar Bank for: ${track.title} (5000 records)...`);
     const topicName = track.type.toString();
     const batch = generateBatchForTopic(track.id, topicName);
     
@@ -169,4 +169,3 @@ async function main() {
 main()
   .catch(e => { console.error(e); process.exit(1); })
   .finally(async () => { await prisma.$disconnect(); });
-  

@@ -27,7 +27,7 @@ export type ProblemInput = {
   platform?: string; code?: string; contestCode?: string;
   problemIndex?: string; externalId?: string; url?: string; points?: number;
   testcases?: any[];
-  imageUrl?: string; // <--- ADD THIS
+  imageUrl?: string;
 };
 
 export type CreateContestInput = {
@@ -69,7 +69,6 @@ function toPlatform(value: string | undefined) {
 }
 
 function parseCodeforcesCode(problem: ProblemInput) {
-  // 👉 FIXED: Automatically strip spaces so "800 A" becomes "800A"
   const code = String(problem.code || problem.externalId || '').replace(/\s+/g, '').toUpperCase();
   if (problem.contestCode && problem.problemIndex) {
     return { contestCode: String(problem.contestCode).trim(), problemIndex: String(problem.problemIndex).replace(/\s+/g, '').toUpperCase() };
@@ -224,7 +223,6 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
       interviewQuestionId: input.problem.interviewQuestionId || null,
       titleSnapshot: String(input.problem.title || `Problem ${label}`).trim(),
       customDescription: input.problem.description || null,
-      // Add the imageUrl field to the Prisma call
       imageUrl: (input.problem as any).imageUrl || null, 
       platform, 
       externalUrl: input.problem.url || externalUrl(input.problem, platform) || '', 
@@ -232,11 +230,10 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
       label, 
       points: Math.max(1, Number(input.problem.points || 1000)),
       addedById: input.addedById || null,
-      // Add these fields and cast the entire data object to 'any'
       isMCQ: !!input.problem.interviewQuestionId,
       mcqTimeLimitSeconds: input.problem.mcqTimeLimitSeconds || 0,
       mcqData: input.problem.mcqData || null
-    } as any // <--- Add this cast to bypass the TypeScript error
+    } as any 
   });
 }
 
@@ -248,14 +245,15 @@ export async function loadContestForViewer(contestId: string) {
         createdBy: true,
         participants: {
           include: { user: true, externalHandle: true, team: true },
-          orderBy: { joinedAt: 'asc' }
+          // 👉 FIXED: Replaced 'joinedAt' with 'createdAt' so Prisma doesn't crash on Return!
+          orderBy: { createdAt: 'asc' } 
         },
         problems: {
           include: {
             problem: {
               include: { editorial: true, officialSolutions: true, testcases: true }
             },
-            interviewQuestion: true // 👉 ADDED THIS INCLUSION
+            interviewQuestion: true
           },
           orderBy: { index: 'asc' }
         },
@@ -299,18 +297,14 @@ export async function registerForContestV2(contestId: string, input: MemberInput
     let teamId = null;
     let isPending = false;
     
-    // TEAM INVITE LOGIC INTEGRATION
     if (memberInput.teamInviteCode) {
       const team = await tx.contestTeam.findUnique({ where: { inviteCode: memberInput.teamInviteCode } });
       if (!team || team.contestId !== contestId) throw new Error("Invalid Team Invite Code");
       teamId = team.id;
       memberInput.teamName = team.name;
     } else if (memberInput.teamName && memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo') {
-       // Logic: New request to join a team requires approval.
-       // We create the participant but set isOfficial to false (Pending).
        isPending = true;
     } else {
-       // Regular join logic for individuals
        const isRealTeam = memberInput.teamName && memberInput.teamName !== 'Individuals';
        if (isRealTeam) {
          let team = await tx.contestTeam.findFirst({ where: { contestId, name: memberInput.teamName } });
@@ -325,7 +319,7 @@ export async function registerForContestV2(contestId: string, input: MemberInput
         displayName: memberInput.displayName!, teamName: memberInput.teamName,
         teamId: teamId, 
         role: ContestParticipantRole.PARTICIPANT, 
-        isOfficial: !isPending // Set to false if pending
+        isOfficial: !isPending 
       }
     });
   });
@@ -400,27 +394,25 @@ export async function createContestV2(input: CreateContestInput) {
       });
     }
 
-   // REPLACE THE LOOP INSIDE createContestV2
     for (const [index, problem] of problems.entries()) {
-      // 1. Prepare data just like we do in addContestProblemV2
       const preparedProblem = {
         ...problem,
         description: problem.description || 'No description provided.',
         imageUrl: problem.imageUrl || null
       };
 
-      await createContestProblemRow(tx, { 
+      const cpRow = await createContestProblemRow(tx, { 
         contestId: created.id, 
         problem: preparedProblem, 
         index, 
         addedById: owner.id 
       });
 
-      // 2. If testcases exist, save them
-      if (problem.testcases && problem.testcases.length > 0) {
+      // 👉 FIXED: Safely link testcases to `problemId` (not `created.id` which caused FK crashes)
+      if (problem.problemId && problem.testcases && problem.testcases.length > 0) {
         await tx.testcase.createMany({
           data: problem.testcases.map((tc: any, idx: number) => ({
-            problemId: created.id, // Ensure this maps to the correct problem
+            problemId: problem.problemId!, 
             input: tc.input || '',
             expectedOutput: tc.expectedOutput || '',
             order: idx + 1,
@@ -568,13 +560,11 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
   });
   if (!contest) throw new Error('Contest not found');
 
-  // 1. Initialize variables at the top of the function scope
   let enrichedProblem = { ...problem };
   let scrapedTestcases: any[] = [];
   let finalImageUrl = problem.imageUrl || null;
   let finalDescription = problem.description || problem.title || 'External Problem';
 
-  // 2. Handle URL scraping
   if (problem.url && !problem.id && !problem.description) {
     try {
       const scraped = await scrapeProblemFromUrl(problem.url);
@@ -592,10 +582,16 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
 
   let finalInterviewQuestionId = problem.interviewQuestionId;
 
+  // 👉 FIXED: Stopped hardcoding 'default-track-id' to avoid FK errors
   if (problem.mcqData) {
+    let defaultTrack = await prisma.interviewTrack.findFirst();
+    if (!defaultTrack) {
+        defaultTrack = await prisma.interviewTrack.create({ data: { slug: 'theory', title: 'Theory Track', type: 'DSA' } });
+    }
+
     const newMcq = await prisma.interviewQuestion.create({
       data: {
-        trackId: 'default-track-id',
+        trackId: defaultTrack.id, 
         title: problem.title || "Contest MCQ",
         prompt: problem.mcqData.prompt,
         options: problem.mcqData.options || [],
@@ -607,7 +603,6 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
     finalInterviewQuestionId = newMcq.id;
   }
 
-  // 3. Database Transaction
   await prisma.$transaction(async (tx) => {
     const created = await createContestProblemRow(tx, { 
       contestId, 
@@ -624,10 +619,12 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
     });
 
     const allTestcases = [...(problem.testcases || []), ...scrapedTestcases];
-    if (allTestcases.length > 0) {
+    
+    // 👉 FIXED: Correctly links testcases to `problemId` and not `created.id`
+    if (created.problemId && allTestcases.length > 0) {
         await tx.testcase.createMany({
            data: allTestcases.map((tc: any, idx: number) => ({
-             problemId: created.id,
+             problemId: created.problemId!,
              input: tc.input || '',
              expectedOutput: tc.expectedOutput || '',
              order: idx + 1,
@@ -767,7 +764,6 @@ export async function approveParticipant(contestId: string, participantId: strin
   const contest = await prisma.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
   const actor = contest?.participants.find(p => p.userId === actorId);
 
-  // Check if actor is a manager or owner (or team leader)
   if (!actor || (actor.role !== ContestParticipantRole.MANAGER && actor.userId !== contest?.createdById)) {
     throw new Error('Unauthorized: Only managers or owners can approve participants.');
   }

@@ -144,31 +144,33 @@ export default function GlobalNavigationAndMashupCreator() {
   };
 
   async function createContest() {
+    if (!session?.user?.email) return toast.error("Session still loading or you are not logged in.");
     if (compiledProblems.length === 0) return toast.error("Batch queue empty.");
+    
     setIsCreating(true);
     setLoadingContext('Creating contest shell...');
 
     try {
       const res = await fetch(`${API_V2}/contests`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
+        headers: { 'Content-Type': 'application/json', 'x-user-email': session.user.email },
         body: JSON.stringify({ 
           title, 
           durationMinutes: duration, 
-          type: contestMode, 
+          type: contestMode === 'SOLO' ? 'INDIVIDUAL' : 'GROUP', // Safely map to Prisma Enum
           startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined,
-          ownerEmail: session?.user?.email,
-          ownerName: session?.user?.name || 'Admin',
+          ownerEmail: session.user.email,
+          ownerName: session.user.name || 'Admin',
           members: [{ 
-              email: session?.user?.email, 
-              displayName: session?.user?.name || 'Admin', 
-              teamName: 'Admin Team' 
+              email: session.user.email, 
+              displayName: session.user.name || 'Admin', 
+              teamName: contestMode === 'GROUP' ? 'Admin Team' : 'Individuals' 
           }]
         })
       });
       
       const contest = await res.json();
-      if (!res.ok) throw new Error(contest.error || "Shell creation failed");
+      if (!res.ok) throw new Error(contest.error || "Shell creation failed on backend");
       
       toast.success(`Contest Created! Invite Code: ${contest.inviteCode}`, { duration: 10000 });
 
@@ -179,7 +181,7 @@ export default function GlobalNavigationAndMashupCreator() {
         try {
           const mRes = await fetch(`${API_V2}/contests/${contest.id}/problems/mashup`, {
             method: 'POST', 
-            headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' }, 
+            headers: { 'Content-Type': 'application/json', 'x-user-email': session.user.email }, 
             body: JSON.stringify(compiledProblems[i])
           });
 
@@ -198,7 +200,7 @@ export default function GlobalNavigationAndMashupCreator() {
       
       router.push(`/contests/${contest.id}`);
     } catch (err: any) {
-      toast.error("Could not create contest shell.");
+      toast.error(err.message || "Could not create contest shell.");
       setIsCreating(false);
     } 
   }
