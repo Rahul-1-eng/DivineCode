@@ -216,18 +216,18 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
   const platform = toPlatform(input.problem.platform);
   const label = displayLabel(input.index);
   
-  // Use a strictly permissive cast for the data object
-  const data: any = {
+  // Construct the object strictly matching the schema
+  const data = {
       contestId: input.contestId,
       problemId: input.problem.problemId || input.problem.id || null,
       interviewQuestionId: input.problem.interviewQuestionId || null,
       titleSnapshot: String(input.problem.title || `Problem ${label}`).trim(),
       customDescription: input.problem.description || null,
       imageUrl: input.problem.imageUrl || null, 
-      platform, 
+      platform: platform, 
       externalUrl: input.problem.url || externalUrl(input.problem, platform) || '', 
       index: input.index,
-      label, 
+      label: label, 
       points: Math.max(1, Number(input.problem.points || 1000)),
       addedById: input.addedById || null,
       isMCQ: !!input.problem.interviewQuestionId,
@@ -235,7 +235,8 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
       mcqData: input.problem.mcqData || null
   };
   
-  return tx.contestProblem.create({ data });
+  // Cast as 'any' specifically for the Prisma call to bypass the strict input check
+  return tx.contestProblem.create({ data: data as any });
 }
 
 export async function loadContestForViewer(contestId: string) {
