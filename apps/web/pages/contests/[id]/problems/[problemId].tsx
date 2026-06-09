@@ -4,7 +4,7 @@ import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
 import { io, Socket } from 'socket.io-client';
 import toast, { Toaster } from 'react-hot-toast';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 export async function getServerSideProps() { return { props: {} }; }
 
@@ -13,7 +13,7 @@ const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loadi
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
-type TestCase = { id: string; input: string; expectedOutput: string; output: string; status: 'idle' | 'running' | 'passed' | 'failed' | 'error' };
+type TestCase = { id: string; input: string; expectedOutput: string; output: string; status: 'idle' | 'running' | 'passed' | 'failed' | 'error'; isPublic?: boolean };
 
 function useContestTimer(startTime?: string | Date, endTime?: string | Date) {
   const [timeLeft, setTimeLeft] = useState({ state: 'loading', text: 'Syncing chronometer...' });
@@ -49,7 +49,6 @@ export default function ContestProblemWorkspace() {
   const { data: session, status } = useSession();
   
   const [contest, setContest] = useState<any>(null);
-  // ADD THIS LINE:
   const [timeLeft, setTimeLeft] = useState(120);
   const [code, setCode] = useState('// Write your solution here...');
   const [language, setLanguage] = useState('cpp');
@@ -58,7 +57,7 @@ export default function ContestProblemWorkspace() {
   const [terminalOutput, setTerminalOutput] = useState<string>('Welcome to DivineCode Integrated Terminal.\nReady to compile and run...\n');
   const [customInput, setCustomInput] = useState<string>('');
   
-  const [testcases, setTestcases] = useState<TestCase[]>([{ id: '1', input: '', expectedOutput: '', output: '', status: 'idle' }]);
+  const [testcases, setTestcases] = useState<TestCase[]>([]);
   const [penaltyViewed, setPenaltyViewed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [judgeVerdict, setJudgeVerdict] = useState<{ status: string, message: string } | null>(null);
@@ -83,6 +82,7 @@ export default function ContestProblemWorkspace() {
   const [voiceStatus, setVoiceStatus] = useState('disconnected');
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  
   useEffect(() => {
     if (typeof window !== 'undefined') {
       audioRef.current = new Audio('/accepted.mp3');
@@ -116,41 +116,54 @@ export default function ContestProblemWorkspace() {
 
   const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
-  
-  const isMCQ = useMemo(() => !!problem?.interviewQuestionId, [problem]);
+  const isMCQ = useMemo(() => !!problem?.interviewQuestionId || problem?.isMCQ, [problem]);
+
+  // Load Custom Test Cases from Backend
+  useEffect(() => {
+    if (!problem || isMCQ) return;
+    let tcs = [];
+    try {
+      if (problem.customTestCases) tcs = typeof problem.customTestCases === 'string' ? JSON.parse(problem.customTestCases) : problem.customTestCases;
+      else if (problem.problem?.testcases) tcs = typeof problem.problem.testcases === 'string' ? JSON.parse(problem.problem.testcases) : problem.problem.testcases;
+      else if (problem.testcases) tcs = typeof problem.testcases === 'string' ? JSON.parse(problem.testcases) : problem.testcases;
+    } catch (e) {}
+
+    if (tcs && tcs.length > 0) {
+      setTestcases(tcs.map((tc: any, i: number) => ({
+        id: Date.now() + i.toString(),
+        input: tc.input || '',
+        expectedOutput: tc.expectedOutput || '',
+        output: '',
+        status: 'idle',
+        isPublic: tc.isPublic !== false // Only hide if explicitly marked false
+      })));
+    } else {
+      setTestcases([{ id: '1', input: '', expectedOutput: '', output: '', status: 'idle', isPublic: true }]);
+    }
+  }, [problem, isMCQ]);
+
   useEffect(() => {
     if (!isMCQ || timeLeft <= 0) return;
-    const interval = setInterval(() => {
-      setTimeLeft((prev) => prev - 1);
-    }, 1000);
+    const interval = setInterval(() => { setTimeLeft((prev) => prev - 1); }, 1000);
     return () => clearInterval(interval);
   }, [isMCQ, timeLeft]);
+
   useEffect(() => {
-    if (isMCQ && problem?.interviewQuestion) {
-      setMcqData(problem.interviewQuestion);
-    } else if (isMCQ && problem?.interviewQuestionId) {
-      fetch(`${API_V2_BASE_URL}/interview/questions`, {
-        headers: { 'x-user-email': session?.user?.email || '' }
-      })
-        .then(r => r.json())
-        .then(data => {
-          if (Array.isArray(data)) setMcqData(data.find(q => q.id === problem.interviewQuestionId));
-        });
+    if (isMCQ) {
+      if (problem?.mcqData) setMcqData(typeof problem.mcqData === 'string' ? JSON.parse(problem.mcqData) : problem.mcqData);
+      else if (problem?.interviewQuestion) setMcqData(problem.interviewQuestion);
     }
-  }, [isMCQ, problem, session]);
+  }, [isMCQ, problem]);
 
   const toggleVoice = async () => {
     if (!contest?.viewerMember?.teamId) return toast.error("You must be in a team to use voice chat.");
-
     if (voiceStatus === 'connected' || voiceStatus === 'connecting') {
       setVoiceStatus('disconnected');
       socketRef.current?.emit('leave-voice', contest.viewerMember.teamId);
-      
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
       }
-      
       Object.values(peersRef.current).forEach(pc => pc.close());
       peersRef.current = {};
       toast.success("Voice disconnected.");
@@ -163,7 +176,6 @@ export default function ContestProblemWorkspace() {
         socketRef.current?.emit('join-voice', contest.viewerMember.teamId);
         toast.success("Voice channel joined!");
       } catch (err) {
-        console.error('Mic access denied:', err);
         setVoiceStatus('disconnected');
         toast.error("Microphone access denied.");
       }
@@ -194,78 +206,10 @@ export default function ContestProblemWorkspace() {
       }
     });
 
-    socket.on('user-joined-voice', async (peerId) => {
-      if (!localStreamRef.current) return;
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-      peersRef.current[peerId] = pc;
-      
-      localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
-      
-      pc.ontrack = (event) => {
-        const audio = new Audio();
-        audio.srcObject = event.streams[0];
-        audio.autoplay = true;
-        audio.play().catch(e => console.log('Audio play blocked:', e));
-      };
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) socket.emit('voice-ice-candidate', { to: peerId, candidate: event.candidate });
-      };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socket.emit('voice-offer', { to: peerId, offer });
-    });
-
-    socket.on('voice-offer', async ({ from, offer }) => {
-      if (!localStreamRef.current) return;
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-      peersRef.current[from] = pc;
-      
-      localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
-      
-      pc.ontrack = (event) => {
-        const audio = new Audio();
-        audio.srcObject = event.streams[0];
-        audio.autoplay = true;
-        audio.play().catch(e => console.log('Audio play blocked:', e));
-      };
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) socket.emit('voice-ice-candidate', { to: from, candidate: event.candidate });
-      };
-
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socket.emit('voice-answer', { to: from, answer });
-    });
-
-    socket.on('voice-answer', async ({ from, answer }) => {
-      const pc = peersRef.current[from];
-      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
-    });
-
-    socket.on('voice-ice-candidate', async ({ from, candidate }) => {
-      const pc = peersRef.current[from];
-      if (pc && pc.remoteDescription) {
-         try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){}
-      }
-    });
-
-    socket.on('user-left-voice', (peerId) => {
-      if (peersRef.current[peerId]) {
-        peersRef.current[peerId].close();
-        delete peersRef.current[peerId];
-      }
-    });
-
     return () => { 
       socket.disconnect(); 
       socketRef.current = null; 
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-      }
+      if (localStreamRef.current) localStreamRef.current.getTracks().forEach(track => track.stop());
       Object.values(peersRef.current).forEach(pc => pc.close());
     };
   }, [id, session, contest?.viewerMember?.teamId]);
@@ -276,7 +220,6 @@ export default function ContestProblemWorkspace() {
     if (!chatInput.trim() || !contest?.viewerMember?.teamId) return;
     if (socketRef.current) {
       const senderIdentifier = contest.viewerMember.userId || contest.viewerMember.user?.id || session?.user?.email;
-      
       socketRef.current.emit('sendTeamMessage', {
         contestId: id, teamId: contest.viewerMember.teamId,
         senderId: senderIdentifier,
@@ -286,8 +229,15 @@ export default function ContestProblemWorkspace() {
     setChatInput('');
   };
 
+  // Only sends 'Public' test cases to CPH!
   const sendToCPH = async () => {
     if (!problem) return;
+    const publicCases = testcases.filter(tc => (tc.input || tc.expectedOutput) && tc.isPublic);
+    
+    if (publicCases.length === 0) {
+      return toast.error("No public test cases available for CPH. The existing test cases are hidden.");
+    }
+
     const cphPayload = {
       name: problem.titleSnapshot || 'Problem',
       group: "DivineCode",
@@ -295,10 +245,7 @@ export default function ContestProblemWorkspace() {
       interactive: false,
       memoryLimit: 256,
       timeLimit: 2000,
-      tests: testcases.filter(tc => tc.input || tc.expectedOutput).map(tc => ({
-        input: tc.input,
-        output: tc.expectedOutput
-      })),
+      tests: publicCases.map(tc => ({ input: tc.input, output: tc.expectedOutput })),
       testType: "single",
       input: { type: "stdin" },
       output: { type: "stdout" },
@@ -307,11 +254,10 @@ export default function ContestProblemWorkspace() {
 
     try {
       const res = await fetch("http://localhost:10043/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(cphPayload)
       });
-      if (res.ok) toast.success("Test cases sent to CPH successfully!");
+      if (res.ok) toast.success(`Sent ${publicCases.length} public test cases to CPH!`);
       else toast.error("Make sure CPH extension is running.");
     } catch (err) {
       toast.error("Could not connect to CPH. Is the extension open?");
@@ -325,10 +271,7 @@ export default function ContestProblemWorkspace() {
     try {
       const res = await fetch(`${API_V2_BASE_URL}/execute`, {
         method: 'POST', 
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-email': session?.user?.email || '' 
-        },
+        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ sourceCode: code, language, input: customInput })
       });
       const data = await res.json();
@@ -353,10 +296,7 @@ export default function ContestProblemWorkspace() {
       try {
         const res = await fetch(`${API_V2_BASE_URL}/execute`, {
           method: 'POST', 
-          headers: { 
-            'Content-Type': 'application/json',
-            'x-user-email': session?.user?.email || ''
-          },
+          headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
           body: JSON.stringify({ sourceCode: code, language, input: newCases[i].input })
         });
         const data = await res.json();
@@ -405,10 +345,7 @@ export default function ContestProblemWorkspace() {
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
         method: 'POST', 
-        headers: { 
-          'Content-Type': 'application/json', 
-          'x-user-email': session?.user?.email || '' 
-        },
+        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ contestProblemId: problemId, code: finalCode, language: finalLanguage })
       });
       const submission = await res.json();
@@ -416,10 +353,7 @@ export default function ContestProblemWorkspace() {
 
       const judgeRes = await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge?wait=true`, { 
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json', 
-          'x-user-email': session?.user?.email || '' 
-        }
+        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' }
       });
       const judgeData = await judgeRes.json();
       if (!judgeRes.ok) throw new Error(judgeData.error || 'Error executing system judge.');
@@ -485,10 +419,6 @@ export default function ContestProblemWorkspace() {
   if (status === 'loading' || isLoading) return <DynamicLoader />;
   if (!contest || !problem) return <div style={page}>Problem not found.</div>;
 
-  const problemIframeUrl = problem.externalUrl?.includes('codeforces') 
-    ? `${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(problem.externalUrl)}` 
-    : problem.externalUrl;
-
   const monacoLanguage = language === 'cpp' ? 'cpp' : language === 'python' ? 'python' : 'java';
 
   return (
@@ -518,7 +448,6 @@ export default function ContestProblemWorkspace() {
         </div>
       )}
 
-      {/* Codeforces Sync Modal */}
       {showCfModal && (
         <div style={modalOverlay}>
           <div style={modalContent}>
@@ -539,17 +468,17 @@ export default function ContestProblemWorkspace() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
           <button onClick={() => router.push(`/contests/${id}`)} style={btnDark}>← Standings</button>
           
-          <strong style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <strong style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
             {problem.titleSnapshot}
-            {/* 👉 AI URL Avatar Fixed! */}
+            {/* CLEAN EXTERNAL LINK BUTTON */}
             {problem.externalUrl && (
               <a 
                 href={problem.externalUrl} 
                 target="_blank" 
                 rel="noreferrer" 
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 20, padding: 0, textDecoration: 'none' }} 
+                style={{ background: '#38bdf8', color: '#000', fontSize: 12, padding: '4px 10px', borderRadius: 4, textDecoration: 'none', fontWeight: 'bold' }} 
                 title="Go to Original Platform">
-                🤖
+                View Original ↗
               </a>
             )}
           </strong>
@@ -568,183 +497,176 @@ export default function ContestProblemWorkspace() {
               <button onClick={runCustomCode} style={runBtn}>Terminal ▶</button>
             </>
           )}
-          <button onClick={handleSubmitCode} disabled={submitting} style={submitBtn}>{submitting ? 'Judging...' : 'Submit 🚀'}</button>
+          {/* MCQ ONLY SHOWS SUBMIT IN ITS OWN UI, NOT IN HEADER */}
+          {!isMCQ && <button onClick={handleSubmitCode} disabled={submitting} style={submitBtn}>{submitting ? 'Judging...' : 'Submit 🚀'}</button>}
         </div>
       </header>
 
-      <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
-        
-       {/* LEFT PANE */}
-        <section style={{ width: '40%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #1e293b', background: '#0f172a' }}>
-          <div style={paneHeader}>
-            Problem Description
-            {problem?.externalUrl && (
-              <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{ float: 'right', textDecoration: 'none', fontSize: 16 }} title="View Original Problem">↗</a>
+      {isMCQ ? (
+        /* ================== DEDICATED MCQ INTERFACE ================== */
+        <div style={{ width: '100%', height: 'calc(100vh - 60px)', overflowY: 'auto', background: '#020617', display: 'flex', justifyContent: 'center' }}>
+          <div style={{ width: '100%', maxWidth: 800, padding: '60px 20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 }}>
+              <strong style={{ color: '#38bdf8', fontSize: 16, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Question {problem?.label || ''}</strong>
+              <div style={{ fontSize: 24, fontWeight: 'bold', color: '#fbbf24', background: 'rgba(251,191,36,0.1)', padding: '5px 15px', borderRadius: 8 }}>
+                {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+              </div>
+            </div>
+
+            <h2 style={{ fontSize: 28, lineHeight: 1.6, margin: '0 0 15px', color: '#eef2ff' }}>
+              {mcqData?.prompt || problem?.titleSnapshot || 'Loading question...'}
+            </h2>
+            
+            {mcqData?.isMultiple ? (
+               <p style={{ color: '#fbbf24', marginBottom: 30, fontWeight: 'bold' }}>* Select all that apply (Multiple Correct Options)</p>
+            ) : (
+               <p style={{ color: '#94a3b8', marginBottom: 30 }}>* Select exactly one answer</p>
             )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+               {mcqData?.options?.map((opt: string, idx: number) => {
+                  const isSelected = selectedOptions.includes(idx);
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        if (mcqData?.isMultiple) setSelectedOptions(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]);
+                        else setSelectedOptions([idx]);
+                      }}
+                      style={{
+                        padding: '20px 24px', borderRadius: 12, background: isSelected ? 'rgba(34,211,238,.12)' : 'rgba(15,23,42,.6)',
+                        color: '#eef2ff', border: `2px solid ${isSelected ? 'rgba(34,211,238,.8)' : 'rgba(51,65,85,.6)'}`,
+                        cursor: 'pointer', textAlign: 'left', fontSize: 16, transition: 'all 0.2s',
+                        display: 'flex', alignItems: 'center', gap: 20
+                      }}
+                    >
+                      <div style={{ width: 24, height: 24, borderRadius: mcqData?.isMultiple ? 6 : 12, border: `2px solid ${isSelected ? '#22d3ee' : '#64748b'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', background: isSelected ? '#22d3ee' : 'transparent', flexShrink: 0 }}>
+                         {isSelected && <div style={{ width: 10, height: 10, background: '#0f172a', borderRadius: mcqData?.isMultiple ? 2 : 6 }} />}
+                      </div>
+                      <div style={{ flex: 1, lineHeight: 1.5 }}>
+                        <span style={{ fontWeight: 'bold', color: '#67e8f9', marginRight: 12 }}>{String.fromCharCode(65 + idx)}.</span>
+                        {opt}
+                      </div>
+                    </button>
+                  )
+               })}
+            </div>
+
+            <div style={{ marginTop: 40, borderTop: '1px solid #334155', paddingTop: 30, display: 'flex', justifyContent: 'flex-end' }}>
+               <button onClick={handleSubmitCode} disabled={submitting} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '16px 40px', borderRadius: 8, fontSize: 18, fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 15px rgba(16,185,129,0.3)' }}>
+                 {submitting ? 'Submitting...' : 'Confirm & Submit Answer'}
+               </button>
+            </div>
           </div>
-          <div style={{ flex: 1, padding: 20, overflowY: 'auto', color: '#e2e8f0', fontSize: '15px', lineHeight: 1.6 }}>
-            {isMCQ ? (
-  <div style={{ padding: 40, display: 'flex', flexDirection: 'column', gap: 20 }}>
-    <h2 style={{ color: '#eef2ff' }}>Theory Assessment</h2>
-    <div style={{ fontSize: 32, fontWeight: 'bold', color: '#fbbf24' }}>
-      {/* Dynamic MCQ Timer from Problem Data */}
-      {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
-    </div>
-    <div style={{ marginTop: 20, background: '#1e293b', padding: 20, borderRadius: 8 }}>
-       <p>{mcqData?.prompt}</p>
-       {/* Map options here */}
-    </div>
-  </div>
-) : (
-               (problem?.customDescription || problem?.problem?.description || problem?.description || problem?.descriptionHtml) ? (
+        </div>
+      ) : (
+        /* ================== STANDARD CODING WORKSPACE ================== */
+        <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
+          {/* LEFT PANE */}
+          <section style={{ width: '40%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #1e293b', background: '#0f172a' }}>
+            <div style={paneHeader}>Problem Description</div>
+            <div style={{ flex: 1, padding: 20, overflowY: 'auto', color: '#e2e8f0', fontSize: '15px', lineHeight: 1.6 }}>
+               {(problem?.customDescription || problem?.problem?.description || problem?.description || problem?.descriptionHtml) ? (
                   <div dangerouslySetInnerHTML={{ __html: problem.customDescription || problem.problem?.description || problem.description || problem.descriptionHtml }} />
                ) : (
                   <div style={{ textAlign: 'center', padding: 20 }}>
                      <p>Problem hosted externally.</p>
                      <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={primaryBtn}>View on Platform ↗</a>
                   </div>
-               )
-            )}
-          </div>
-        </section>
+               )}
+            </div>
+          </section>
 
-        {/* RIGHT PANE: Workspace / MCQ Form */}
-        <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
-          {isMCQ ? (
-            <div style={{ padding: '40px 60px', display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', background: '#020617' }}>
-              <strong style={{ color: '#38bdf8', fontSize: 14, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Question {problem?.label || ''}</strong>
-              <h2 style={{ fontSize: 26, lineHeight: 1.5, margin: '20px 0 10px', color: '#eef2ff' }}>
-                {mcqData?.prompt || problem?.titleSnapshot || 'Loading question...'}
-              </h2>
-              {mcqData?.isMultiple ? (
-                 <p style={{ color: '#fbbf24', marginBottom: 30, fontWeight: 'bold' }}>* Select all that apply (Multiple Correct)</p>
-              ) : (
-                 <p style={{ color: '#94a3b8', marginBottom: 30 }}>* Select one answer</p>
-              )}
+          {/* RIGHT PANE: Workspace */}
+          <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
+            <div style={{ flex: 1, position: 'relative', paddingTop: 10 }}>
+              <Editor height="100%" theme="vs-dark" language={monacoLanguage} value={code} onChange={(val) => setCode(val || '')} options={{ minimap: { enabled: false }, fontSize: 16 }} />
+            </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                 {mcqData?.options?.map((opt: string, idx: number) => {
-                    const isSelected = selectedOptions.includes(idx);
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          if (mcqData?.isMultiple) {
-                             setSelectedOptions(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]);
-                          } else {
-                             setSelectedOptions([idx]);
-                          }
-                        }}
-                        style={{
-                          padding: '20px 24px', borderRadius: 16, background: isSelected ? 'rgba(34,211,238,.12)' : 'rgba(15,23,42,.6)',
-                          color: '#eef2ff', border: `2px solid ${isSelected ? 'rgba(34,211,238,.8)' : 'rgba(51,65,85,.6)'}`,
-                          cursor: 'pointer', textAlign: 'left', fontSize: 16, transition: 'all 0.2s',
-                          display: 'flex', alignItems: 'center', gap: 20
-                        }}
-                      >
-                        <div style={{ width: 24, height: 24, borderRadius: mcqData?.isMultiple ? 6 : 12, border: `2px solid ${isSelected ? '#22d3ee' : '#64748b'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', background: isSelected ? '#22d3ee' : 'transparent', flexShrink: 0 }}>
-                           {isSelected && <div style={{ width: 10, height: 10, background: '#0f172a', borderRadius: mcqData?.isMultiple ? 2 : 6 }} />}
+            <div style={{ height: '35%', display: 'flex', flexDirection: 'column', borderTop: '1px solid #333', background: '#1e1e1e' }}>
+              <div style={tabsHeader}>
+                <button style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('cph')}>CPH TESTCASES</button>
+                <button style={activeTab === 'terminal' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('terminal')}>TERMINAL</button>
+                <button style={activeTab === 'testcases' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('testcases')}>DEBUG / HIDDEN</button>
+              </div>
+              
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {activeTab === 'cph' && (
+                  <div style={{ padding: 15, background: '#0f172a', minHeight: '100%' }}>
+                    {testcases.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '40px 20px', background: '#020617', border: '1px dashed #334155', borderRadius: 8, marginBottom: 15 }}>
+                        <h3 style={{ color: '#94a3b8', margin: '0 0 10px' }}>No Pre-Loaded Test Cases</h3>
+                        <p style={{ color: '#64748b', fontSize: 13, marginBottom: 20 }}>Automatic scraping failed or was blocked by the platform. You can manually enter test cases below.</p>
+                      </div>
+                    ) : (
+                      testcases.map((tc, idx) => (
+                        <div key={tc.id} style={{...tcCard, border: tc.isPublic ? '1px solid #38bdf8' : '1px solid #334155'}}>
+                          <div style={{...tcHeader, background: tc.isPublic ? 'rgba(56,189,248,0.1)' : '#1e293b'}}>
+                            <strong>Test Case {idx + 1} {tc.isPublic ? '(Public / CPH)' : '(Hidden)'}</strong>
+                            <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' || tc.status === 'error' ? '#f87171' : '#94a3b8' }}>{tc.status.toUpperCase()}</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 10, padding: 10 }}>
+                            <div style={{ flex: 1 }}><div style={tcLabel}>Input</div><textarea value={tc.input} onChange={e => { const n = [...testcases]; n[idx].input = e.target.value; setTestcases(n); }} style={tcBox} /></div>
+                            <div style={{ flex: 1 }}><div style={tcLabel}>Expected Output</div><textarea value={tc.expectedOutput} onChange={e => { const n = [...testcases]; n[idx].expectedOutput = e.target.value; setTestcases(n); }} style={tcBox} /></div>
+                          </div>
+                          <div style={{ padding: '0 10px 10px' }}>
+                            <div style={tcLabel}>Actual Output</div>
+                            <pre style={{...tcBox, height: 60, margin: 0, overflow: 'auto', background: tc.status === 'failed' ? 'rgba(248,113,113,0.1)' : '#020617'}}>{tc.output}</pre>
+                          </div>
                         </div>
-                        <div style={{ flex: 1, lineHeight: 1.5 }}>
-                          <span style={{ fontWeight: 'bold', color: '#67e8f9', marginRight: 12 }}>{String.fromCharCode(65 + idx)}.</span>
-                          {opt}
+                      ))
+                    )}
+                    <button onClick={() => setTestcases([...testcases, { id: Date.now().toString(), input: '', expectedOutput: '', output: '', status: 'idle', isPublic: true }])} style={{...secondaryBtn, width: '100%'}}>+ Add Custom Test Case</button>
+                  </div>
+                )}
+
+                {activeTab === 'terminal' && (
+                  <div style={{ display: 'flex', height: '100%', padding: 10, gap: 10, background: '#1e1e1e' }}>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                      <div style={{ color: '#ccc', fontSize: 12, marginBottom: 5, fontWeight: 'bold' }}>STDIN (Custom Input)</div>
+                      <textarea value={customInput} onChange={(e) => setCustomInput(e.target.value)} style={{ flex: 1, background: '#2d2d2d', color: '#fff', border: '1px solid #444', fontFamily: 'monospace', padding: 8, outline: 'none', resize: 'none' }} placeholder="Enter custom input here..." />
+                    </div>
+                    <div style={{ flex: 2, display: 'flex', flexDirection: 'column' }}>
+                      <div style={{ color: '#ccc', fontSize: 12, marginBottom: 5, fontWeight: 'bold' }}>TERMINAL OUTPUT</div>
+                      <pre style={{ flex: 1, background: '#000', color: '#4ade80', margin: 0, padding: 10, border: '1px solid #444', fontFamily: 'monospace', overflowY: 'auto' }}>{terminalOutput}</pre>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'testcases' && (
+                  <div style={{ padding: 15, background: '#0f172a', minHeight: '100%' }}>
+                    <div style={aiTutorCard}>
+                      <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>🤖 AI Contest Tutor</h3>
+                      {!aiDebugResult ? (
+                        <button onClick={handleAiDebug} disabled={aiDebuggerLoading} style={aiTriggerBtn}>
+                          {aiDebuggerLoading ? 'Analyzing Code...' : 'Find Flaw & Generate Failing Case (-50 pts)'}
+                        </button>
+                      ) : (
+                        <div style={{ marginTop: 10, background: '#0f172a', padding: 16, borderRadius: 8, border: '1px solid #334155' }}>
+                          <p style={{ color: '#fbbf24', fontWeight: 'bold' }}>💡 Hint: {aiDebugResult.hint}</p>
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            <div style={{ flex: 1 }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>FAILING INPUT</strong><pre style={codeBlockError}>{aiDebugResult.input}</pre></div>
+                            <div style={{ flex: 1 }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>EXPECTED OUTPUT</strong><pre style={codeBlockSuccess}>{aiDebugResult.expectedOutput}</pre></div>
+                          </div>
                         </div>
-                      </button>
-                    )
-                 })}
+                      )}
+                    </div>
+
+                    {!penaltyViewed ? (
+                      <div style={{ textAlign: 'center', marginTop: 20, borderTop: '1px solid #1e293b', paddingTop: 20 }}>
+                        <h3 style={{ color: '#f87171', marginTop: 0 }}>⚠️ Standard Hidden Test Cases</h3>
+                        <button onClick={() => { if(confirm("Deduct 50 pts?")) setPenaltyViewed(true); }} style={btnDanger}>Accept Penalty & View</button>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 20 }}><h4 style={{ color: '#4ade80' }}>System Cases Unlocked</h4><p style={{ color: '#94a3b8', fontFamily: 'monospace' }}>[System test case data loaded]</p></div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
-          ) : (
-            <>
-              <div style={{ flex: 1, position: 'relative', paddingTop: 10 }}>
-                <Editor height="100%" theme="vs-dark" language={monacoLanguage} value={code} onChange={(val) => setCode(val || '')} options={{ minimap: { enabled: false }, fontSize: 16 }} />
-              </div>
-
-              <div style={{ height: '35%', display: 'flex', flexDirection: 'column', borderTop: '1px solid #333', background: '#1e1e1e' }}>
-                <div style={tabsHeader}>
-                  <button style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('cph')}>CPH TESTCASES</button>
-                  <button style={activeTab === 'terminal' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('terminal')}>TERMINAL</button>
-                  <button style={activeTab === 'testcases' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('testcases')}>DEBUG / HIDDEN</button>
-                </div>
-                
-                <div style={{ flex: 1, overflowY: 'auto' }}>
-                  {activeTab === 'cph' && (
-                    <div style={{ padding: 15, background: '#0f172a', minHeight: '100%' }}>
-                      {testcases.length === 0 ? (
-                        <div style={{ textAlign: 'center', padding: '40px 20px', background: '#020617', border: '1px dashed #334155', borderRadius: 8, marginBottom: 15 }}>
-                          <h3 style={{ color: '#94a3b8', margin: '0 0 10px' }}>No Pre-Loaded Test Cases</h3>
-                          <p style={{ color: '#64748b', fontSize: 13, marginBottom: 20 }}>Automatic scraping failed or was blocked by the platform. You can manually enter test cases below.</p>
-                        </div>
-                      ) : (
-                        testcases.map((tc, idx) => (
-                          <div key={tc.id} style={tcCard}>
-                            <div style={tcHeader}>
-                              <strong>Test Case {idx + 1}</strong>
-                              <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' || tc.status === 'error' ? '#f87171' : '#94a3b8' }}>{tc.status.toUpperCase()}</span>
-                            </div>
-                            <div style={{ display: 'flex', gap: 10, padding: 10 }}>
-                              <div style={{ flex: 1 }}><div style={tcLabel}>Input</div><textarea value={tc.input} onChange={e => { const n = [...testcases]; n[idx].input = e.target.value; setTestcases(n); }} style={tcBox} /></div>
-                              <div style={{ flex: 1 }}><div style={tcLabel}>Expected Output</div><textarea value={tc.expectedOutput} onChange={e => { const n = [...testcases]; n[idx].expectedOutput = e.target.value; setTestcases(n); }} style={tcBox} /></div>
-                            </div>
-                            <div style={{ padding: '0 10px 10px' }}>
-                              <div style={tcLabel}>Actual Output</div>
-                              <pre style={{...tcBox, height: 60, margin: 0, overflow: 'auto', background: tc.status === 'failed' ? 'rgba(248,113,113,0.1)' : '#020617'}}>{tc.output}</pre>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                      <button onClick={() => setTestcases([...testcases, { id: Date.now().toString(), input: '', expectedOutput: '', output: '', status: 'idle' }])} style={{...secondaryBtn, width: '100%'}}>+ Add Custom Test Case</button>
-                    </div>
-                  )}
-
-                  {activeTab === 'terminal' && (
-                    <div style={{ display: 'flex', height: '100%', padding: 10, gap: 10, background: '#1e1e1e' }}>
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                        <div style={{ color: '#ccc', fontSize: 12, marginBottom: 5, fontWeight: 'bold' }}>STDIN (Custom Input)</div>
-                        <textarea value={customInput} onChange={(e) => setCustomInput(e.target.value)} style={{ flex: 1, background: '#2d2d2d', color: '#fff', border: '1px solid #444', fontFamily: 'monospace', padding: 8, outline: 'none', resize: 'none' }} placeholder="Enter custom input here..." />
-                      </div>
-                      <div style={{ flex: 2, display: 'flex', flexDirection: 'column' }}>
-                        <div style={{ color: '#ccc', fontSize: 12, marginBottom: 5, fontWeight: 'bold' }}>TERMINAL OUTPUT</div>
-                        <pre style={{ flex: 1, background: '#000', color: '#4ade80', margin: 0, padding: 10, border: '1px solid #444', fontFamily: 'monospace', overflowY: 'auto' }}>{terminalOutput}</pre>
-                      </div>
-                    </div>
-                  )}
-
-                  {activeTab === 'testcases' && (
-                    <div style={{ padding: 15, background: '#0f172a', minHeight: '100%' }}>
-                      <div style={aiTutorCard}>
-                        <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>🤖 AI Contest Tutor</h3>
-                        {!aiDebugResult ? (
-                          <button onClick={handleAiDebug} disabled={aiDebuggerLoading} style={aiTriggerBtn}>
-                            {aiDebuggerLoading ? 'Analyzing Code...' : 'Find Flaw & Generate Failing Case (-50 pts)'}
-                          </button>
-                        ) : (
-                          <div style={{ marginTop: 10, background: '#0f172a', padding: 16, borderRadius: 8, border: '1px solid #334155' }}>
-                            <p style={{ color: '#fbbf24', fontWeight: 'bold' }}>💡 Hint: {aiDebugResult.hint}</p>
-                            <div style={{ display: 'flex', gap: 10 }}>
-                              <div style={{ flex: 1 }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>FAILING INPUT</strong><pre style={codeBlockError}>{aiDebugResult.input}</pre></div>
-                              <div style={{ flex: 1 }}><strong style={{ color: '#94a3b8', fontSize: 11 }}>EXPECTED OUTPUT</strong><pre style={codeBlockSuccess}>{aiDebugResult.expectedOutput}</pre></div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {!penaltyViewed ? (
-                        <div style={{ textAlign: 'center', marginTop: 20, borderTop: '1px solid #1e293b', paddingTop: 20 }}>
-                          <h3 style={{ color: '#f87171', marginTop: 0 }}>⚠️ Standard Hidden Test Cases</h3>
-                          <button onClick={() => { if(confirm("Deduct 50 pts?")) setPenaltyViewed(true); }} style={btnDanger}>Accept Penalty & View</button>
-                        </div>
-                      ) : (
-                        <div style={{ marginTop: 20 }}><h4 style={{ color: '#4ade80' }}>System Cases Unlocked</h4><p style={{ color: '#94a3b8', fontFamily: 'monospace' }}>[System test case data loaded]</p></div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-        </section>
-      </div>
+          </section>
+        </div>
+      )}
 
       {/* Global Team Chat Embedded in Workspace */}
       {contest?.viewerMember?.teamId && (
@@ -752,7 +674,6 @@ export default function ContestProblemWorkspace() {
           {isChatOpen ? (
             <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
               
-              {/* WebRTC Voice Chat Controls */}
               <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
                 <strong style={{ color: '#a5b4fc' }}>Team Chat</strong>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -802,7 +723,6 @@ const runBtn: CSSProperties = { background: '#3b82f6', border: 'none', color: '#
 const ghostBtn: CSSProperties = { background: 'transparent', border: '1px solid #444', color: '#ccc', padding: '8px 16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: 4 };
 const selectBox: CSSProperties = { background: '#333', color: '#fff', border: 'none', padding: '8px', outline: 'none', borderRadius: 4 };
 const paneHeader: CSSProperties = { padding: '12px 16px', background: '#1e293b', fontWeight: 'bold', fontSize: 14, color: '#94a3b8' };
-const iframeStyle: CSSProperties = { width: '100%', height: '100%', border: 'none', background: '#fff' };
 const tabsHeader: CSSProperties = { display: 'flex', borderBottom: '1px solid #333', background: '#1e1e1e' };
 const activeTabStyle: CSSProperties = { flex: 1, background: '#1e1e1e', border: 'none', borderTop: '2px solid #38bdf8', color: '#fff', padding: '10px', cursor: 'pointer', fontWeight: 'bold', fontSize: 12, letterSpacing: 1 };
 const inactiveTabStyle: CSSProperties = { flex: 1, background: '#2d2d2d', border: 'none', color: '#888', padding: '10px', cursor: 'pointer', fontSize: 12, letterSpacing: 1, borderTop: '2px solid transparent' };

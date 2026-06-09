@@ -22,12 +22,12 @@ export default function GlobalNavigationAndMashupCreator() {
   
   const [customTitle, setCustomTitle] = useState('');
   const [customDesc, setCustomDesc] = useState('');
-  const [customCases, setCustomCases] = useState([{ input: '', expectedOutput: '', isHidden: false }]);
+  const [customCases, setCustomCases] = useState([{ input: '', expectedOutput: '', isPublic: true }]);
   
   const [mcqPrompt, setMcqPrompt] = useState('');
   const [mcqOptions, setMcqOptions] = useState(['', '']);
   const [mcqCorrect, setMcqCorrect] = useState<number[]>([]);
-  const [mcqTimeLimit, setMcqTimeLimit] = useState(120); // Default 2 mins
+  const [mcqTimeLimit, setMcqTimeLimit] = useState(120); 
   
   const [compiledProblems, setCompiledProblems] = useState<any[]>([]);
   const [aiBank, setAiBank] = useState<any[]>([]);
@@ -65,8 +65,6 @@ export default function GlobalNavigationAndMashupCreator() {
     
     if (activeTab === 'URL') {
       let finalUrl = urlProblem.trim();
-      
-      // 👉 FIXED: Auto-convert "800 A" or "1500B" into Codeforces URLs on the fly
       if (!finalUrl.startsWith('http') && /^\d+\s*[a-zA-Z][0-9]?$/.test(finalUrl)) {
          const clean = finalUrl.replace(/\s+/g, '').toUpperCase();
          const num = clean.match(/^\d+/)?.[0];
@@ -82,24 +80,30 @@ export default function GlobalNavigationAndMashupCreator() {
       
     } else if (activeTab === 'CUSTOM') {
       if (!customTitle) return toast.error('Enter custom title');
+      if (!customDesc) return toast.error('Enter problem description');
       const validCases = customCases.filter(c => c.input.trim() !== '' && c.expectedOutput.trim() !== '');
+      if (validCases.length === 0) return toast.error('Provide at least one valid test case');
       
-      // Flatten the structure
       payload.title = customTitle;
-      payload.description = customDesc;
-      payload.imageUrl = imageBase64 || null;
-      payload.testcases = validCases;
-      payload.displayTitle = customTitle;} else {
-      if (!mcqPrompt || mcqCorrect.length === 0) return toast.error('Enter question parameters');
+      payload.customData = {
+          title: customTitle,
+          description: customDesc,
+          imageUrl: imageBase64 || null,
+          testcases: validCases
+      };
+      payload.displayTitle = customTitle;
+    } else {
+      if (!mcqPrompt || mcqCorrect.length === 0) return toast.error('Enter question and select correct options');
       payload.isMCQ = true;
+      payload.title = "Theory MCQ: " + mcqPrompt.substring(0, 20);
       payload.mcqTimeLimitSeconds = mcqTimeLimit;
       payload.mcqData = { prompt: mcqPrompt, options: mcqOptions, correctIndices: mcqCorrect, timeLimit: mcqTimeLimit };
-      payload.displayTitle = "Theory MCQ: " + mcqPrompt.substring(0, 20) + "...";
+      payload.displayTitle = payload.title;
     }
     
     setCompiledProblems([...compiledProblems, payload]);
     setUrlProblem(''); setImageBase64(''); setCustomTitle(''); setCustomDesc(''); 
-    setCustomCases([{ input: '', expectedOutput: '', isHidden: false }]);
+    setCustomCases([{ input: '', expectedOutput: '', isPublic: true }]);
     setMcqPrompt(''); setMcqCorrect([]); setMcqOptions(['', '']);
     toast.success("Problem appended to contest batch queue!");
   }
@@ -112,12 +116,10 @@ export default function GlobalNavigationAndMashupCreator() {
   const moveProblem = (index: number, direction: 'UP' | 'DOWN') => {
     if (direction === 'UP' && index === 0) return;
     if (direction === 'DOWN' && index === compiledProblems.length - 1) return;
-    
-    const newIdx = direction === 'UP' ? index - 1 : index + 1;
     const newArr = [...compiledProblems];
     const temp = newArr[index];
-    newArr[index] = newArr[newIdx];
-    newArr[newIdx] = temp;
+    newArr[index] = newArr[direction === 'UP' ? index - 1 : index + 1];
+    newArr[direction === 'UP' ? index - 1 : index + 1] = temp;
     setCompiledProblems(newArr);
   };
 
@@ -127,18 +129,18 @@ export default function GlobalNavigationAndMashupCreator() {
     setActiveTab(p.type);
     
     if (p.type === 'URL') setUrlProblem(p.url);
-    if (p.type === 'IMAGE') setImageBase64(p.imageUrl);
     if (p.type === 'CUSTOM') {
       setCustomTitle(p.customData.title);
       setCustomDesc(p.customData.description);
-      setCustomCases(p.customData.testcases.length ? p.customData.testcases : [{ input: '', expectedOutput: '', isHidden: false }]);
+      setCustomCases(p.customData.testcases.length ? p.customData.testcases : [{ input: '', expectedOutput: '', isPublic: true }]);
     }
     if (p.type === 'MCQ') {
       setMcqPrompt(p.mcqData.prompt);
       setMcqOptions(p.mcqData.options);
       setMcqCorrect(p.mcqData.correctIndices);
+      setMcqTimeLimit(p.mcqData.timeLimit);
     }
-    toast("Problem loaded into editor. Make your changes and click 'Append' again.", { icon: '✍️' });
+    toast("Problem loaded into editor. Make changes and append.", { icon: '✍️' });
   };
 
   async function createContest() {
@@ -168,14 +170,10 @@ export default function GlobalNavigationAndMashupCreator() {
       const contest = await res.json();
       if (!res.ok) throw new Error(contest.error || "Shell creation failed");
       
-      toast.success(`Contest Created! Invite Code: ${contest.inviteCode}`, { 
-        duration: 10000,
-        style: { background: '#38bdf8', color: '#000', fontWeight: 'bold' } 
-      });
+      toast.success(`Contest Created! Invite Code: ${contest.inviteCode}`, { duration: 10000 });
 
       let failedAny = false;
 
-      // 👉 FIXED: This loop now checks `res.ok` to alert you exactly which questions fail
       for (let i = 0; i < compiledProblems.length; i++) {
         setLoadingContext(`Adding problem ${i + 1}/${compiledProblems.length}...`);
         try {
@@ -187,8 +185,7 @@ export default function GlobalNavigationAndMashupCreator() {
 
           if (!mRes.ok) {
             failedAny = true;
-            const errData = await mRes.json();
-            toast.error(`Failed to add '${compiledProblems[i].displayTitle}': Scraper Error or Timeout`);
+            toast.error(`Failed to add '${compiledProblems[i].displayTitle}'`);
           }
         } catch (err) {
           failedAny = true;
@@ -197,7 +194,7 @@ export default function GlobalNavigationAndMashupCreator() {
       }
       
       if (!failedAny) toast.success("Mashup fully synchronized!");
-      else toast.error("Mashup created, but some external problems failed to scrape.", { duration: 6000 });
+      else toast.error("Mashup created, but some problems failed.", { duration: 6000 });
       
       router.push(`/contests/${contest.id}`);
     } catch (err: any) {
@@ -259,36 +256,52 @@ export default function GlobalNavigationAndMashupCreator() {
 
             {activeTab === 'URL' && <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste Link or Codeforces Code (e.g. 1500A)" />}
             
-  // REPLACE THIS BLOCK IN apps/web/pages/contests/create.tsx
-{activeTab === 'CUSTOM' && (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-    <input placeholder="Problem Title" value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} />
-    <textarea placeholder="Problem Description (HTML supported)" value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, height: '100px'}} />
-    
-    <div style={{ marginTop: 10 }}>
-      <label style={{ display: 'block', marginBottom: 5 }}>Problem Image</label>
-      <input type="file" accept="image/*" onChange={handleImageUpload} />
-      {imageBase64 && <img src={imageBase64} style={{ width: '100px', marginTop: 10 }} />}
-    </div>
-
-    <h4 style={{ color: '#94a3b8', marginTop: 15 }}>Test Cases</h4>
-    {customCases.map((tc, i) => (
-        <div key={i} style={{ display: 'flex', gap: 5 }}>
-            <input placeholder="Input" value={tc.input} onChange={e => {
-                const newCases = [...customCases];
-                newCases[i].input = e.target.value;
-                setCustomCases(newCases);
-            }} style={{...inputBox, flex: 1}} />
-            <input placeholder="Expected Output" value={tc.expectedOutput} onChange={e => {
-                const newCases = [...customCases];
-                newCases[i].expectedOutput = e.target.value;
-                setCustomCases(newCases);
-            }} style={{...inputBox, flex: 1}} />
-        </div>
-    ))}
-    <button onClick={() => setCustomCases([...customCases, {input: '', expectedOutput: '', isHidden: false}])} style={ghostBtn}>+ Add Row</button>
-  </div>
-)}
+            {activeTab === 'CUSTOM' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
+                <div>
+                    <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Custom Problem Title</label>
+                    <input placeholder="e.g. Find the Missing Integer" value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} />
+                </div>
+                <div>
+                    <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Problem Description (Supports Markdown/HTML)</label>
+                    <textarea placeholder="Describe the problem, input formats, and constraints..." value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, minHeight: '150px', resize: 'vertical'}} />
+                </div>
+                <div>
+                    <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Optional Image Attachment</label>
+                    <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'block', marginTop: 5, color: '#fff' }} />
+                </div>
+                
+                <h4 style={{ color: '#94a3b8', margin: '10px 0 0 0' }}>Custom Test Cases</h4>
+                {customCases.map((tc, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                        <input placeholder="Input" value={tc.input} onChange={e => {
+                            const newCases = [...customCases];
+                            newCases[i].input = e.target.value;
+                            setCustomCases(newCases);
+                        }} style={{...inputBox, flex: 1, marginTop: 0}} />
+                        <input placeholder="Expected Output" value={tc.expectedOutput} onChange={e => {
+                            const newCases = [...customCases];
+                            newCases[i].expectedOutput = e.target.value;
+                            setCustomCases(newCases);
+                        }} style={{...inputBox, flex: 1, marginTop: 0}} />
+                        
+                        <label style={{display: 'flex', alignItems: 'center', gap: 5, color: '#94a3b8', fontSize: 12, width: '120px', cursor: 'pointer'}}>
+                            <input type="checkbox" checked={tc.isPublic} onChange={e => {
+                                const newCases = [...customCases];
+                                newCases[i].isPublic = e.target.checked;
+                                setCustomCases(newCases);
+                            }} /> Public (CPH)
+                        </label>
+                        
+                        <button onClick={() => {
+                            const newCases = customCases.filter((_, idx) => idx !== i);
+                            setCustomCases(newCases.length ? newCases : [{input: '', expectedOutput: '', isPublic: true}]);
+                        }} style={{...iconBtn, color: '#f87171', borderColor: '#f87171'}}>✕</button>
+                    </div>
+                ))}
+                <button onClick={() => setCustomCases([...customCases, {input: '', expectedOutput: '', isPublic: true}])} style={{...ghostBtn, alignSelf: 'flex-start'}}>+ Add Test Case</button>
+              </div>
+            )}
 
             {activeTab === 'MCQ' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -296,15 +309,13 @@ export default function GlobalNavigationAndMashupCreator() {
                 <label style={{ fontSize: 12, fontWeight: 'bold' }}>Time Limit (Seconds)</label>
                 <input type="number" value={mcqTimeLimit} onChange={e => setMcqTimeLimit(Number(e.target.value))} style={inputBox} placeholder="e.g. 120" />
                 <p style={{fontSize: 12, color: '#94a3b8', margin: 0}}>Check the box next to correct options.</p>
-                <input type="number" value={mcqTimeLimit} onChange={e => setMcqTimeLimit(Number(e.target.value))} style={inputBox} placeholder="e.g. 120" />
-                <p style={{fontSize: 12, color: '#94a3b8', margin: 0}}>Check the box next to correct options.</p>
                 {mcqOptions.map((o, idx) => (
                   <div key={idx} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                     <input type="checkbox" checked={mcqCorrect.includes(idx)} onChange={() => setMcqCorrect(prev => prev.includes(idx) ? prev.filter(x => x !== idx) : [...prev, idx])} style={{transform: 'scale(1.5)', cursor: 'pointer'}} />
-                    <input value={o} onChange={e => { const n = [...mcqOptions]; n[idx] = e.target.value; setMcqOptions(n); }} style={inputBox} placeholder={`Option ${String.fromCharCode(65+idx)}`} />
+                    <input value={o} onChange={e => { const n = [...mcqOptions]; n[idx] = e.target.value; setMcqOptions(n); }} style={{...inputBox, marginTop: 0}} placeholder={`Option ${String.fromCharCode(65+idx)}`} />
                   </div>
                 ))}
-                <button onClick={() => setMcqOptions([...mcqOptions, ''])} style={{...ghostBtn, alignSelf: 'flex-start'}}>+ Option Item</button>
+                <button onClick={() => setMcqOptions([...mcqOptions, ''])} style={{...ghostBtn, alignSelf: 'flex-start'}}>+ Add Option</button>
               </div>
             )}
 
@@ -340,7 +351,6 @@ export default function GlobalNavigationAndMashupCreator() {
                       <span style={{ fontSize: 10, background: '#3b82f633', color: '#38bdf8', padding: '2px 6px', borderRadius: 4 }}>{p.platform}</span>
                       <span style={{ fontSize: 10, background: '#1e293b', color: '#94a3b8', padding: '2px 6px', borderRadius: 4 }}>{p.difficulty}</span>
                     </div>
-                    {/* 👉 FIXED: Properly mapping the title into the payload so the backend doesn't overwrite it */}
                     <button onClick={() => setCompiledProblems([...compiledProblems, { type: 'URL', url: p.originalUrl, title: p.title, displayTitle: p.title }])} style={{ background: '#38bdf8', color: '#000', fontWeight: 'bold', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>+ Import to Mashup</button>
                   </div>
                 ))}

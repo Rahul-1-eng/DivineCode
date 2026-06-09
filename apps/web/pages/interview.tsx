@@ -145,7 +145,7 @@ export default function InterviewPage() {
               return (
                 <section key={`${attempt}-${q.id}`} style={card}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <span style={tag}>{q.track?.title || 'General'}</span>
+                    <span style={tag}>{q.track?.title || 'Core Computer Science'}</span>
                     <span style={rating}>{q.difficultyLabel || q.difficulty || 'Medium'}</span>
                   </div>
                   

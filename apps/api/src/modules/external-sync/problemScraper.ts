@@ -13,25 +13,26 @@ export interface ScrapedProblem {
 
 export async function scrapeProblemFromUrl(url: string) {
   try {
-    // 1. Prioritize Specialized Scrapers for speed and accuracy
     if (url.includes('codeforces.com')) {
       const cfData = await scrapeCodeforces(url);
       return { ...cfData, success: true, requiresRedirect: false };
     }
 
-    // 2. Generic Platform Scraper
     const genericData = await scrapeGenericPlatform(url);
     return { ...genericData, success: true, requiresRedirect: false };
 
   } catch (error) {
     console.error(`[Scraper] Full extraction failed for ${url}, enforcing redirect.`);
     
-    // 3. Fallback: Tells frontend to use `window.open` external link
+    // Clean Redirect UI - No raw error shown
     return { 
       title: 'External Platform Problem',
-      descriptionHtml: `<div style="text-align:center; padding: 20px;">
-        <p>Problem description could not be scraped. Submitting will redirect you.</p>
-      </div>`,
+      descriptionHtml: `
+        <div style="text-align:center; padding: 40px; background: #0f172a; border: 1px solid #334155; border-radius: 8px;">
+            <h3 style="color: #38bdf8; margin-bottom: 10px;">Original Problem Required</h3>
+            <p style="color: #94a3b8; margin-bottom: 25px;">Due to platform security restrictions, the full problem description could not be scraped. Please view the question on the original platform.</p>
+            <a href="${url}" target="_blank" style="display: inline-block; padding: 12px 24px; background: #38bdf8; color: #000; font-weight: bold; border-radius: 6px; text-decoration: none;">View Original Problem</a>
+        </div>`,
       testcases: [],
       platform: 'OTHER' as const,
       originalUrl: url,
@@ -86,7 +87,12 @@ async function scrapeCodeforces(url: string): Promise<ScrapedProblem> {
     console.error('[Scraper] Codeforces extraction failed:', error);
     return {
       title: 'Codeforces Problem',
-      descriptionHtml: `<div style="text-align:center; padding: 20px;"><h3>Cloudflare Blocked Request</h3><p>Please view the full description and test cases directly on Codeforces.</p></div>`,
+      descriptionHtml: `
+        <div style="text-align:center; padding: 40px; background: #0f172a; border: 1px solid #334155; border-radius: 8px;">
+            <h3 style="color: #38bdf8; margin-bottom: 10px;">Codeforces Problem</h3>
+            <p style="color: #94a3b8; margin-bottom: 25px;">Codeforces Cloudflare protection blocked direct extraction. Please view the description and test cases directly on Codeforces.</p>
+            <a href="${url}" target="_blank" style="display: inline-block; padding: 12px 24px; background: #38bdf8; color: #000; font-weight: bold; border-radius: 6px; text-decoration: none;">View on Codeforces</a>
+        </div>`,
       testcases: [],
       platform: 'CODEFORCES',
       originalUrl: url,
@@ -132,7 +138,12 @@ async function scrapeGenericPlatform(url: string): Promise<ScrapedProblem> {
     console.warn(`[Scraper] Generic extraction failed for ${url}. Using graceful fallback.`);
     return {
       title: 'External Problem',
-      descriptionHtml: `<div style="text-align:center; padding: 20px;"><h3>Scraping Blocked</h3><p>Please read the problem statement on the original platform.</p></div>`,
+      descriptionHtml: `
+        <div style="text-align:center; padding: 40px; background: #0f172a; border: 1px solid #334155; border-radius: 8px;">
+            <h3 style="color: #38bdf8; margin-bottom: 10px;">Scraping Blocked</h3>
+            <p style="color: #94a3b8; margin-bottom: 25px;">Please read the problem statement on the original platform.</p>
+            <a href="${url}" target="_blank" style="display: inline-block; padding: 12px 24px; background: #38bdf8; color: #000; font-weight: bold; border-radius: 6px; text-decoration: none;">View Original Problem</a>
+        </div>`,
       testcases: [],
       platform: 'OTHER',
       originalUrl: url,

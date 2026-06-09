@@ -137,16 +137,16 @@ export default function ContestRoomPage() {
     return parts.join(' : ');
   }
 
-useEffect(() => { const ticker = setInterval(() => setNowTick(Date.now()), 1000); return () => clearInterval(ticker); }, []);
+  useEffect(() => { const ticker = setInterval(() => setNowTick(Date.now()), 1000); return () => clearInterval(ticker); }, []);
 
-// Add this to calculate stats
-const { mcqCount, codingCount } = useMemo(() => {
-  const problems = contest?.problems || [];
-  return {
-    mcqCount: problems.filter((p: any) => !!p.interviewQuestionId).length,
-    codingCount: problems.filter((p: any) => !p.interviewQuestionId).length
-  };
-}, [contest]);
+  // 👉 FIXED: Top Level useMemo (Removed the duplicate inside the problem map loop)
+  const { mcqCount, codingCount } = useMemo(() => {
+    const problems = contest?.problems || [];
+    return {
+      mcqCount: problems.filter((p: any) => !!p.interviewQuestionId || p.isMCQ).length,
+      codingCount: problems.filter((p: any) => !p.interviewQuestionId && !p.isMCQ).length
+    };
+  }, [contest]);
 
   async function registerForContest() {
     if (!id || !session || !regHandle.trim()) return toast.error("Codeforces handle is required");
@@ -171,7 +171,8 @@ const { mcqCount, codingCount } = useMemo(() => {
       if (myTeam?.inviteCode) alert(`Team Created! Share this invite code with your friends: ${myTeam.inviteCode}`);
     }
   }
- async function approveMember(participantId: string) {
+
+  async function approveMember(participantId: string) {
     if (!id || !session) return;
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/participants/${participantId}/approve`, {
@@ -180,7 +181,7 @@ const { mcqCount, codingCount } = useMemo(() => {
       });
       if (res.ok) {
         toast.success('Player approved!');
-        await loadContest(); // Refresh to show them as official
+        await loadContest();
       } else {
         const data = await res.json();
         toast.error(data.error || 'Failed to approve');
@@ -189,31 +190,32 @@ const { mcqCount, codingCount } = useMemo(() => {
       toast.error('Network error');
     }
   }
- async function unregisterFromContest() {
-  if (!confirm("Are you sure you want to unregister?")) return;
-  
-  setLoadingText('Unregistering...'); 
-  setSyncing(true);
 
-  try {
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/unregister`, { 
-      method: 'POST', 
-      headers: viewerHeaders(session) 
-    });
+  async function unregisterFromContest() {
+    if (!confirm("Are you sure you want to unregister?")) return;
     
-    if (res.ok) {
-      toast.success('Successfully unregistered.');
-      await loadContest(); 
-    } else {
-      const data = await res.json();
-      toast.error(data.error || 'Failed to unregister');
+    setLoadingText('Unregistering...'); 
+    setSyncing(true);
+
+    try {
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/unregister`, { 
+        method: 'POST', 
+        headers: viewerHeaders(session) 
+      });
+      
+      if (res.ok) {
+        toast.success('Successfully unregistered.');
+        await loadContest(); 
+      } else {
+        const data = await res.json();
+        toast.error(data.error || 'Failed to unregister');
+      }
+    } catch (err) {
+      toast.error('Network error.');
+    } finally {
+      setSyncing(false);
     }
-  } catch (err) {
-    toast.error('Network error.');
-  } finally {
-    setSyncing(false);
   }
-}
 
   async function loadContest() {
     if (!id) return;
@@ -376,12 +378,6 @@ const { mcqCount, codingCount } = useMemo(() => {
     setChatInput('');
   };
 
-  const sendLobbyMsg = () => {
-    if(!lobbyChat.trim()) return;
-    socketRef.current?.emit('sendLobbyMessage', { contestId: id, sender: session?.user?.name || 'Guest', text: lobbyChat.trim(), time: Date.now() });
-    setLobbyChat('');
-  };
-
   const toggleVoice = async () => {
     if (!contest?.viewerMember?.teamId) return toast.error("You must be in a team to use voice chat. Solos can only use Text Chat.");
 
@@ -418,7 +414,12 @@ const { mcqCount, codingCount } = useMemo(() => {
     });
 
     socket.on('lobbyMessage', (msg) => { setLobbyMessages(prev => [...prev, msg]); });
-    socket.on('standings:update', () => { loadContest(); });
+    
+    // 👉 FIXED: Listens to the single universal update event to trigger a clean data refresh
+    socket.on('standings:update', () => { 
+        loadContest(); 
+        loadSubmissions();
+    });
     
     socket.on('submission:judged', (sub) => { 
       loadSubmissions();
@@ -632,7 +633,6 @@ const { mcqCount, codingCount } = useMemo(() => {
             
             <h1 style={{ fontSize: 46, margin: 0 }}>{contest.title}</h1>
             
-            {/* 👉 FIXED: Persistent Team Invite Code display here */}
             {viewerMember?.team && viewerMember.team !== 'Individuals' && viewerMember.team?.inviteCode && (
               <div style={{ background: 'rgba(2,6,23,0.5)', border: '1px dashed #38bdf8', padding: '8px 16px', borderRadius: 8, display: 'inline-block', marginTop: 12 }}>
                 <span style={{ color: '#94a3b8', fontSize: 12, marginRight: 8, textTransform: 'uppercase' }}>TEAM INVITE CODE:</span>
@@ -734,7 +734,6 @@ const { mcqCount, codingCount } = useMemo(() => {
         {isScheduledLockScreen && !isActuallyOwnerMode ? (
           <section style={{...panel, textAlign: 'center', padding: '60px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(251,191,36,0.05))'}}>
              <h2 style={{ fontSize: 32, marginBottom: 10, color: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>Contest has not started yet</h2>
-             {/* The invite code is safely persisted in the header now, but left here as an extra reminder */}
              <p style={{color: '#a8b3c7', fontSize: 18}}>Problems will be revealed when the countdown reaches zero.</p>
              <div style={{fontSize: 48, fontWeight: 'bold', color: '#67e8f9', marginTop: 20, fontFamily: 'monospace'}}>{formatCountdown(startTimeMs - nowTick)}</div>
              
@@ -796,8 +795,8 @@ const { mcqCount, codingCount } = useMemo(() => {
   <div style={{ marginBottom: '20px', padding: '15px', background: '#0f172a', borderRadius: '8px', border: '1px solid #334155' }}>
     <h3 style={{ margin: '0 0 10px 0', color: '#94a3b8' }}>Contest Breakdown</h3>
     <div style={{ display: 'flex', gap: '20px' }}>
-      <span style={{ color: '#fff' }}>Coding Problems: <strong>{codingCount}</strong></span>
-      <span style={{ color: '#fff' }}>MCQ Questions: <strong>{mcqCount}</strong></span>
+      <span style={{ color: '#fff' }}>Coding Problems: <strong style={{ color: '#38bdf8'}}>{codingCount}</strong></span>
+      <span style={{ color: '#fff' }}>Theory / MCQs: <strong style={{ color: '#fbbf24'}}>{mcqCount}</strong></span>
     </div>
   </div>
 
@@ -809,16 +808,12 @@ const { mcqCount, codingCount } = useMemo(() => {
                       const label = String.fromCharCode(65 + index);
                       const actualTitle = p.titleSnapshot || p.problem?.title || `Problem ${label}`;
                       const visibleTitle = canSeeProblemMeta ? actualTitle : `Problem ${label}`;
-                      // Redirecting to the centralized submit page
-const safeProblemHref = `/submit?contestId=${contest.id}&problemId=${p.id}`; 
+                      
+                      // 👉 FIXED URL: This now points correctly to the [problemId].tsx dynamic workspace
+                      const safeProblemHref = `/contests/${contest.id}/problems/${p.id}`; 
+                      
                       const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
-                      const { mcqCount, codingCount } = useMemo(() => {
-                      const problems = contest?.problems || [];
-                      return {
-                        mcqCount: problems.filter((p: any) => !!p.interviewQuestionId).length,
-                        codingCount: problems.filter((p: any) => !p.interviewQuestionId).length
-                      };
-                    }, [contest]);
+
                       return <div key={p.id} style={{ ...problemRow, borderColor: isSolvedByTeam ? 'rgba(74, 222, 128, 0.4)' : 'rgba(148,163,184,.16)' }}>
                         <strong style={{ color: '#67e8f9', fontSize: 22 }}>{label}</strong>
                         <div>
@@ -997,7 +992,6 @@ const safeProblemHref = `/submit?contestId=${contest.id}&problemId=${p.id}`;
         )}
       </section>
 
-      {/* 👉 FIXED: Chat Box logic - Solo players get a Global Chat, Teams get Team Chat */}
       {!isFinal && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
           {isChatOpen ? (
@@ -1017,7 +1011,6 @@ const safeProblemHref = `/submit?contestId=${contest.id}&problemId=${p.id}`;
 
               <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
                 {viewerMember.teamId ? (
-                  // Team Message UI
                   messages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No messages yet. Say hi!</p> : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {messages.map(msg => (
@@ -1030,7 +1023,6 @@ const safeProblemHref = `/submit?contestId=${contest.id}&problemId=${p.id}`;
                     </div>
                   )
                 ) : (
-                  // Global Message UI (Solo Player)
                   lobbyMessages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No global messages yet.</p> : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {lobbyMessages.map((msg, i) => (

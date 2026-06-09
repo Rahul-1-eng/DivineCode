@@ -20,7 +20,6 @@ submissionRouter.get('/contest/:contestId', async (req, res) => {
 
     return res.json(submissions);
   } catch (err: any) {
-    // Return 403 Forbidden for privacy violations
     return res.status(403).json({ error: err.message });
   }
 });
@@ -70,12 +69,12 @@ submissionRouter.post('/:id/report', async (req, res) => {
       }
     });
 
-    // 👉 ADDED: Tell the room to refresh so the owner sees the report instantly
+    // 👉 FIXED: Socket room name must include 'contest:' prefix to match v2.ts
     const submission = await prisma.submission.findUnique({ where: { id } });
     if (submission && submission.contestId) {
       const io = req.app.get('io');
       if (io) {
-        io.to(submission.contestId).emit('submissionsUpdated');
+        io.to(`contest:${submission.contestId}`).emit('standings:update');
       }
     }
 
@@ -97,14 +96,13 @@ submissionRouter.post('/:id/override', async (req, res) => {
       data: { manualPoints: manualPoints !== null ? Number(manualPoints) : null }
     });
 
-    // Recompute standings so the overridden points immediately reflect on the leaderboard
     if (submission.contestId) {
       await recomputeContestStandings(submission.contestId);
       
-      // 👉 ADDED: Fire the WebSocket event so everyone's screen flashes the new standings instantly!
+      // 👉 FIXED: Tell the frontend to instantly recalculate the leaderboard
       const io = req.app.get('io');
       if (io) {
-        io.to(submission.contestId).emit('submissionsUpdated');
+        io.to(`contest:${submission.contestId}`).emit('standings:update');
       }
     }
 
