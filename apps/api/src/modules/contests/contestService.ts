@@ -7,7 +7,7 @@ import { generateToughTestCases } from '../ai/aiService';
 
 export type MemberInput = { username?: string; userId?: string; email?: string; name?: string; displayName?: string; teamName?: string; teamInviteCode?: string; codeforcesHandle?: string; ratingBefore?: number; };
 
-export type ProblemInput = { id?: string; problemId?: string; interviewQuestionId?: string; title?: string; description?: string; mcqTimeLimitSeconds?: number; mcqData?: any; platform?: string; code?: string; contestCode?: string; problemIndex?: string; externalId?: string; url?: string; points?: number; testcases?: any[]; imageUrl?: string; };
+export type ProblemInput = { id?: string; problemId?: string; interviewQuestionId?: string; title?: string; description?: string; mcqTimeLimitSeconds?: number; mcqData?: any; platform?: string; code?: string; contestCode?: string; problemIndex?: string; externalId?: string; url?: string; externalUrl?: string; points?: number; testcases?: any[]; imageUrl?: string; };
 
 export type CreateContestInput = { title?: string; description?: string; type?: ContestType; startTime?: string; durationMinutes?: number; freezeMinutes?: number; isRated?: boolean; allowLateJoin?: boolean; allowTeamSubmissionView?: boolean; hideProblemMetaDuringContest?: boolean; ownerUserId?: string; ownerEmail?: string; ownerName?: string; members?: MemberInput[]; problems?: ProblemInput[]; requireUnsolvedByAll?: boolean; };
 
