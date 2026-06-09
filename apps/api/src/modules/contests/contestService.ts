@@ -216,14 +216,14 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
   const platform = toPlatform(input.problem.platform);
   const label = displayLabel(input.index);
   
-  return tx.contestProblem.create({
-    data: {
+  // Use a strictly permissive cast for the data object
+  const data: any = {
       contestId: input.contestId,
       problemId: input.problem.problemId || input.problem.id || null,
       interviewQuestionId: input.problem.interviewQuestionId || null,
       titleSnapshot: String(input.problem.title || `Problem ${label}`).trim(),
       customDescription: input.problem.description || null,
-      imageUrl: (input.problem as any).imageUrl || null, 
+      imageUrl: input.problem.imageUrl || null, 
       platform, 
       externalUrl: input.problem.url || externalUrl(input.problem, platform) || '', 
       index: input.index,
@@ -233,8 +233,9 @@ async function createContestProblemRow(tx: Prisma.TransactionClient, input: {
       isMCQ: !!input.problem.interviewQuestionId,
       mcqTimeLimitSeconds: input.problem.mcqTimeLimitSeconds || 0,
       mcqData: input.problem.mcqData || null
-    } as any 
-  });
+  };
+  
+  return tx.contestProblem.create({ data });
 }
 
 export async function loadContestForViewer(contestId: string) {
@@ -246,7 +247,7 @@ export async function loadContestForViewer(contestId: string) {
         participants: {
           include: { user: true, externalHandle: true, team: true },
           // 👉 FIXED: Replaced 'joinedAt' with 'createdAt' so Prisma doesn't crash on Return!
-          orderBy: { createdAt: 'asc' } 
+          orderBy: { joinedAt: 'asc' } 
         },
         problems: {
           include: {
