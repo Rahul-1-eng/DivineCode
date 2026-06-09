@@ -6,11 +6,14 @@ import { canManageContest, sanitizeContestForViewer, viewerFromRequest } from '.
 import { 
   createContestV2, listContestsV2, loadContestForViewer, reorderContestProblemV2, 
   addContestProblemV2, removeContestProblemV2, replaceContestProblemV2, registerForContestV2, approveParticipant,
-  createTeamForContest, joinTeamWithInviteCode, requestToJoinTeam
+  createTeamForContest, joinTeamWithInviteCode, requestToJoinTeam,
+  updateContestSettingsV2, deleteContestV2, extendContestV2, getContestSubmissionsV2, overrideSubmissionPoints
 } from '../modules/contests/contestService';
+import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncService';
 import { createQueuedContestSubmission, unlockHiddenTestCase } from '../modules/contests/submissionService';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
 import { recomputeContestStandings } from '../modules/standings/standingService';
+import { processContestRewards } from '../modules/ratings/ratingService';
 import { scrapeProblemFromUrl } from '../modules/external-sync/problemScraper'; 
 import { generateTestCasesWithAI, debugCodeWithAI, generateToughTestCases } from '../modules/ai/aiService'; 
 import { ContestStatus } from '@prisma/client';
@@ -50,9 +53,56 @@ function asyncRoute(handler: AsyncHandler) {
 function statusFromError(error: Error) {
   console.error("API Error Log:", error);
   if (/not found/i.test(error.message)) return 404;
-  if (/only|owner|permission|registered contest players/i.test(error.message)) return 403;
+  if (/only|owner|permission|registered contest players|unauthorized|forbidden/i.test(error.message)) return 403;
   if (/required|needs|cannot|at least|already/i.test(error.message)) return 400;
   return 500;
+}
+
+function slugify(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'user';
+}
+
+async function resolveViewerUserId(viewer: ReturnType<typeof viewerFromRequest>, createIfMissing = false) {
+  if (viewer.userId) {
+    const byId = await prisma.user.findUnique({ where: { id: viewer.userId } });
+    if (byId) return byId.id;
+  }
+
+  const email = viewer.email?.trim().toLowerCase();
+  if (!email) return undefined;
+
+  const byEmail = await prisma.user.findUnique({ where: { email } });
+  if (byEmail || !createIfMissing) return byEmail?.id;
+
+  const usernameSeed = slugify(viewer.name || email.split('@')[0] || 'user');
+  const created = await prisma.user.upsert({
+    where: { email },
+    update: { name: viewer.name || undefined },
+    create: {
+      email,
+      name: viewer.name || email.split('@')[0],
+      username: `${usernameSeed}_${Math.random().toString(36).slice(2, 8)}`
+    }
+  });
+  return created.id;
+}
+
+async function resolvedViewerFromRequest(req: Request, createIfMissing = false) {
+  const viewer = viewerFromRequest(req);
+  const resolvedUserId = await resolveViewerUserId(viewer, createIfMissing);
+  return { ...viewer, userId: resolvedUserId || viewer.userId };
+}
+
+async function requireContestOwner(req: Request) {
+  const viewer = await resolvedViewerFromRequest(req);
+  const contest = await prisma.contest.findUnique({
+    where: { id: req.params.id },
+    include: { createdBy: true, participants: { include: { user: true, externalHandle: true } } }
+  });
+  if (!contest) throw new Error('Contest not found');
+  if (!canManageContest(contest, viewer)) throw new Error('Only the contest owner can perform this action');
+  if (!viewer.userId) throw new Error('Unauthorized');
+  return viewer;
 }
 
 async function requireJudgeAccess(submissionId: string, req: Request) {
@@ -184,7 +234,7 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
   
   router.post('/contests/:id/participants/:participantId/approve', asyncRoute(async (req, res) => {
-    const viewer = viewerFromRequest(req);
+    const viewer = await resolvedViewerFromRequest(req);
     if (!viewer.userId) throw new Error("Unauthorized");
     const updated = await approveParticipant(req.params.id, req.params.participantId, viewer.userId);
     res.json({ success: true, participant: updated });
@@ -192,41 +242,43 @@ export function mountV2Routes(app: Express, io: Server) {
 
   // NEW: Create a team/group for the contest
   router.post('/contests/:id/team/create', asyncRoute(async (req, res) => {
-    const viewer = viewerFromRequest(req);
+    const viewer = await resolvedViewerFromRequest(req, true);
     if (!viewer.userId) throw new Error("Unauthorized");
-    const { teamName } = req.body;
+    const { teamName, codeforcesHandle } = req.body;
     if (!teamName || !teamName.trim()) throw new Error("Team name is required");
     
-    const result = await createTeamForContest(req.params.id, teamName.trim(), viewer.userId);
-    res.json({ success: true, ...result });
+    await createTeamForContest(req.params.id, teamName.trim(), viewer.userId, codeforcesHandle);
+    const contest = await loadContestForViewer(req.params.id);
+    res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
   // NEW: Join team with invitation code
   router.post('/contests/:id/team/join-invite', asyncRoute(async (req, res) => {
-    const viewer = viewerFromRequest(req);
+    const viewer = await resolvedViewerFromRequest(req, true);
     if (!viewer.userId) throw new Error("Unauthorized");
-    const { inviteCode } = req.body;
+    const { inviteCode, codeforcesHandle } = req.body;
     if (!inviteCode) throw new Error("Invite code is required");
     
-    const result = await joinTeamWithInviteCode(req.params.id, inviteCode, viewer.userId);
+    await joinTeamWithInviteCode(req.params.id, inviteCode, viewer.userId, codeforcesHandle);
     const contest = await loadContestForViewer(req.params.id);
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
   // NEW: Request to join existing team (pending approval)
   router.post('/contests/:id/team/request-join', asyncRoute(async (req, res) => {
-    const viewer = viewerFromRequest(req);
+    const viewer = await resolvedViewerFromRequest(req, true);
     if (!viewer.userId) throw new Error("Unauthorized");
-    const { teamName } = req.body;
-    if (!teamName) throw new Error("Team name is required");
+    const { teamName, teamId, codeforcesHandle } = req.body;
+    const teamTarget = teamId || teamName;
+    if (!teamTarget) throw new Error("Team is required");
     
-    const result = await requestToJoinTeam(req.params.id, teamName, viewer.userId);
+    await requestToJoinTeam(req.params.id, teamTarget, viewer.userId, codeforcesHandle);
     const contest = await loadContestForViewer(req.params.id);
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
   router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
-    const viewer = viewerFromRequest(req);
+    const viewer = await resolvedViewerFromRequest(req);
     const contestId = req.params.id;
     
     const participant = await prisma.contestParticipant.findFirst({
@@ -266,32 +318,35 @@ export function mountV2Routes(app: Express, io: Server) {
   router.get('/problems/lookup', asyncRoute(async (req, res) => {
     const { platform, code } = req.query;
     const cleanCode = String(code).replace(/\s+/g, '').toUpperCase();
+    const cfMatch = cleanCode.match(/^(\d+)([A-Z][0-9]?)$/);
     
     res.json({ 
       title: `${platform} Problem ${cleanCode}`, 
       platform, 
       code: cleanCode, 
       externalId: cleanCode, 
+      contestCode: cfMatch?.[1],
+      problemIndex: cfMatch?.[2],
       url: platform === 'Codeforces' 
-        ? `https://codeforces.com/problemset/problem/${cleanCode.match(/^\d+/)?.[0]}/${cleanCode.match(/[A-Z0-9]+$/)?.[0]}` 
+        ? (cfMatch ? `https://codeforces.com/problemset/problem/${cfMatch[1]}/${cfMatch[2]}` : '') 
         : '' 
     });
   }));
 
   router.post('/contests/:id/problems', asyncRoute(async (req, res) => {
-    const viewer = viewerFromRequest(req);
+    const viewer = await requireContestOwner(req);
     const contest = await addContestProblemV2(req.params.id, req.body, viewer.userId);
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
   router.put('/contests/:id/problems/:problemId', asyncRoute(async (req, res) => {
-    const viewer = viewerFromRequest(req);
+    const viewer = await requireContestOwner(req);
     const contest = await replaceContestProblemV2(req.params.id, req.params.problemId, req.body, viewer.userId);
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
   router.delete('/contests/:id/problems/:problemId', asyncRoute(async (req, res) => {
-    const viewer = viewerFromRequest(req);
+    const viewer = await requireContestOwner(req);
     const contest = await removeContestProblemV2(req.params.id, req.params.problemId, viewer.userId);
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
@@ -306,6 +361,60 @@ export function mountV2Routes(app: Express, io: Server) {
     res.status(201).json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
   }));
 
+  router.put('/contests/:id', asyncRoute(async (req, res) => {
+    const viewer = await requireContestOwner(req);
+    const contest = await updateContestSettingsV2(req.params.id, req.body, viewer.userId);
+    res.json(sanitizeContestForViewer(contest!, viewer));
+  }));
+
+  router.delete('/contests/:id', asyncRoute(async (req, res) => {
+    const viewer = await requireContestOwner(req);
+    await deleteContestV2(req.params.id, viewer.userId);
+    res.json({ success: true });
+  }));
+
+  router.post('/contests/:id/extend', asyncRoute(async (req, res) => {
+    const viewer = await requireContestOwner(req);
+    const minutes = Math.max(1, Number(req.body?.minutes || 0));
+    const contest = await extendContestV2(req.params.id, minutes, viewer.userId);
+    res.json(sanitizeContestForViewer(contest!, viewer));
+  }));
+
+  router.post('/contests/:id/finalize', asyncRoute(async (req, res) => {
+    const viewer = await requireContestOwner(req);
+    const before = await prisma.contest.findUnique({ where: { id: req.params.id } });
+    await prisma.contest.update({ where: { id: req.params.id }, data: { status: ContestStatus.ENDED } });
+    await recomputeContestStandings(req.params.id);
+    const rewards = before?.status === ContestStatus.ENDED ? null : await processContestRewards(req.params.id);
+    const contest = await loadContestForViewer(req.params.id);
+    io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id });
+    res.json({ success: true, message: 'Contest finalized.', rewards, contest: sanitizeContestForViewer(contest!, viewer) });
+  }));
+
+  router.get('/contests/:id/submissions', asyncRoute(async (req, res) => {
+    const viewer = await resolvedViewerFromRequest(req);
+    const submissions = await getContestSubmissionsV2(req.params.id, viewer.userId, viewer.email);
+    res.json(submissions);
+  }));
+
+  router.post('/contests/:id/sync/codeforces', asyncRoute(async (req, res) => {
+    const viewer = await resolvedViewerFromRequest(req);
+    const contest = await loadContestForViewer(req.params.id);
+    if (!contest) throw new Error('Contest not found');
+    const sanitized = sanitizeContestForViewer(contest, viewer);
+    if (!sanitized?.canManage && !sanitized?.viewerMember) throw new Error('Only registered contest players can sync submissions.');
+    const result = await syncCodeforcesContest(req.params.id);
+    io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id, standings: result.standings });
+    res.json(result);
+  }));
+
+  router.post('/contests/:id/submissions/:submissionId/override', asyncRoute(async (req, res) => {
+    const viewer = await requireContestOwner(req);
+    const contest = await overrideSubmissionPoints(req.params.id, req.params.submissionId, Number(req.body.manualPoints), viewer.userId!);
+    io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id });
+    res.json(sanitizeContestForViewer(contest!, viewer));
+  }));
+
   router.get('/contests/:id', asyncRoute(async (req, res) => {
     const contest = await loadContestForViewer(req.params.id);
     if (!contest) throw new Error('Contest not found');
@@ -313,6 +422,7 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
 
   router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
+    const viewer = await requireContestOwner(req);
     // We now capture generateAiTests for URL problems
     const { type, url, customData, mcqData, generateAiTests } = req.body;
     const contestId = req.params.id;
@@ -366,7 +476,8 @@ export function mountV2Routes(app: Express, io: Server) {
       const updatedProblem = await prisma.contestProblem.create({
         data: { contestId, problemId: problem.id, points: 100, titleSnapshot: problem.title, index: existingCount, label: nextLabel, platform: platform as any, externalUrl: url, requiresRedirect: true }
       });
-      return res.json({ success: true, problem: updatedProblem });
+      const contest = await loadContestForViewer(contestId);
+      return res.json(sanitizeContestForViewer(contest!, viewer));
     }
 
     // ============================================
@@ -401,7 +512,8 @@ export function mountV2Routes(app: Express, io: Server) {
           mcqTimeLimitSeconds: Number(mcqData.timeLimit || req.body.mcqTimeLimitSeconds || 0)
         } as any 
       });
-      return res.json({ success: true });
+      const contest = await loadContestForViewer(contestId);
+      return res.json(sanitizeContestForViewer(contest!, viewer));
     }
 
     // ============================================
@@ -448,16 +560,18 @@ export function mountV2Routes(app: Express, io: Server) {
           mcqTimeLimitSeconds: Number(customData.time || 0)
         } as any
       });
-      return res.json({ success: true });
+      const contest = await loadContestForViewer(contestId);
+      return res.json(sanitizeContestForViewer(contest!, viewer));
     }
 
     res.status(400).json({ error: 'Bad type parsing' });
   }));
 
   router.put('/contests/:id/problems/:problemId/reorder', asyncRoute(async (req, res) => {
+    const viewer = await requireContestOwner(req);
     const { direction } = req.body;
-    const contest = await reorderContestProblemV2(req.params.id, req.params.problemId, direction);
-    res.json(sanitizeContestForViewer(contest!, viewerFromRequest(req)));
+    const contest = await reorderContestProblemV2(req.params.id, req.params.problemId, direction, viewer.userId);
+    res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
   router.post('/contests/:id/problems/:problemId/unlock-testcase', asyncRoute(async (req, res) => {

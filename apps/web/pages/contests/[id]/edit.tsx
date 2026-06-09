@@ -1,4 +1,4 @@
-import { CSSProperties, useEffect, useState } from 'react';
+import { CSSProperties, useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import toast, { Toaster } from 'react-hot-toast';
@@ -34,6 +34,9 @@ export default function ContestEditPage() {
   const [durationMinutes, setDurationMinutes] = useState(120);
   const [startTimeStr, setStartTimeStr] = useState('');
   
+  // 👉 NEW: Open Editing State to allow others to add problems
+  const [openEditing, setOpenEditing] = useState(false);
+
   const [newProblemCode, setNewProblemCode] = useState('');
   const [newProblemPlatform, setNewProblemPlatform] = useState('Codeforces');
   const [newProblemUrl, setNewProblemUrl] = useState(''); 
@@ -65,6 +68,7 @@ export default function ContestEditPage() {
     setTitle(data.title || '');
     setDescription(data.description || '');
     setDurationMinutes(data.durationMinutes || 120);
+    setOpenEditing(data.settings?.openEditing || data.openEditing || false);
     
     if (data.startTime) {
       const dt = new Date(data.startTime);
@@ -78,7 +82,7 @@ export default function ContestEditPage() {
   async function saveSettings() {
     if (!id || !session) return;
     setSaving(true);
-    const bodyPayload: any = { title, description, durationMinutes };
+    const bodyPayload: any = { title, description, durationMinutes, openEditing };
     if (startTimeStr) bodyPayload.startTime = new Date(startTimeStr).toISOString();
     
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}`, { 
@@ -101,8 +105,27 @@ export default function ContestEditPage() {
     toast.success('Settings saved successfully!');
   }
 
+  // 👉 FIXED: Toggle open editing correctly connects to v2 settings API
+  const toggleOpenEditing = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.checked;
+    setOpenEditing(newVal);
+    try {
+      await fetch(`${API_V2_BASE_URL}/contests/${id}/settings`, {
+        method: 'PUT',
+        headers: viewerHeaders(session),
+        body: JSON.stringify({ openEditing: newVal })
+      });
+      toast.success("Editing permissions updated!");
+    } catch(err) {
+      toast.error("Failed to update editing settings");
+    }
+  };
+
+  // 👉 FIXED: Upgraded to /v2/problems/lookup and implemented viewerHeaders for authorization.
   async function lookupProblem(platform: string, code: string) {
-    const res = await fetch(`${API_BASE_URL}/api/problems/lookup?platform=${encodeURIComponent(platform)}&code=${encodeURIComponent(code)}`);
+    const res = await fetch(`${API_V2_BASE_URL}/problems/lookup?platform=${encodeURIComponent(platform)}&code=${encodeURIComponent(code)}`, {
+      headers: viewerHeaders(session)
+    });
    let data;
       const contentType = res.headers.get("content-type");
       if (contentType && contentType.includes("application/json")) {
@@ -381,6 +404,11 @@ export default function ContestEditPage() {
           <label style={{display: 'block', marginTop: 10}}>Scheduled Start Time</label>
           <input type="datetime-local" value={startTimeStr} onChange={(e) => setStartTimeStr(e.target.value)} style={{ ...input, maxWidth: 220 }} />
           
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 15, marginBottom: 15 }}>
+            <input type="checkbox" checked={openEditing} onChange={toggleOpenEditing} />
+            Open Editing (Allow others to add problems during the contest)
+          </label>
+
           <button onClick={saveSettings} disabled={saving} style={primary}>{saving ? 'Saving...' : 'Save settings'}</button>
         </section>
 

@@ -14,7 +14,7 @@ export default function PracticePage() {
   const [difficultyFilter, setDifficultyFilter] = useState('All');
   const [platformFilter, setPlatformFilter] = useState('All');
 
-  // 👉 NEW: AI Avatar Chatbot State
+  // AI Avatar Chatbot State
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<{role: 'user'|'ai', text: string}[]>([
     { role: 'ai', text: 'Hello! I have access to over 5,000+ DSA questions across all platforms and ratings. How can I help you practice today?' }
@@ -151,7 +151,23 @@ export default function PracticePage() {
                       transition: 'background 0.2s',
                       cursor: 'pointer'
                     }}
-                    onClick={() => window.location.href = `/practice/${p.id}`}
+                    // 👉 FIXED: Re-direct to original platform link for Codeforces instead of a blank local screen
+                    onClick={() => {
+                      const isCodeforces = p.platform === 'Codeforces' || p.source === 'codeforces' || p.originalUrl;
+                      if (isCodeforces) {
+                        const contestId = p.contestId || p.code?.match(/^\d+/)?.[0];
+                        const index = p.index || p.code?.match(/[A-Z0-9]+$/)?.[0];
+                        const targetUrl = p.originalUrl || (contestId && index ? `https://codeforces.com/problemset/problem/${contestId}/${index}` : null);
+                        
+                        if (targetUrl) {
+                          window.open(targetUrl, '_blank', 'noopener,noreferrer');
+                        } else {
+                          window.location.href = `/practice/${p.id}`;
+                        }
+                      } else {
+                        window.location.href = `/practice/${p.id}`;
+                      }
+                    }}
                     onMouseOver={(e) => e.currentTarget.style.background = 'rgba(30,41,59,0.8)'}
                     onMouseOut={(e) => e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.4)'}
                   >
@@ -183,7 +199,7 @@ export default function PracticePage() {
         </div>
       </section>
 
-      {/* 👉 NEW: Floating AI Avatar Chatbot */}
+      {/* Floating AI Avatar Chatbot */}
       <div style={floatingAiWrapper}>
         <AnimatePresence>
           {isChatOpen && (

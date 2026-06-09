@@ -36,7 +36,8 @@ export function isContestOwner(contest: any, viewer: ViewerContext) {
   const viewerEmail = normalize(viewer?.email);
   return Boolean(
     (viewerUserId && normalize(contest.createdById) === viewerUserId) ||
-      (viewerEmail && normalize(contest?.createdBy?.email) === viewerEmail)
+      (viewerEmail && normalize(contest?.createdBy?.email) === viewerEmail) ||
+      (viewerEmail && normalize(contest?.ownerEmail) === viewerEmail)
   );
 }
 
@@ -143,13 +144,31 @@ export function sanitizeContestForViewer(contest: any, viewer: ViewerContext, no
   
   const validParticipants = (contest.participants || []).filter(Boolean);
   const participantById = new Map(validParticipants.map((row: any) => [row.id, row]));
+  const officialParticipants = validParticipants.filter((p: any) => p.isOfficial !== false);
+  const countableParticipants = officialParticipants.filter((p: any) => p.teamId || p.role !== 'OWNER');
+  const teams = (contest.teams || []).map((team: any) => {
+    const teamParticipants = validParticipants.filter((p: any) => p.teamId === team.id);
+    const viewerIsTeamLeader = participant?.teamId === team.id && ['OWNER', 'MANAGER'].includes(String(participant?.role || ''));
+    const canSeeInviteCode = canManage || viewerIsTeamLeader;
+    return {
+      id: team.id,
+      name: team.name,
+      membersCount: teamParticipants.filter((p: any) => p.isOfficial !== false).length,
+      pendingCount: teamParticipants.filter((p: any) => p.isOfficial === false).length,
+      inviteCode: canSeeInviteCode ? team.inviteCode : null,
+      createdAt: team.createdAt
+    };
+  });
   
   const members = validParticipants.map((p: any) => ({
     id: p.id,
+    userId: p.userId || null,
     name: p.displayName || 'Unknown',
     displayName: p.displayName || 'Unknown',
     team: p.teamName || 'Individuals',
     teamName: p.teamName || 'Individuals',
+    teamId: p.teamId || null,
+    teamInviteCode: (canManage || (participant?.teamId === p.teamId && ['OWNER', 'MANAGER'].includes(String(participant?.role || '')))) ? p.team?.inviteCode || null : null,
     email: p.user?.email || '',
     codeforcesHandle: p.externalHandle?.handle || '',
     handle: p.externalHandle?.handle || '',
@@ -174,14 +193,27 @@ export function sanitizeContestForViewer(contest: any, viewer: ViewerContext, no
     allowLateJoin: Boolean(contest.allowLateJoin),
     allowTeamSubmissionView: Boolean(contest.allowTeamSubmissionView),
     createdAt: contest.createdAt,
+    membersCount: typeof contest.membersCount === 'number' ? contest.membersCount : countableParticipants.length,
+    participantsCount: typeof contest.participantsCount === 'number' ? contest.participantsCount : countableParticipants.length,
+    problemsCount: typeof contest.problemsCount === 'number' ? contest.problemsCount : (contest.problems || []).length,
+    questionCount: typeof contest.questionCount === 'number' ? contest.questionCount : (contest.problems || []).length,
+    mcqCount: typeof contest.mcqCount === 'number' ? contest.mcqCount : (contest.problems || []).filter((p: any) => p?.isMCQ || p?.interviewQuestionId).length,
+    codingProblemsCount: typeof contest.codingProblemsCount === 'number' ? contest.codingProblemsCount : (contest.problems || []).filter((p: any) => !p?.isMCQ && !p?.interviewQuestionId).length,
+    ownerEmail: contest.ownerEmail || contest.createdBy?.email || '',
+    createdById: contest.createdById || null,
     canManage,
     viewerMember: participant
       ? {
           id: participant.id,
+          userId: participant.userId || null,
           name: participant.displayName || 'Unknown',
           displayName: participant.displayName || 'Unknown',
           team: participant.teamName || 'Individuals',
           teamName: participant.teamName || 'Individuals',
+          teamId: participant.teamId || null,
+          role: participant.role || 'PARTICIPANT',
+          isOfficial: Boolean(participant.isOfficial),
+          teamInviteCode: participant.teamId && ['OWNER', 'MANAGER'].includes(String(participant.role || '')) ? participant.team?.inviteCode || null : null,
           email: participant.user?.email || '',
           codeforcesHandle: participant.externalHandle?.handle || '',
           handle: participant.externalHandle?.handle || ''
@@ -204,6 +236,7 @@ export function sanitizeContestForViewer(contest: any, viewer: ViewerContext, no
     },
     participants: members,
     members,
+    teams,
     problems: (contest.problems || []).map((problem: any) => sanitizeProblem(problem, showMeta)).filter(Boolean),
     standings: (contest.standings || []).map((standing: any) => {
       if (!standing) return null;

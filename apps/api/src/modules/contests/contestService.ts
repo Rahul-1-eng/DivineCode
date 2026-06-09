@@ -87,6 +87,10 @@ async function ensureCodeforcesHandle(tx: Prisma.TransactionClient, userId: stri
   return tx.externalHandle.create({ data: { userId, platform: Platform.CODEFORCES, handle: normalizedHandle, status: HandleVerificationStatus.PENDING } });
 }
 
+async function deleteContestSettingsV2(contestId: string) {
+  return await prisma.contest.delete({ where: { id: contestId } });
+}
+
 async function assertUnsolvedByAll(members: MemberInput[], problems: ProblemInput[]) {
   for (const problem of problems) {
     const platform = toPlatform(problem.platform);
@@ -97,8 +101,8 @@ async function assertUnsolvedByAll(members: MemberInput[], problems: ProblemInpu
     for (const member of members) {
       if (!member.codeforcesHandle) throw new Error(`CF MISSING: Participant ${member.displayName || 'Unnamed'} needs a Codeforces handle.`);
       try {
-        const accepted = await fetchCodeforcesAccepted(member.codeforcesHandle, parsed.contestCode, parsed.problemIndex);
-        if (accepted) throw new Error(`Cannot add ${parsed.contestCode}${parsed.problemIndex}. ${member.codeforcesHandle} has already solved it.`);
+        const _accepted = await fetchCodeforcesAccepted(member.codeforcesHandle, parsed.contestCode, parsed.problemIndex);
+        if (_accepted) throw new Error(`Cannot add ${parsed.contestCode}${parsed.problemIndex}. ${member.codeforcesHandle} has already solved it.`);
       } catch (err: any) { if (err.message.includes('Cannot add')) throw err; }
     }
   }
@@ -136,10 +140,10 @@ export async function loadContestForViewer(contestId: string) {
       where: { id: contestId },
       include: {
         createdBy: true,
-        // FIXED: Removed orderBy: { joinedAt } to prevent database crash
         participants: { include: { user: true, externalHandle: true, team: true } },
         problems: { include: { problem: { include: { editorial: true, officialSolutions: true, testcases: true } }, interviewQuestion: true }, orderBy: { index: 'asc' } },
-        standings: { include: { participant: true } }
+        standings: { include: { participant: true } },
+        teams: { include: { participants: true } }
       }
     });
   } catch (error) { throw error; }
@@ -160,27 +164,30 @@ export async function registerForContestV2(contestId: string, input: MemberInput
     const existing = await tx.contestParticipant.findFirst({ where: { contestId, userId: user.id } });
     if (existing) throw new Error('User is already registered for this contest.');
 
-    let teamId = null;
+    let teamId: string | null = null;
     let isPending = false;
+    let role = ContestParticipantRole.PARTICIPANT;
     
     if (memberInput.teamInviteCode) {
-      const team = await tx.contestTeam.findUnique({ where: { inviteCode: memberInput.teamInviteCode } });
+      const team = await tx.contestTeam.findFirst({ where: { inviteCode: memberInput.teamInviteCode.trim().toUpperCase(), contestId } });
       if (!team || team.contestId !== contestId) throw new Error("Invalid or Expired Team Invite Code");
-      teamId = team.id; memberInput.teamName = team.name; isPending = true; 
+      teamId = team.id; memberInput.teamName = team.name; isPending = false; 
     } else if (memberInput.teamName && memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo') {
-       isPending = true;
-    } else {
-       const isRealTeam = memberInput.teamName && memberInput.teamName !== 'Individuals';
-       if (isRealTeam) {
-         let team = await tx.contestTeam.findFirst({ where: { contestId, name: memberInput.teamName } });
-         if (!team) team = await tx.contestTeam.create({ data: { contestId, name: memberInput.teamName! } });
-         teamId = team.id;
-       }
+      const existingTeam = await tx.contestTeam.findFirst({ where: { contestId, name: memberInput.teamName } });
+      if (existingTeam) {
+        teamId = existingTeam.id;
+        isPending = true;
+      } else {
+        const createdTeam = await tx.contestTeam.create({ data: { contestId, name: memberInput.teamName, inviteCode: inviteCode(memberInput.teamName) } });
+        teamId = createdTeam.id;
+        role = ContestParticipantRole.PARTICIPANT;
+        isPending = false;
+      }
     }
 
-    const needsApproval = memberInput.teamInviteCode || (memberInput.teamName && memberInput.teamName !== 'Individuals');
+    const needsApproval = isPending && !memberInput.teamInviteCode && (memberInput.teamName && memberInput.teamName !== 'Individuals');
     await tx.contestParticipant.create({
-      data: { contestId: contest.id, userId: user.id, externalHandleId: externalHandle?.id || null, displayName: memberInput.displayName!, teamName: memberInput.teamName, teamId: teamId, role: ContestParticipantRole.PARTICIPANT, isOfficial: !needsApproval }
+      data: { contestId: contest.id, userId: user.id, externalHandleId: externalHandle?.id || null, displayName: memberInput.displayName!, teamName: memberInput.teamName, teamId: teamId, role, isOfficial: !needsApproval }
     });
   });
 
@@ -192,7 +199,6 @@ export async function createContestV2(input: CreateContestInput) {
   const title = String(input.title || '').trim();
   if (!title) throw new Error('Contest title is required');
   const members = (input.members || []).map(normalizedMember);
-  if (members.length === 0) throw new Error('Add at least one player. The owner is not added automatically.');
   const problems = input.problems || [];
   const startTime = input.startTime ? new Date(input.startTime) : new Date();
   const durationMinutes = Math.max(1, Number(input.durationMinutes || 120));
@@ -208,14 +214,24 @@ export async function createContestV2(input: CreateContestInput) {
       data: { inviteCode: inviteCode(title), title, description: input.description || null, type: input.type || ContestType.GROUP, status: startTime.getTime() <= Date.now() ? ContestStatus.RUNNING : ContestStatus.SCHEDULED, startTime, endTime, freezeTime, durationMinutes, isRated: Boolean(input.isRated), allowLateJoin: Boolean(input.allowLateJoin), hideProblemMetaDuringContest: input.hideProblemMetaDuringContest !== false, allowTeamSubmissionView: input.allowTeamSubmissionView !== false, createdById: owner.id }
     });
 
-    const uniqueTeamNames = [...new Set(members.map(m => m.teamName).filter(n => n && n !== 'Individuals' && n !== 'Solo'))];
+    // Keep the contest creator in the room context without counting them as a team player.
+    await tx.contestParticipant.create({
+      data: { contestId: created.id, userId: owner.id, displayName: owner.name || 'Owner', role: ContestParticipantRole.OWNER, isOfficial: true }
+    });
+
+    const playerMembers = members.filter((member) => {
+      const emailMatchesOwner = member.email && owner.email && member.email.trim().toLowerCase() === owner.email.trim().toLowerCase();
+      return !emailMatchesOwner && member.userId !== owner.id;
+    });
+
+    const uniqueTeamNames = [...new Set(playerMembers.map(m => m.teamName).filter(n => n && n !== 'Individuals' && n !== 'Solo'))];
     const teamRecordMap = new Map<string, string>();
     for (const tName of uniqueTeamNames) {
-      const team = await tx.contestTeam.create({ data: { contestId: created.id, name: tName! } });
+      const team = await tx.contestTeam.create({ data: { contestId: created.id, name: tName!, inviteCode: inviteCode(tName!) } });
       teamRecordMap.set(tName!, team.id);
     }
 
-    for (const member of members) {
+    for (const member of playerMembers) {
       const user = await ensureParticipantUser(tx, member);
       let externalHandle = null;
       if (member.codeforcesHandle) externalHandle = await ensureCodeforcesHandle(tx, user.id, member.codeforcesHandle);
@@ -245,6 +261,10 @@ export async function deleteContestV2(contestId: string, actorId?: string) {
   if (!contest) throw new Error('Contest not found');
   await prisma.$transaction(async (tx) => {
     await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_DELETE', entityType: 'Contest', entityId: contestId, before: contest as any } });
+    await tx.submission.deleteMany({ where: { contestId } });
+    await tx.contestParticipant.deleteMany({ where: { contestId } });
+    await tx.contestProblem.deleteMany({ where: { contestId } });
+    await tx.contestTeam.deleteMany({ where: { contestId } });
     await tx.contest.delete({ where: { id: contestId } });
   });
 }
@@ -253,18 +273,19 @@ export async function listContestsV2() {
   const contests = await prisma.contest.findMany({ 
     include: { 
       createdBy: true, 
-      participants: { select: { id: true } },
+      participants: { select: { id: true, isOfficial: true, role: true, teamId: true, userId: true } },
       problems: { select: { id: true, isMCQ: true } },
       _count: { select: { participants: true, problems: true } } 
     }, 
     orderBy: { createdAt: 'desc' }, 
-    take: 40 
+    take: 40
   });
   
   return contests.map((contest) => {
     const mcqCount = contest.problems.filter(p => p.isMCQ).length;
     const codingCount = contest.problems.filter(p => !p.isMCQ).length;
     const totalProblems = contest.problems.length;
+    const participantsCount = contest.participants.filter((p) => p.isOfficial && (p.teamId || p.role !== ContestParticipantRole.OWNER)).length;
     
     return { 
       id: contest.id, 
@@ -274,8 +295,8 @@ export async function listContestsV2() {
       durationMinutes: contest.durationMinutes, 
       isRated: contest.isRated, 
       status: contest.status, 
-      membersCount: contest._count.participants, 
-      participantsCount: contest._count.participants,
+      membersCount: participantsCount, 
+      participantsCount,
       problemsCount: totalProblems,
       questionCount: totalProblems,
       mcqCount: mcqCount,
@@ -340,8 +361,6 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
     try {
       const scraped = await scrapeProblemFromUrl(problem.url);
       enrichedProblem.title = scraped.title; enrichedProblem.platform = scraped.platform; finalDescription = scraped.descriptionHtml;
-      
-      // Check if we need to auto-generate tests based on the payload input
       if (problem.mcqData?.generateAiTests || (problem as any).generateAiTests) {
          const aiGeneratedCases = await generateToughTestCases(scraped.descriptionHtml);
          scrapedTestcases = [...scraped.testcases, ...aiGeneratedCases];
@@ -352,7 +371,7 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
   }
 
   let finalInterviewQuestionId = problem.interviewQuestionId;
-  if (problem.mcqData && !problem.mcqData.generateAiTests) { // Prevent misidentifying
+  if (problem.mcqData && !problem.mcqData.generateAiTests) {
     let defaultTrack = await prisma.interviewTrack.findFirst();
     if (!defaultTrack) { defaultTrack = await prisma.interviewTrack.create({ data: { slug: 'theory', title: 'Theory Track', type: 'DSA' } }); }
     const newMcq = await prisma.interviewQuestion.create({
@@ -484,127 +503,189 @@ export async function approveParticipant(contestId: string, participantId: strin
   const contest = await prisma.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
   if (!contest) throw new Error('Contest not found');
 
-  // AUTHORIZATION FIX: Check for owner OR manager role
-  const actor = contest.participants.find(p => p.userId === actorId);
-  const isOwner = contest.createdById === actorId;
-  const isManager = actor?.role === ContestParticipantRole.MANAGER;
+  const targetParticipant = await prisma.contestParticipant.findUnique({ where: { id: participantId } });
+  if (!targetParticipant) throw new Error('Target player request not found');
 
-  if (!isOwner && !isManager) {
-    throw new Error('Unauthorized: Only managers or owners can approve participants.');
+  const isContestOwner = contest.createdById === actorId;
+  const actorParticipant = contest.participants.find(p => p.userId === actorId);
+  
+  // Checking if the approving actor is an official member of the same team.
+  const isTeamMember = actorParticipant && targetParticipant.teamId && actorParticipant.teamId === targetParticipant.teamId && actorParticipant.isOfficial;
+
+  if (!isContestOwner && !isTeamMember) {
+    throw new Error('Unauthorized: Only official team members or the contest creator can approve requests.');
   }
 
-  return await prisma.contestParticipant.update({ where: { id: participantId }, data: { isOfficial: true } });
+  const updated = await prisma.contestParticipant.update({ where: { id: participantId }, data: { isOfficial: true } });
+  void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+  return updated;
 }
 
-// NEW: Create a team/group for current user
-export async function createTeamForContest(contestId: string, teamName: string, userId: string) {
+export async function createTeamForContest(contestId: string, teamName: string, userId: string, codeforcesHandle?: string) {
   try {
-    const contest = await prisma.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
-    if (!contest) throw new Error('Contest not found');
-    
-    // Check if user is already in a team
-    const existing = await prisma.contestParticipant.findFirst({ where: { contestId, userId, teamId: { not: null } } });
-    if (existing) throw new Error('You are already in a team. Leave that team first.');
+    const result = await prisma.$transaction(async (tx) => {
+      const contest = await tx.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
+      if (!contest) throw new Error('Contest not found');
+      
+      const existing = await tx.contestParticipant.findFirst({ where: { contestId, userId } });
+      if (existing?.teamId) throw new Error('You are already in a team. Leave that team first.');
 
-    // Check if team name already exists
-    const existingTeam = await prisma.contestTeam.findFirst({ where: { contestId, name: teamName } });
-    if (existingTeam) throw new Error('Team name already exists. Choose a different name.');
+      const existingTeam = await tx.contestTeam.findFirst({ where: { contestId, name: teamName } });
+      if (existingTeam) throw new Error('Team name already exists. Choose a different name.');
 
-    // Create team and add user as leader
-    const team = await prisma.contestTeam.create({ data: { contestId, name: teamName } });
-    
-    // Create participant record with user as team leader
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new Error('User not found');
+      const generatedCode = inviteCode(teamName);
+      const team = await tx.contestTeam.create({ data: { contestId, name: teamName, inviteCode: generatedCode } });
+      
+      const user = await tx.user.findUnique({ where: { id: userId } });
+      if (!user) throw new Error('User not found');
 
-    await prisma.contestParticipant.create({
-      data: {
-        contestId,
-        userId,
-        displayName: user.name || user.email,
-        teamId: team.id,
-        teamName: teamName,
-        role: ContestParticipantRole.MANAGER, // Leader is a manager
-        isOfficial: true
-      }
+      const externalHandle = codeforcesHandle
+        ? await ensureCodeforcesHandle(tx, userId, codeforcesHandle)
+        : await tx.externalHandle.findFirst({ where: { userId, platform: Platform.CODEFORCES } });
+
+      const participant = existing
+        ? await tx.contestParticipant.update({
+            where: { id: existing.id },
+            data: {
+              displayName: user.name || user.email,
+              externalHandleId: externalHandle?.id || existing.externalHandleId,
+              teamId: team.id,
+              teamName,
+              role: ContestParticipantRole.PARTICIPANT,
+              isOfficial: true
+            }
+          })
+        : await tx.contestParticipant.create({
+            data: {
+              contestId,
+              userId,
+              externalHandleId: externalHandle?.id || null,
+              displayName: user.name || user.email,
+              teamId: team.id,
+              teamName,
+              role: ContestParticipantRole.PARTICIPANT,
+              isOfficial: true
+            }
+          });
+
+      return { team, participant, inviteCode: generatedCode };
     });
 
     void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
-    return { success: true, team, inviteCode: team.inviteCode };
+    return { success: true, ...result };
   } catch (err: any) {
     console.error('[Create Team Error]', err.message);
     throw err;
   }
 }
 
-// NEW: Join team with invitation code
-export async function joinTeamWithInviteCode(contestId: string, inviteCode: string, userId: string) {
+export async function joinTeamWithInviteCode(contestId: string, inviteCode: string, userId: string, codeforcesHandle?: string) {
   try {
-    const contest = await prisma.contest.findUnique({ where: { id: contestId } });
-    if (!contest) throw new Error('Contest not found');
+    const result = await prisma.$transaction(async (tx) => {
+      const contest = await tx.contest.findUnique({ where: { id: contestId } });
+      if (!contest) throw new Error('Contest not found');
 
-    const team = await prisma.contestTeam.findFirst({ where: { inviteCode, contestId } });
-    if (!team) throw new Error('Invalid or expired invite code');
+      const team = await tx.contestTeam.findFirst({ where: { inviteCode: inviteCode.trim().toUpperCase(), contestId } });
+      if (!team) throw new Error('Invalid or expired invite code');
 
-    // Check if already in contest
-    const existing = await prisma.contestParticipant.findFirst({ where: { contestId, userId } });
-    if (existing) throw new Error('You are already registered for this contest');
+      const existing = await tx.contestParticipant.findFirst({ where: { contestId, userId } });
+      if (existing?.teamId) throw new Error('You are already registered for a team in this contest');
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new Error('User not found');
+      const user = await tx.user.findUnique({ where: { id: userId } });
+      if (!user) throw new Error('User not found');
 
-    // Add user to team (auto-approved when using valid invite code)
-    await prisma.contestParticipant.create({
-      data: {
-        contestId,
-        userId,
-        displayName: user.name || user.email,
-        teamId: team.id,
-        teamName: team.name,
-        role: ContestParticipantRole.PARTICIPANT,
-        isOfficial: true // Auto-approved with valid invite code
-      }
+      const externalHandle = codeforcesHandle
+        ? await ensureCodeforcesHandle(tx, userId, codeforcesHandle)
+        : await tx.externalHandle.findFirst({ where: { userId, platform: Platform.CODEFORCES } });
+
+      const participant = existing
+        ? await tx.contestParticipant.update({
+            where: { id: existing.id },
+            data: {
+              displayName: user.name || user.email,
+              externalHandleId: externalHandle?.id || existing.externalHandleId,
+              teamId: team.id,
+              teamName: team.name,
+              role: ContestParticipantRole.PARTICIPANT,
+              isOfficial: true
+            }
+          })
+        : await tx.contestParticipant.create({
+            data: {
+              contestId,
+              userId,
+              externalHandleId: externalHandle?.id || null,
+              displayName: user.name || user.email,
+              teamId: team.id,
+              teamName: team.name,
+              role: ContestParticipantRole.PARTICIPANT,
+              isOfficial: true 
+            }
+          });
+
+      return { team, participant };
     });
 
     void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
-    return { success: true, team };
+    return { success: true, ...result };
   } catch (err: any) {
     console.error('[Join Team Error]', err.message);
     throw err;
   }
 }
 
-// NEW: Request to join existing team (pending approval)
-export async function requestToJoinTeam(contestId: string, teamName: string, userId: string) {
+export async function requestToJoinTeam(contestId: string, teamName: string, userId: string, codeforcesHandle?: string) {
   try {
-    const contest = await prisma.contest.findUnique({ where: { id: contestId } });
-    if (!contest) throw new Error('Contest not found');
+    const result = await prisma.$transaction(async (tx) => {
+      const contest = await tx.contest.findUnique({ where: { id: contestId } });
+      if (!contest) throw new Error('Contest not found');
 
-    const team = await prisma.contestTeam.findFirst({ where: { contestId, name: teamName } });
-    if (!team) throw new Error('Team not found');
+      const team = await tx.contestTeam.findFirst({ where: { contestId, OR: [{ id: teamName }, { name: teamName }] } });
+      if (!team) throw new Error('Team not found');
 
-    // Check if already in contest
-    const existing = await prisma.contestParticipant.findFirst({ where: { contestId, userId } });
-    if (existing) throw new Error('You are already registered for this contest');
-
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new Error('User not found');
-
-    // Add user to team (pending approval)
-    await prisma.contestParticipant.create({
-      data: {
-        contestId,
-        userId,
-        displayName: user.name || user.email,
-        teamId: team.id,
-        teamName: team.name,
-        role: ContestParticipantRole.PARTICIPANT,
-        isOfficial: false // Pending approval
+      const existing = await tx.contestParticipant.findFirst({ where: { contestId, userId } });
+      if (existing?.teamId) {
+        if (existing.teamId === team.id && !existing.isOfficial) throw new Error('Your join request is already pending approval');
+        throw new Error('You are already registered for this contest');
       }
+
+      const user = await tx.user.findUnique({ where: { id: userId } });
+      if (!user) throw new Error('User not found');
+
+      const externalHandle = codeforcesHandle
+        ? await ensureCodeforcesHandle(tx, userId, codeforcesHandle)
+        : await tx.externalHandle.findFirst({ where: { userId, platform: Platform.CODEFORCES } });
+
+      const participant = existing
+        ? await tx.contestParticipant.update({
+            where: { id: existing.id },
+            data: {
+              displayName: user.name || user.email,
+              externalHandleId: externalHandle?.id || existing.externalHandleId,
+              teamId: team.id,
+              teamName: team.name,
+              role: ContestParticipantRole.PARTICIPANT,
+              isOfficial: false
+            }
+          })
+        : await tx.contestParticipant.create({
+            data: {
+              contestId,
+              userId,
+              externalHandleId: externalHandle?.id || null,
+              displayName: user.name || user.email,
+              teamId: team.id,
+              teamName: team.name,
+              role: ContestParticipantRole.PARTICIPANT,
+              isOfficial: false 
+            }
+          });
+
+      return { team, participant };
     });
 
     void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
-    return { success: true, team, status: 'pending_approval' };
+    return { success: true, ...result, status: 'pending_approval' };
   } catch (err: any) {
     console.error('[Join Request Error]', err.message);
     throw err;

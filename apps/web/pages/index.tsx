@@ -19,7 +19,7 @@ export default function Home() {
   const [profile, setProfile] = useState<any>(null);
   const router = useRouter();
 
-  // 👉 FIXED: AI Chatbot state management added
+  // Chatbot state management
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState<{role: string, text: string}[]>([
@@ -43,17 +43,17 @@ export default function Home() {
     }
   }, [session]);
 
-  const handleSendSupportMessage = async () => { // Added 'async'
+  const handleSendSupportMessage = async () => {
     if(!chatInput.trim()) return;
-    const userMessage = chatInput.trim(); // Capture before clearing
+    const userMessage = chatInput.trim(); 
     setChatHistory([...chatHistory, { role: 'user', text: userMessage }]);
     setChatInput('');
     
-   // Call your actual backend AI endpoint
+   // Call your backend AI endpoint
   const res = await fetch(`${API_BASE_URL}/api/v2/ai/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: userMessage }) // Use captured message
+    body: JSON.stringify({ message: userMessage })
   });
   const data = await res.json();
   setChatHistory(prev => [...prev, { role: 'ai', text: data.reply }]);
@@ -136,7 +136,7 @@ export default function Home() {
         ))}
       </motion.section>
 
-      {/* 👉 FIXED: FLOATING AI MENTOR WIDGET */}
+      {/* FLOATING AI MENTOR WIDGET */}
       <div style={{ position: 'fixed', bottom: 30, right: 30, zIndex: 50, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
         <AnimatePresence>
           {isChatOpen && (

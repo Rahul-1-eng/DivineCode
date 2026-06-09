@@ -33,7 +33,7 @@ export function PostContestAiRecommendations({ contestId, contestStatus }: { con
       {loading ? ( <div style={{ color: '#64748b' }}>Analyzing contest data...</div> ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '15px' }}>
           {recommendations.map((prob) => (
-            <a key={prob.id} href={prob.originalUrl || '#'} target="_blank" rel="noreferrer" style={{ display: 'block', background: '#0f172a', border: '1px solid #1e293b', padding: '16px', borderRadius: '12px', textDecoration: 'none' }}>
+            <a key={prob.id} href={prob.originalUrl || prob.externalUrl || prob.link || '#'} target="_blank" rel="noreferrer" style={{ display: 'block', background: '#0f172a', border: '1px solid #1e293b', padding: '16px', borderRadius: '12px', textDecoration: 'none' }}>
               <h3 style={{ margin: '0 0 8px 0', color: '#e2e8f0', fontSize: '16px' }}>{prob.title}</h3>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '11px', background: '#3b82f633', color: '#38bdf8', padding: '2px 8px', borderRadius: '12px', fontWeight: 'bold' }}>{prob.difficulty}</span>
@@ -82,9 +82,10 @@ export default function ContestRoomPage() {
   const [overridePoints, setOverridePoints] = useState<number | ''>('');
   
   const [isRegistering, setIsRegistering] = useState(false);
-  const [regMode, setRegMode] = useState<'SOLO' | 'TEAM_NEW' | 'TEAM_JOIN'>('SOLO');
+  const [regMode, setRegMode] = useState<'SOLO' | 'TEAM_NEW' | 'TEAM_REQUEST' | 'TEAM_INVITE'>('SOLO');
   const [regHandle, setRegHandle] = useState('');
   const [regTeamName, setRegTeamName] = useState('');
+  const [regTeamId, setRegTeamId] = useState('');
   const [regInviteCode, setRegInviteCode] = useState('');
 
   const [ownerMode, setOwnerMode] = useState<'ADMIN' | 'PARTICIPANT'>('ADMIN');
@@ -111,6 +112,9 @@ export default function ContestRoomPage() {
   const isOwner = Boolean(contest?.canManage);
   const viewerMember = contest?.viewerMember || null;
   const canSeeProblemMeta = Boolean(contest?.visibility?.canSeeProblemMeta);
+  const availableTeams = contest?.teams || [];
+  const isPendingViewer = Boolean(viewerMember && viewerMember.isOfficial === false);
+  const isTeamLeader = Boolean(viewerMember?.teamId && ['OWNER', 'MANAGER'].includes(String(viewerMember?.role || '')));
 
   // Dynamic End Time logic
   const startTimeMs = contest ? new Date(contest.startTime).getTime() : 0;
@@ -153,7 +157,8 @@ export default function ContestRoomPage() {
     
     // Safety check for Team Modes
     if (regMode === 'TEAM_NEW' && !regTeamName.trim()) return toast.error("Team name required");
-    if (regMode === 'TEAM_JOIN') {
+    if (regMode === 'TEAM_REQUEST' && !regTeamId && !regTeamName.trim()) return toast.error("Choose a group to request approval.");
+    if (regMode === 'TEAM_INVITE') {
         const trimmedCode = regInviteCode.trim();
         if (trimmedCode.length < 3) return toast.error("Please enter a valid 6-character invite code");
     }
@@ -162,11 +167,24 @@ export default function ContestRoomPage() {
     setLoadingText('Connecting to Lobby...'); 
     setSyncing(true);
 
+    let endpoint = `${API_V2_BASE_URL}/contests/${id}/register`;
     const payload: any = { codeforcesHandle: regHandle.trim() };
-    if (regMode === 'TEAM_NEW') payload.teamName = regTeamName.trim();
-    if (regMode === 'TEAM_JOIN') payload.teamInviteCode = regInviteCode.trim();
+    if (regMode === 'SOLO') payload.teamName = 'Individuals';
+    if (regMode === 'TEAM_NEW') {
+      endpoint = `${API_V2_BASE_URL}/contests/${id}/team/create`;
+      payload.teamName = regTeamName.trim();
+    }
+    if (regMode === 'TEAM_INVITE') {
+      endpoint = `${API_V2_BASE_URL}/contests/${id}/team/join-invite`;
+      payload.inviteCode = regInviteCode.trim();
+    }
+    if (regMode === 'TEAM_REQUEST') {
+      endpoint = `${API_V2_BASE_URL}/contests/${id}/team/request-join`;
+      if (regTeamId) payload.teamId = regTeamId;
+      else payload.teamName = regTeamName.trim();
+    }
 
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/register`, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify(payload) });
+    const res = await fetch(endpoint, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify(payload) });
     const data = await res.json();
     setIsRegistering(false); setSyncing(false);
 
@@ -174,8 +192,11 @@ export default function ContestRoomPage() {
     
     setContest(data); await loadSubmissions(); playSuccessSound(); toast.success("Successfully registered!");
     if (regMode === 'TEAM_NEW') {
-      const myTeam = data.participants?.find((p: any) => p.userId === session.user?.email || p.user?.email === session.user?.email)?.team;
-      if (myTeam?.inviteCode) alert(`Team Created! Share this invite code with your friends: ${myTeam.inviteCode}`);
+      const invite = data.viewerMember?.teamInviteCode || data.teams?.find((team: any) => team.id === data.viewerMember?.teamId)?.inviteCode;
+      if (invite) alert(`Team Created! Share this invite code with your friends: ${invite}`);
+    }
+    if (regMode === 'TEAM_REQUEST') {
+      toast.success('Join request sent to the group owner.');
     }
   }
 
@@ -279,7 +300,7 @@ export default function ContestRoomPage() {
   }
 
   async function lookupProblem(platform: string, code: string) {
-    const res = await fetch(`${API_BASE_URL}/api/problems/lookup?platform=${encodeURIComponent(platform)}&code=${encodeURIComponent(code)}`);
+    const res = await fetch(`${API_V2_BASE_URL}/problems/lookup?platform=${encodeURIComponent(platform)}&code=${encodeURIComponent(code)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Lookup failed');
     return data;
@@ -532,6 +553,12 @@ export default function ContestRoomPage() {
     return Boolean(viewerMember && (viewerMember.id === memberId || (viewerMember.teamId && member?.teamId === viewerMember.teamId) || (viewerMember.team && viewerMember.team !== 'Individuals' && member?.team === viewerMember.team)));
   };
 
+  const canApproveMember = (member: any) => {
+    if (!member || member.isOfficial) return false;
+    if (isOwner) return true;
+    return Boolean(isTeamLeader && viewerMember?.teamId && member.teamId === viewerMember.teamId);
+  };
+
   const memberSubmissions = selectedMember ? submissions.filter((submission) => submission.memberId === selectedMember.memberId || submission.participantId === selectedMember.memberId) : [];
   const mySubmissions = viewerMember ? submissions.filter((s) => s.memberId === viewerMember.id || s.participantId === viewerMember.id || s.userId === (session?.user?.name || session?.user?.email)) : [];
   const myTotalAttempts = mySubmissions.length;
@@ -640,10 +667,10 @@ export default function ContestRoomPage() {
             
             <h1 style={{ fontSize: 46, margin: 0 }}>{contest.title}</h1>
             
-            {viewerMember?.team && viewerMember.team !== 'Individuals' && viewerMember.team?.inviteCode && (
+            {viewerMember?.teamInviteCode && (
               <div style={{ background: 'rgba(2,6,23,0.5)', border: '1px dashed #38bdf8', padding: '8px 16px', borderRadius: 8, display: 'inline-block', marginTop: 12 }}>
                 <span style={{ color: '#94a3b8', fontSize: 12, marginRight: 8, textTransform: 'uppercase' }}>TEAM INVITE CODE:</span>
-                <strong style={{ color: '#38bdf8', letterSpacing: 2, fontSize: 16 }}>{viewerMember.team.inviteCode}</strong>
+                <strong style={{ color: '#38bdf8', letterSpacing: 2, fontSize: 16 }}>{viewerMember.teamInviteCode}</strong>
               </div>
             )}
 
@@ -711,10 +738,25 @@ export default function ContestRoomPage() {
             <h2 style={{color: '#38bdf8', margin: '0 0 10px 0', fontSize: 28}}>Register for {contest.title}</h2>
             <p style={{color: '#a8b3c7', marginBottom: 25}}>Configure your play style to enter the lobby.</p>
             
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 15, marginBottom: 20 }}>
+            {availableTeams.length > 0 && (
+              <div style={{ textAlign: 'left', maxWidth: 720, margin: '0 auto 20px', padding: 14, background: 'rgba(2,6,23,.45)', border: '1px solid rgba(148,163,184,.16)', borderRadius: 12 }}>
+                <strong style={{ color: '#e2e8f0', display: 'block', marginBottom: 10 }}>Groups already formed</strong>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {availableTeams.map((team: any) => (
+                    <button key={team.id} onClick={() => { setRegMode('TEAM_REQUEST'); setRegTeamId(team.id); setRegTeamName(team.name); }} style={{ ...inactiveTabBox, textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>{team.name}</span>
+                      <span style={{ color: '#64748b', fontSize: 12 }}>{team.membersCount || 0} joined{team.pendingCount ? `, ${team.pendingCount} pending` : ''}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 15, marginBottom: 20, flexWrap: 'wrap' }}>
               <button onClick={() => setRegMode('SOLO')} style={regMode === 'SOLO' ? activeTabBox : inactiveTabBox}>👤 Register as Solo</button>
               <button onClick={() => setRegMode('TEAM_NEW')} style={regMode === 'TEAM_NEW' ? activeTabBox : inactiveTabBox}>👥 Create a Team</button>
-              <button onClick={() => setRegMode('TEAM_JOIN')} style={regMode === 'TEAM_JOIN' ? activeTabBox : inactiveTabBox}>🤝 Join via Invite Code</button>
+              <button onClick={() => setRegMode('TEAM_REQUEST')} style={regMode === 'TEAM_REQUEST' ? activeTabBox : inactiveTabBox}>Request Approval</button>
+              <button onClick={() => setRegMode('TEAM_INVITE')} style={regMode === 'TEAM_INVITE' ? activeTabBox : inactiveTabBox}>Join via Invite Code</button>
             </div>
 
             <div style={{ maxWidth: 400, margin: '0 auto', textAlign: 'left' }}>
@@ -728,19 +770,78 @@ export default function ContestRoomPage() {
                 </>
               )}
 
-              {regMode === 'TEAM_JOIN' && (
+              {regMode === 'TEAM_REQUEST' && (
+                <>
+                  <label style={tcLabel}>Group to Join</label>
+                  {availableTeams.length > 0 ? (
+                    <select style={smallInput} value={regTeamId} onChange={e => {
+                      const team = availableTeams.find((t: any) => t.id === e.target.value);
+                      setRegTeamId(e.target.value);
+                      setRegTeamName(team?.name || '');
+                    }}>
+                      <option value="">Choose a group</option>
+                      {availableTeams.map((team: any) => <option key={team.id} value={team.id}>{team.name}</option>)}
+                    </select>
+                  ) : (
+                    <input placeholder="Team name" style={smallInput} value={regTeamName} onChange={e => setRegTeamName(e.target.value)} />
+                  )}
+                </>
+              )}
+
+              {regMode === 'TEAM_INVITE' && (
                 <>
                   <label style={tcLabel}>6-Digit Invite Code</label>
                   <input placeholder="ABC-123" style={smallInput} value={regInviteCode} onChange={e => setRegInviteCode(e.target.value)} />
                 </>
               )}
 
-              <button onClick={registerForContest} disabled={isRegistering} style={{...primaryButton, marginTop: 15}}>{isRegistering ? 'Registering...' : 'Complete Registration'}</button>
+              <button onClick={registerForContest} disabled={isRegistering} style={{...primaryButton, marginTop: 15}}>{isRegistering ? 'Registering...' : regMode === 'TEAM_REQUEST' ? 'Send Join Request' : 'Complete Registration'}</button>
             </div>
           </section>
         )}
 
-        {isScheduledLockScreen && !isActuallyOwnerMode ? (
+        {viewerMember && !isActuallyOwnerMode && (
+          <section style={{ ...panel, marginBottom: 18 }}>
+            <h2 style={{ marginTop: 0 }}>Groups</h2>
+            {availableTeams.length === 0 ? <p style={{ color: '#94a3b8' }}>No groups have been created yet.</p> : (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {availableTeams.map((team: any) => {
+                  const teamMembers = (contest.members || []).filter((m: any) => m.teamId === team.id);
+                  const pendingMembers = teamMembers.filter((m: any) => !m.isOfficial);
+                  return (
+                    <div key={team.id} style={{ padding: 14, borderRadius: 12, background: 'rgba(2,6,23,.45)', border: '1px solid rgba(148,163,184,.16)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <strong style={{ color: '#e2e8f0' }}>{team.name}</strong>
+                        <span style={{ color: '#94a3b8', fontSize: 13 }}>{team.membersCount || 0} joined{team.pendingCount ? `, ${team.pendingCount} pending` : ''}</span>
+                      </div>
+                      {team.inviteCode && (
+                        <div style={{ marginTop: 8, color: '#38bdf8', fontWeight: 'bold', letterSpacing: 2 }}>Invite: {team.inviteCode}</div>
+                      )}
+                      {pendingMembers.length > 0 && (
+                        <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+                          {pendingMembers.map((m: any) => (
+                            <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, color: '#cbd5e1' }}>
+                              <span>{m.name || m.displayName} <span style={{ color: '#64748b', fontSize: 12 }}>({m.codeforcesHandle || 'missing handle'})</span></span>
+                              {canApproveMember(m) && <button onClick={() => approveMember(m.id)} style={{ ...primaryButton, width: 'auto', margin: 0, padding: '7px 12px', fontSize: 12 }}>Approve</button>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+
+        {isPendingViewer && !isActuallyOwnerMode ? (
+          <section style={{...panel, textAlign: 'center', padding: '50px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(251,191,36,0.05))'}}>
+            <h2 style={{ color: '#fbbf24', marginTop: 0 }}>Approval pending</h2>
+            <p style={{ color: '#a8b3c7', fontSize: 17 }}>Your request to join {viewerMember.teamName || 'this group'} is waiting for the group owner or contest owner.</p>
+            <button onClick={unregisterFromContest} style={{...dangerButton, width: 'auto', marginTop: 20}}>Cancel request</button>
+          </section>
+        ) : isScheduledLockScreen && !isActuallyOwnerMode ? (
           <section style={{...panel, textAlign: 'center', padding: '60px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(251,191,36,0.05))'}}>
              <h2 style={{ fontSize: 32, marginBottom: 10, color: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>Contest has not started yet</h2>
              <p style={{color: '#a8b3c7', fontSize: 18}}>Problems will be revealed when the countdown reaches zero.</p>
@@ -788,7 +889,7 @@ export default function ContestRoomPage() {
                       {!m.isOfficial && <span style={{ color: '#f87171', fontSize: 12, marginLeft: 8 }}>[PENDING APPROVAL]</span>}<br/>
                       <span style={{ color: '#67e8f9', fontSize: 13 }}>{m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}</span>
                     </p>
-                   {!m.isOfficial && isActuallyOwnerMode && (
+                   {canApproveMember(m) && (
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <span style={{ color: '#f87171', fontSize: 11, fontWeight: 'bold' }}>Pending</span>
                         <button 
