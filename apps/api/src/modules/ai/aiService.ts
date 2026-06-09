@@ -19,6 +19,7 @@ function sanitizeDescriptionForPrompt(html: string) {
 }
 
 export async function analyzeSubmissionLogic(submissionId: string, problemDescription: string, userCode: string) {
+
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) return;
 
@@ -262,4 +263,29 @@ export async function generateToughTestCases(problemDescriptionHtml: string) {
     console.error("AI Generation Error from Google:", error.response?.data || error.message);
     return []; 
   }
+}
+export async function debugCodeWithAI(userCode: string, problemDescription: string) {
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) throw new Error("AI_API_KEY missing");
+
+  const prompt = `
+    You are a competitive programming debugger. 
+    Problem Description: ${sanitizeDescriptionForPrompt(problemDescription)}
+    User Code: ${userCode}
+    
+    Find the logical error. Provide:
+    1. A short hint about the bug.
+    2. A minimal input that breaks the code.
+    3. The expected correct output for that input.
+    
+    Return ONLY JSON: {"hint": "...", "input": "...", "expectedOutput": "..."}
+  `;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const { data } = await axios.post(url, {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: "application/json" }
+  });
+
+  return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
 }

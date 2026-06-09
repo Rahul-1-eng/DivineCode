@@ -332,7 +332,7 @@ model ContestParticipant {
   teamName         String?                
   teamId           String?                
   role             ContestParticipantRole @default(PARTICIPANT)
-  isOfficial       Boolean                @default(true)
+ isOfficial Boolean @default(true) // Ensure this exists to toggle access
   ratingBefore     Int?
   ratingAfter      Int?
   joinedAt         DateTime               @default(now())

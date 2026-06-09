@@ -11,7 +11,7 @@ import { createQueuedContestSubmission, unlockHiddenTestCase } from '../modules/
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
 import { recomputeContestStandings } from '../modules/standings/standingService';
 import { scrapeProblemFromUrl } from '../modules/external-sync/problemScraper'; 
-import { generateTestCasesWithAI } from '../modules/ai/aiService'; 
+import { generateTestCasesWithAI, debugCodeWithAI } from '../modules/ai/aiService'; 
 import { ContestStatus } from '@prisma/client';
 import axios from 'axios';
 import multer from 'multer';
@@ -448,6 +448,20 @@ router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
       orderBy: { createdAt: 'desc' }
     });
     res.json({ success: true, recommendations: problems });
+  }));
+
+  // 👉 ADD THIS ROUTE: Fixes the 404 error when clicking "Find Flaw"
+router.post('/contests/:id/problems/:problemId/ai-debug', asyncRoute(async (req, res) => {
+    const { userCode, problemDescription } = req.body;
+    
+    // Call the real service function defined in aiService.ts
+    const aiDebugData = await debugCodeWithAI(userCode, problemDescription);
+    
+    if (!aiDebugData || !aiDebugData.hint) {
+        return res.status(500).json({ error: "AI failed to generate a debug response." });
+    }
+
+    res.json({ success: true, aiDebugData });
   }));
 
   router.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {

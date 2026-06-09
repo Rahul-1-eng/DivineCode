@@ -50,7 +50,8 @@ function randomSuffix() {
 }
 
 function inviteCode(title: string) {
-  return `${slugify(title).slice(0, 16) || 'contest'}-${randomSuffix()}`.toUpperCase();
+  // Generates a 6-character code (e.g., A1B2C3)
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
 function displayLabel(index: number) {
@@ -301,9 +302,11 @@ export async function registerForContestV2(contestId: string, input: MemberInput
     
     if (memberInput.teamInviteCode) {
       const team = await tx.contestTeam.findUnique({ where: { inviteCode: memberInput.teamInviteCode } });
-      if (!team || team.contestId !== contestId) throw new Error("Invalid Team Invite Code");
+      if (!team || team.contestId !== contestId) throw new Error("Invalid or Expired Team Invite Code");
       teamId = team.id;
       memberInput.teamName = team.name;
+      // Set isOfficial to false; they must be approved by the owner/manager
+      isPending = true; 
     } else if (memberInput.teamName && memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo') {
        isPending = true;
     } else {
@@ -315,15 +318,23 @@ export async function registerForContestV2(contestId: string, input: MemberInput
        }
     }
 
+   // If they have an invite code or are joining a group, mark as not official
+    const needsApproval = memberInput.teamInviteCode || (memberInput.teamName && memberInput.teamName !== 'Individuals');
+    
     await tx.contestParticipant.create({
       data: {
         contestId: contest.id, userId: user.id, externalHandleId: externalHandle?.id || null,
         displayName: memberInput.displayName!, teamName: memberInput.teamName,
         teamId: teamId, 
         role: ContestParticipantRole.PARTICIPANT, 
-        isOfficial: !isPending 
+        isOfficial: !needsApproval // false if they need approval
       }
     });
+    
+    if (isPending) {
+        // Here you would notify the owner.
+        // For now, it stays as isOfficial: false (not processed in standings)
+    }
   });
 
   void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));

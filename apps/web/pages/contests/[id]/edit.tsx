@@ -50,9 +50,15 @@ export default function ContestEditPage() {
   async function loadContest() {
     if (!id || status === 'loading') return;
     const res = await fetch(`${API_V2_BASE_URL}/contests/${id}${viewerQuery(session)}`);
-    const rawText = await res.text();
-      let data;
-      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
+   let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const errorText = await res.text();
+        console.error("Server Error:", errorText);
+        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
+      }
     if (!res.ok) { setError(data.error || 'Contest not found'); return; }
     setContest(data);
     setTitle(data.title || '');
@@ -79,9 +85,15 @@ export default function ContestEditPage() {
       headers: viewerHeaders(session), 
       body: JSON.stringify(bodyPayload) 
     });
-    const rawText = await res.text();
-      let data;
-      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
+   let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const errorText = await res.text();
+        console.error("Server Error:", errorText);
+        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
+      }
     setSaving(false);
     if (!res.ok) return toast.error(data.error || 'Could not save contest');
     setContest(data);
@@ -90,9 +102,15 @@ export default function ContestEditPage() {
 
   async function lookupProblem(platform: string, code: string) {
     const res = await fetch(`${API_BASE_URL}/api/problems/lookup?platform=${encodeURIComponent(platform)}&code=${encodeURIComponent(code)}`);
-    const rawText = await res.text();
-      let data;
-      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
+   let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const errorText = await res.text();
+        console.error("Server Error:", errorText);
+        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
+      }
     if (!res.ok) throw new Error(data.error || 'Lookup failed');
     return data;
   }
@@ -109,9 +127,14 @@ export default function ContestEditPage() {
         body: JSON.stringify(p) 
       });
       
-      const rawText = await res.text();
+      const contentType = res.headers.get("content-type");
       let data;
-      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Received HTML instead of JSON (Status ${res.status})`); }
+      if (contentType && contentType.indexOf("application/json") !== -1) {
+        data = await res.json();
+      } else {
+        const errorText = await res.text();
+        return toast.error(`Server Error (${res.status}): ${errorText.slice(0, 50)}...`);
+      }
 
       if (!res.ok) return toast.error(data.error || 'Could not add problem');
       setContest(data);
@@ -140,10 +163,15 @@ export default function ContestEditPage() {
         body: JSON.stringify({ type: 'URL', url: finalUrl }) 
       });
 
-      const rawText = await res.text();
-      let data;
-      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Scrape Error: Backend crashed processing URL (Status ${res.status})`); }
-
+     let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const errorText = await res.text();
+        console.error("Backend Error Response:", errorText);
+        return toast.error(`Server Error (${res.status}): Please check backend console.`);
+      }
       if (!res.ok) return toast.error(data.error || 'Could not scrape problem. Check URL.');
       setContest(data);
       setNewProblemUrl('');
@@ -167,9 +195,15 @@ export default function ContestEditPage() {
         })
       });
 
-      const rawText = await res.text();
-      let data;
-      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
+     let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const errorText = await res.text();
+        console.error("Server Error:", errorText);
+        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
+      }
 
       if (!res.ok) return toast.error(data.error || 'Could not add custom problem');
       
@@ -192,9 +226,15 @@ export default function ContestEditPage() {
         method: 'POST',
         body: formData 
       });
-      const rawText = await res.text();
-      let data;
-      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
+     let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const errorText = await res.text();
+        console.error("Server Error:", errorText);
+        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
+      }
       if (data.success) {
         setCustomDescription(prev => prev + `\n<br /><img src="${API_BASE_URL}${data.url}" alt="Problem Image" style="max-width: 100%; border-radius: 8px;" />\n<br />`);
         toast.success("Image uploaded & appended to description!");
@@ -220,9 +260,15 @@ export default function ContestEditPage() {
         headers: viewerHeaders(session),
         body: JSON.stringify(p)
       });
-      const rawText = await res.text();
-      let data;
-      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
+     let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const errorText = await res.text();
+        console.error("Server Error:", errorText);
+        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
+      }
       if (!res.ok) return toast.error(data.error || 'Could not replace problem');
       setContest(data);
       toast.success('Problem replaced successfully!');
@@ -236,9 +282,15 @@ export default function ContestEditPage() {
         method: 'DELETE',
         headers: viewerHeaders(session)
       });
-      const rawText = await res.text();
-      let data;
-      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
+     let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const errorText = await res.text();
+        console.error("Server Error:", errorText);
+        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
+      }
       if (!res.ok) return toast.error(data.error || 'Could not remove problem');
       setContest(data);
       toast.success('Problem removed!');
@@ -252,9 +304,15 @@ export default function ContestEditPage() {
         headers: viewerHeaders(session),
         body: JSON.stringify({ direction })
       });
-      const rawText = await res.text();
-      let data;
-      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
+     let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const errorText = await res.text();
+        console.error("Server Error:", errorText);
+        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
+      }
       if (!res.ok) return toast.error(data.error || 'Could not reorder problem');
       setContest(data);
       toast.success('Reordered successfully!');
@@ -272,9 +330,15 @@ export default function ContestEditPage() {
       });
       if (res.ok) router.push('/contests');
       else {
-        const rawText = await res.text();
-      let data;
-      try { data = JSON.parse(rawText); } catch(e) { return toast.error(`Server Error: Status ${res.status}`); }
+       let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const errorText = await res.text();
+        console.error("Server Error:", errorText);
+        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
+      }
         toast.error(data.error || 'Could not delete contest');
       }
     } catch (e: any) { toast.error(e.message || 'Could not delete contest'); }

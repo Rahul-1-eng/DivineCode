@@ -148,12 +148,20 @@ export default function ContestRoomPage() {
     };
   }, [contest]);
 
-  async function registerForContest() {
-    if (!id || !session || !regHandle.trim()) return toast.error("Codeforces handle is required");
+ async function registerForContest() {
+    if (!id || !session) return toast.error("Session expired");
+    if (!regHandle.trim()) return toast.error("Codeforces handle is required");
+    
+    // Safety check for Team Modes
     if (regMode === 'TEAM_NEW' && !regTeamName.trim()) return toast.error("Team name required");
-    if (regMode === 'TEAM_JOIN' && !regInviteCode.trim()) return toast.error("Invite code required");
+    if (regMode === 'TEAM_JOIN') {
+        const trimmedCode = regInviteCode.trim();
+        if (trimmedCode.length < 3) return toast.error("Please enter a valid 6-character invite code");
+    }
 
-    setIsRegistering(true); setLoadingText('Connecting to Lobby...'); setSyncing(true);
+    setIsRegistering(true); 
+    setLoadingText('Connecting to Lobby...'); 
+    setSyncing(true);
 
     const payload: any = { codeforcesHandle: regHandle.trim() };
     if (regMode === 'TEAM_NEW') payload.teamName = regTeamName.trim();
@@ -779,11 +787,25 @@ export default function ContestRoomPage() {
                       {!m.isOfficial && <span style={{ color: '#f87171', fontSize: 12, marginLeft: 8 }}>[PENDING APPROVAL]</span>}<br/>
                       <span style={{ color: '#67e8f9', fontSize: 13 }}>{m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}</span>
                     </p>
-                    {!m.isOfficial && isActuallyOwnerMode && (
-                      <button onClick={() => approveMember(m.id)} style={{ ...primaryButton, width: 'auto', margin: 0, padding: '6px 12px', fontSize: 12 }}>
-                        Approve
-                      </button>
-                    )}
+                   {!m.isOfficial && isActuallyOwnerMode && (
+  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+    <span style={{ color: '#f87171', fontSize: 11, fontWeight: 'bold' }}>Pending</span>
+    <button 
+  disabled={syncing} 
+  onClick={() => approveMember(m.id)} 
+  style={{ 
+    ...primaryButton, 
+    width: 'auto', 
+    margin: 0, 
+    padding: '6px 12px', 
+    fontSize: 12, 
+    opacity: syncing ? 0.5 : 1 
+  }}
+>
+  {syncing ? 'Processing...' : 'Approve'}
+</button>
+  </div>
+)}
                   </div>
                 ))}
               </section>}
