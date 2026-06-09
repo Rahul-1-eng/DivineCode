@@ -48,9 +48,16 @@ export async function submitToWandbox(input: { sourceCode: string; language: str
   }
 }
 
+// Highly robust output normalizer to handle trailing spaces, \r\n vs \n differences
 function normalizeOutput(value: string | null | undefined) {
   if (!value) return '';
-  return String(value).replace(/\r\n/g, '\n').replace(/\r/g, '').split('\n').map(line => line.trimEnd()).join('\n').trim(); 
+  return String(value)
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map(line => line.trimEnd())
+    .join('\n')
+    .trim(); 
 }
 
 function evaluateVerdict(status: string, stdout: string | null | undefined, expectedOutput: string, checkerType: CheckerType): Verdict {
@@ -71,7 +78,7 @@ function evaluateVerdict(status: string, stdout: string | null | undefined, expe
 async function finalizeVerdict(submissionId: string, verdict: Verdict) {
   const submission = await prisma.submission.findUnique({
     where: { id: submissionId }, 
-    include: { participant: true, team: true, problem: true } 
+    include: { participant: true, team: true, problem: true, contestProblem: true } 
   });
 
   if (!submission || !submission.participant) return;
@@ -94,6 +101,9 @@ async function finalizeVerdict(submissionId: string, verdict: Verdict) {
     const teamId = submission.teamId;
     const problemId = submission.contestProblemId;
 
+    // Use specific problem points, fallback to problem rating, fallback to 100
+    const pointsToAward = submission.contestProblem?.points || submission.problem?.rating || 100;
+
     if (teamId && problemId) {
       try {
         await prisma.teamProblemSolve.create({
@@ -102,14 +112,14 @@ async function finalizeVerdict(submissionId: string, verdict: Verdict) {
         
         await prisma.contestTeam.update({ 
           where: { id: teamId }, 
-          data: { score: { increment: submission.problem?.rating || 100 } } 
+          data: { score: { increment: pointsToAward } } 
         });
-      } catch (err) {}
+      } catch (err) {} // Ignore if already solved
     }
 
     await prisma.contestStanding.updateMany({ 
       where: { participantId: submission.participantId }, 
-      data: { individualScore: { increment: submission.problem?.rating || 100 }, individualSolved: { increment: 1 } } 
+      data: { individualScore: { increment: pointsToAward }, individualSolved: { increment: 1 } } 
     });
   }
 }
@@ -122,15 +132,32 @@ export async function judgeQueuedSubmission(submissionId: string) {
 
   if (!submission) throw new Error('Submission not found');
   
+  // ==========================================
+  // STRICT MCQ GRADING LOGIC
+  // ==========================================
   if (submission.language === 'mcq') {
-    const mcq = await prisma.interviewQuestion.findUnique({ where: { id: submission.contestProblem!.interviewQuestionId! } });
+    let correctIndices: number[] = [];
+    
+    // Check if it's stored relationally
+    if (submission.contestProblem?.interviewQuestionId) {
+        const mcq = await prisma.interviewQuestion.findUnique({ where: { id: submission.contestProblem.interviewQuestionId } });
+        correctIndices = mcq?.correctIndices || [];
+    } 
+    // Check if it's stored dynamically in JSON
+    else if (submission.contestProblem?.mcqData) {
+        const data = typeof submission.contestProblem.mcqData === 'string' ? JSON.parse(submission.contestProblem.mcqData) : submission.contestProblem.mcqData;
+        correctIndices = data.correctIndices || [];
+    }
+
     let isCorrect = false;
     try {
-      const submitted = JSON.parse(submission.code);
-      isCorrect = Array.isArray(submitted) && mcq?.correctIndices && submitted.length === mcq.correctIndices.length && submitted.every(v => mcq.correctIndices.includes(v));
+      const submitted = JSON.parse(submission.code); // Expected e.g. [0, 2]
+      isCorrect = Array.isArray(submitted) && correctIndices.length > 0 && submitted.length === correctIndices.length && submitted.every((v: number) => correctIndices.includes(v));
     } catch {
-      isCorrect = mcq?.correctIndex === parseInt(submission.code);
+      // Fallback just in case string code is a single index
+      isCorrect = correctIndices.includes(parseInt(submission.code));
     }
+
     const verdict = isCorrect ? Verdict.ACCEPTED : Verdict.WRONG_ANSWER;
     const judged = await prisma.submission.update({ where: { id: submission.id }, data: { status: 'FINISHED', verdict, judgeMessage: isCorrect ? 'Correct Answer' : 'Incorrect Answer', judgedAt: new Date() } });
     
@@ -139,6 +166,9 @@ export async function judgeQueuedSubmission(submissionId: string) {
     return { submission: judged, standings };
   }
 
+  // ==========================================
+  // EXTERNAL URL FALLBACK (Skipped)
+  // ==========================================
   if (submission.contestProblem?.requiresRedirect) {
     const judged = await prisma.submission.update({
       where: { id: submission.id },
@@ -147,9 +177,18 @@ export async function judgeQueuedSubmission(submissionId: string) {
     return { submission: judged, standings: null };
   }
 
-  let testcases = submission.problem?.testcases || [];
+  // ==========================================
+  // TEST CASE GATHERING & DYNAMIC AI LOGIC
+  // ==========================================
+  let testcases: any[] = submission.problem?.testcases || [];
   
-  // 👉 DYNAMIC AI CUSTOM TESTCASE GENERATOR 
+  // Fallback to ContestProblem custom JSON data if relational mapping failed
+  if (testcases.length === 0 && submission.contestProblem?.customTestCases) {
+     try {
+         testcases = typeof submission.contestProblem.customTestCases === 'string' ? JSON.parse(submission.contestProblem.customTestCases) : submission.contestProblem.customTestCases;
+     } catch (e) {}
+  }
+  
   if (testcases.length === 0 && submission.problem) {
     const descriptionForAi = submission.contestProblem?.customDescription || submission.problem.description || submission.contestProblem?.titleSnapshot || '';
     if (descriptionForAi) {
@@ -161,6 +200,7 @@ export async function judgeQueuedSubmission(submissionId: string) {
     }
   }
 
+  // If absolutely NO test cases exist (empty custom problem), execute and verify it runs without crashing
   if (testcases.length === 0) {
     const res = await submitToWandbox({ sourceCode: submission.code, language: submission.language, stdin: "1\n" });
     const verdict = res.status === 'ACCEPTED' ? Verdict.ACCEPTED : Verdict.RUNTIME_ERROR;
@@ -183,7 +223,7 @@ export async function judgeQueuedSubmission(submissionId: string) {
     
     fullTestResults.push({
       submissionId: submission.id,
-      testcaseId: testcase.id,
+      testcaseId: testcase.id || `tc-${index}`,
       index,
       verdict: localVerdict,
       stdout: result.stdout?.substring(0, 500) || null,

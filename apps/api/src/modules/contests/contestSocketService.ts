@@ -50,6 +50,10 @@ export function setupContestSockets(io: Server) {
     socket.on('voice-offer', ({ to, offer }) => { io.to(to).emit('voice-offer', { from: socket.id, offer }); });
     socket.on('voice-answer', ({ to, answer }) => { io.to(to).emit('voice-answer', { from: socket.id, answer }); });
     socket.on('voice-ice-candidate', ({ to, candidate }) => { io.to(to).emit('voice-ice-candidate', { from: socket.id, candidate }); });
+    socket.on('leave-voice', (teamId) => {
+      socket.leave(`voice:${teamId}`);
+      socket.to(`voice:${teamId}`).emit('user-left-voice', socket.id);
+    });
 
     socket.on('disconnect', () => {});
   });

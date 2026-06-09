@@ -139,7 +139,6 @@ export default function ContestRoomPage() {
 
   useEffect(() => { const ticker = setInterval(() => setNowTick(Date.now()), 1000); return () => clearInterval(ticker); }, []);
 
-  // 👉 FIXED: Top Level useMemo (Removed the duplicate inside the problem map loop)
   const { mcqCount, codingCount } = useMemo(() => {
     const problems = contest?.problems || [];
     return {
@@ -148,7 +147,7 @@ export default function ContestRoomPage() {
     };
   }, [contest]);
 
- async function registerForContest() {
+  async function registerForContest() {
     if (!id || !session) return toast.error("Session expired");
     if (!regHandle.trim()) return toast.error("Codeforces handle is required");
     
@@ -788,24 +787,24 @@ export default function ContestRoomPage() {
                       <span style={{ color: '#67e8f9', fontSize: 13 }}>{m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}</span>
                     </p>
                    {!m.isOfficial && isActuallyOwnerMode && (
-  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-    <span style={{ color: '#f87171', fontSize: 11, fontWeight: 'bold' }}>Pending</span>
-    <button 
-  disabled={syncing} 
-  onClick={() => approveMember(m.id)} 
-  style={{ 
-    ...primaryButton, 
-    width: 'auto', 
-    margin: 0, 
-    padding: '6px 12px', 
-    fontSize: 12, 
-    opacity: syncing ? 0.5 : 1 
-  }}
->
-  {syncing ? 'Processing...' : 'Approve'}
-</button>
-  </div>
-)}
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span style={{ color: '#f87171', fontSize: 11, fontWeight: 'bold' }}>Pending</span>
+                        <button 
+                      disabled={syncing} 
+                      onClick={() => approveMember(m.id)} 
+                      style={{ 
+                        ...primaryButton, 
+                        width: 'auto', 
+                        margin: 0, 
+                        padding: '6px 12px', 
+                        fontSize: 12, 
+                        opacity: syncing ? 0.5 : 1 
+                      }}
+                    >
+                      {syncing ? 'Processing...' : 'Approve'}
+                    </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </section>}
@@ -1074,7 +1073,6 @@ export default function ContestRoomPage() {
   );
 }
 
-// STYLES
 const page: CSSProperties = { minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.32), transparent 34rem), #070a16' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 };
 const userPill: CSSProperties = { padding: '10px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)' };

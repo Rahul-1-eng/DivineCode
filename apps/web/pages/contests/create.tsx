@@ -18,11 +18,14 @@ export default function GlobalNavigationAndMashupCreator() {
   const [startTimeStr, setStartTimeStr] = useState('');
   
   const [urlProblem, setUrlProblem] = useState('');
+  const [generateAiTests, setGenerateAiTests] = useState(true); // <--- AI TEST CHECKBOX STATE
+  
   const [imageBase64, setImageBase64] = useState<string>('');
   
   const [customTitle, setCustomTitle] = useState('');
   const [customDesc, setCustomDesc] = useState('');
   const [customCases, setCustomCases] = useState([{ input: '', expectedOutput: '', isPublic: true }]);
+  const [customTimeLimit, setCustomTimeLimit] = useState<number>(0); // <--- CUSTOM TIME LIMIT
   
   const [mcqPrompt, setMcqPrompt] = useState('');
   const [mcqOptions, setMcqOptions] = useState(['', '']);
@@ -77,6 +80,7 @@ export default function GlobalNavigationAndMashupCreator() {
       payload.url = finalUrl;
       payload.title = finalUrl.split('/').pop() || 'External Problem';
       payload.displayTitle = payload.title;
+      payload.generateAiTests = generateAiTests; // Include Checkbox value
       
     } else if (activeTab === 'CUSTOM') {
       if (!customTitle) return toast.error('Enter custom title');
@@ -89,7 +93,9 @@ export default function GlobalNavigationAndMashupCreator() {
           title: customTitle,
           description: customDesc,
           imageUrl: imageBase64 || null,
-          testcases: validCases
+          testcases: validCases,
+          time: customTimeLimit, // Include Timer
+          generateAiTests: generateAiTests // Include Checkbox value
       };
       payload.displayTitle = customTitle;
     } else {
@@ -102,7 +108,7 @@ export default function GlobalNavigationAndMashupCreator() {
     }
     
     setCompiledProblems([...compiledProblems, payload]);
-    setUrlProblem(''); setImageBase64(''); setCustomTitle(''); setCustomDesc(''); 
+    setUrlProblem(''); setImageBase64(''); setCustomTitle(''); setCustomDesc(''); setCustomTimeLimit(0);
     setCustomCases([{ input: '', expectedOutput: '', isPublic: true }]);
     setMcqPrompt(''); setMcqCorrect([]); setMcqOptions(['', '']);
     toast.success("Problem appended to contest batch queue!");
@@ -128,10 +134,15 @@ export default function GlobalNavigationAndMashupCreator() {
     removeProblem(index); 
     setActiveTab(p.type);
     
-    if (p.type === 'URL') setUrlProblem(p.url);
+    if (p.type === 'URL') {
+        setUrlProblem(p.url);
+        setGenerateAiTests(p.generateAiTests);
+    }
     if (p.type === 'CUSTOM') {
       setCustomTitle(p.customData.title);
       setCustomDesc(p.customData.description);
+      setCustomTimeLimit(p.customData.time || 0);
+      setGenerateAiTests(p.customData.generateAiTests);
       setCustomCases(p.customData.testcases.length ? p.customData.testcases : [{ input: '', expectedOutput: '', isPublic: true }]);
     }
     if (p.type === 'MCQ') {
@@ -157,7 +168,7 @@ export default function GlobalNavigationAndMashupCreator() {
         body: JSON.stringify({ 
           title, 
           durationMinutes: duration, 
-          type: contestMode === 'SOLO' ? 'INDIVIDUAL' : 'GROUP', // Safely map to Prisma Enum
+          type: contestMode === 'SOLO' ? 'INDIVIDUAL' : 'GROUP', 
           startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined,
           ownerEmail: session.user.email,
           ownerName: session.user.name || 'Admin',
@@ -256,21 +267,33 @@ export default function GlobalNavigationAndMashupCreator() {
               ))}
             </div>
 
-            {activeTab === 'URL' && <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste Link or Codeforces Code (e.g. 1500A)" />}
+            {activeTab === 'URL' && (
+               <div>
+                  <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste Link or Codeforces Code (e.g. 1500A)" />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#94a3b8', marginTop: 10 }}>
+                     <input type="checkbox" checked={generateAiTests} onChange={e => setGenerateAiTests(e.target.checked)} />
+                     🤖 Check scraped tests AND automatically generate tougher hidden system tests via AI
+                  </label>
+               </div>
+            )}
             
             {activeTab === 'CUSTOM' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
                 <div>
-                    <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Custom Problem Title</label>
-                    <input placeholder="e.g. Find the Missing Integer" value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} />
+                  <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Custom Problem Title</label>
+                  <input placeholder="e.g. Find the Missing Integer" value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} />
                 </div>
                 <div>
-                    <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Problem Description (Supports Markdown/HTML)</label>
-                    <textarea placeholder="Describe the problem, input formats, and constraints..." value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, minHeight: '150px', resize: 'vertical'}} />
+                  <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Problem Description (Supports Markdown/HTML)</label>
+                  <textarea placeholder="Describe the problem, input formats, and constraints..." value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, minHeight: '150px', resize: 'vertical'}} />
                 </div>
                 <div>
-                    <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Optional Image Attachment</label>
-                    <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'block', marginTop: 5, color: '#fff' }} />
+                  <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Optional Image Attachment</label>
+                  <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'block', marginTop: 5, color: '#fff' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Time Limit (Seconds, 0 for infinite)</label>
+                  <input type="number" placeholder="e.g. 120" value={customTimeLimit} onChange={e => setCustomTimeLimit(Number(e.target.value))} style={inputBox} />
                 </div>
                 
                 <h4 style={{ color: '#94a3b8', margin: '10px 0 0 0' }}>Custom Test Cases</h4>
@@ -302,6 +325,11 @@ export default function GlobalNavigationAndMashupCreator() {
                     </div>
                 ))}
                 <button onClick={() => setCustomCases([...customCases, {input: '', expectedOutput: '', isPublic: true}])} style={{...ghostBtn, alignSelf: 'flex-start'}}>+ Add Test Case</button>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#94a3b8', marginTop: 10 }}>
+                     <input type="checkbox" checked={generateAiTests} onChange={e => setGenerateAiTests(e.target.checked)} />
+                     🤖 Automatically generate tougher hidden system tests for this problem via AI
+                </label>
               </div>
             )}
 

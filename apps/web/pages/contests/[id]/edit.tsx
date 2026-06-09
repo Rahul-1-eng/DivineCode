@@ -24,8 +24,6 @@ function viewerHeaders(session: any) {
   };
 }
 
-// ... (keep loadContest, saveSettings standard logic from before) ...
-
 export default function ContestEditPage() {
   const router = useRouter();
   const { id } = router.query;
@@ -39,9 +37,12 @@ export default function ContestEditPage() {
   const [newProblemCode, setNewProblemCode] = useState('');
   const [newProblemPlatform, setNewProblemPlatform] = useState('Codeforces');
   const [newProblemUrl, setNewProblemUrl] = useState(''); 
+  const [urlGenerateAiTests, setUrlGenerateAiTests] = useState(true);
   
   const [customTitle, setCustomTitle] = useState('');
   const [customDescription, setCustomDescription] = useState('');
+  const [customTimeLimit, setCustomTimeLimit] = useState<number>(0);
+  const [customGenerateAiTests, setCustomGenerateAiTests] = useState(true);
   const [uploadingImage, setUploadingImage] = useState(false);
 
   const [saving, setSaving] = useState(false);
@@ -115,7 +116,6 @@ export default function ContestEditPage() {
     return data;
   }
 
-  // 👉 FIXED: Safe JSON Parsing blocks for ALL problem additions
   async function addProblem() {
     if (!id || !session || !newProblemCode.trim()) return toast.error('Enter a problem code.');
     try {
@@ -160,7 +160,7 @@ export default function ContestEditPage() {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/mashup`, { 
         method: 'POST', 
         headers: viewerHeaders(session), 
-        body: JSON.stringify({ type: 'URL', url: finalUrl }) 
+        body: JSON.stringify({ type: 'URL', url: finalUrl, generateAiTests: urlGenerateAiTests }) 
       });
 
      let data;
@@ -190,6 +190,8 @@ export default function ContestEditPage() {
           customData: {
             title: customTitle,
             description: customDescription,
+            time: customTimeLimit,
+            generateAiTests: customGenerateAiTests,
             testcases: [] 
           }
         })
@@ -209,6 +211,7 @@ export default function ContestEditPage() {
       
       setCustomTitle('');
       setCustomDescription('');
+      setCustomTimeLimit(0);
       toast.success('Custom problem added successfully!');
       loadContest(); 
     } catch (e: any) { toast.error(e.message || 'Custom add failed'); }
@@ -401,6 +404,10 @@ export default function ContestEditPage() {
               <input value={newProblemUrl} onChange={(e) => setNewProblemUrl(e.target.value)} placeholder="https://codeforces.com/problemset/problem/..." style={{ ...input, flex: 1, margin: 0 }} />
               <button onClick={addProblemFromUrl} style={primary}>Scrape & Add</button>
             </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#94a3b8', marginTop: 10 }}>
+               <input type="checkbox" checked={urlGenerateAiTests} onChange={e => setUrlGenerateAiTests(e.target.checked)} />
+               🤖 Check scraped tests AND automatically generate tougher hidden system tests via AI
+            </label>
           </div>
 
           <div style={{ borderTop: '1px solid #1e293b', paddingTop: 20 }}>
@@ -425,6 +432,16 @@ export default function ContestEditPage() {
               style={{ ...input, minHeight: 140, borderRadius: '0 0 12px 12px' }} 
             />
             
+            <div>
+               <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Time Limit (Seconds, 0 for infinite)</label>
+               <input type="number" placeholder="e.g. 120" value={customTimeLimit} onChange={e => setCustomTimeLimit(Number(e.target.value))} style={input} />
+            </div>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#94a3b8', marginTop: 5, marginBottom: 15 }}>
+               <input type="checkbox" checked={customGenerateAiTests} onChange={e => setCustomGenerateAiTests(e.target.checked)} />
+               🤖 Automatically generate tougher hidden system tests for this problem via AI
+            </label>
+
             <button onClick={addCustomProblem} style={primary}>Create Custom Problem</button>
           </div>
 

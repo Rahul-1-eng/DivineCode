@@ -11,7 +11,7 @@ import { createQueuedContestSubmission, unlockHiddenTestCase } from '../modules/
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
 import { recomputeContestStandings } from '../modules/standings/standingService';
 import { scrapeProblemFromUrl } from '../modules/external-sync/problemScraper'; 
-import { generateTestCasesWithAI, debugCodeWithAI } from '../modules/ai/aiService'; 
+import { generateTestCasesWithAI, debugCodeWithAI, generateToughTestCases } from '../modules/ai/aiService'; 
 import { ContestStatus } from '@prisma/client';
 import axios from 'axios';
 import multer from 'multer';
@@ -121,7 +121,6 @@ export function mountV2Routes(app: Express, io: Server) {
     });
   });
 
-  // 👉 FIXED: The Missing AI Chatbot Route that powers your Avatar
   router.post('/ai/chat', asyncRoute(async (req, res) => {
     const { message, history } = req.body;
     const apiKey = process.env.AI_API_KEY;
@@ -130,7 +129,6 @@ export function mountV2Routes(app: Express, io: Server) {
     try {
       const contents = [];
       
-      // Parse history if it was sent by the frontend
       if (Array.isArray(history)) {
          history.forEach(msg => {
             contents.push({
@@ -140,7 +138,6 @@ export function mountV2Routes(app: Express, io: Server) {
          });
       }
       
-      // Append the latest user message
       contents.push({ role: 'user', parts: [{ text: message || 'Hello' }] });
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
@@ -258,17 +255,22 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
   }));
 
-router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
-    const { type, url, customData, mcqData } = req.body;
+  router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
+    // We now capture generateAiTests for URL problems
+    const { type, url, customData, mcqData, generateAiTests } = req.body;
     const contestId = req.params.id;
 
     const existingCount = await prisma.contestProblem.count({ where: { contestId } });
     const nextLabel = String.fromCharCode(65 + existingCount);
 
+    // ============================================
+    // 1. URL SCALER LOGIC
+    // ============================================
     if (type === 'URL' && url) {
       let scrapedTitle = 'External Problem Resource';
       let scrapedHtml = `<div style="text-align:center;"><a href="${url}">View Problem Here</a></div>`;
       let platform = 'OTHER';
+      let scrapedTestcases: any[] = [];
 
       try {
         const data = await scrapeProblemFromUrl(url);
@@ -276,12 +278,31 @@ router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
           scrapedTitle = data.title;
           scrapedHtml = data.descriptionHtml;
           platform = data.platform || 'OTHER';
+          scrapedTestcases = data.testcases || [];
         }
       } catch (err) {}
 
+      // Add AI generated test cases if the user checked the box!
+      if (generateAiTests && scrapedHtml.length > 50) {
+          const aiCases = await generateToughTestCases(scrapedHtml);
+          if (aiCases && aiCases.length > 0) {
+             const formattedAiCases = aiCases.map((c: any) => ({ ...c, isPublic: false }));
+             scrapedTestcases = [...scrapedTestcases, ...formattedAiCases];
+          }
+      }
+
       const problem = await prisma.problem.create({
         data: {
-          title: scrapedTitle, description: scrapedHtml, platform: platform as any, source: 'EXTERNAL', url, problemCode: `SCRAPED-${Date.now()}`, visibility: 'PUBLIC'
+          title: scrapedTitle, description: scrapedHtml, platform: platform as any, source: 'EXTERNAL', url, problemCode: `SCRAPED-${Date.now()}`, visibility: 'PUBLIC',
+          testcases: {
+             create: scrapedTestcases.map((c: any, i: number) => ({
+                input: c.input,
+                expectedOutput: c.expectedOutput,
+                order: i,
+                isPublic: c.isPublic !== false,
+                type: c.isPublic === false ? 'HIDDEN' : 'SAMPLE'
+             }))
+          }
         }
       });
 
@@ -291,6 +312,9 @@ router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
       return res.json({ success: true, problem: updatedProblem });
     }
 
+    // ============================================
+    // 2. MCQ LOGIC
+    // ============================================
     if (type === 'MCQ' && mcqData) {
       let defaultTrack = await prisma.interviewTrack.findFirst();
       if (!defaultTrack) defaultTrack = await prisma.interviewTrack.create({ data: { slug: 'theory', title: 'Theory Track', type: 'DSA' } });
@@ -316,18 +340,33 @@ router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
           index: existingCount, 
           label: nextLabel, 
           platform: 'DIVINECODE', 
-          isMCQ: true 
+          isMCQ: true,
+          mcqTimeLimitSeconds: Number(mcqData.timeLimit || req.body.mcqTimeLimitSeconds || 0)
         } as any 
       });
       return res.json({ success: true });
     }
 
+    // ============================================
+    // 3. CUSTOM INPUT LOGIC
+    // ============================================
     if (type === 'CUSTOM' && customData) {
+      let customCases = customData.testcases || [];
+      
+      // Add AI generated test cases if the user checked the box!
+      if (customData.generateAiTests && customData.description.length > 20) {
+         const aiCases = await generateToughTestCases(customData.description);
+         if (aiCases && aiCases.length > 0) {
+            const formattedAiCases = aiCases.map((c: any) => ({ ...c, isPublic: false }));
+            customCases = [...customCases, ...formattedAiCases];
+         }
+      }
+
       const problem = await prisma.problem.create({
         data: {
           title: customData.title, description: customData.description, platform: 'DIVINECODE', source: 'INTERNAL', problemCode: `CUSTOM-${Date.now()}`, visibility: 'PUBLIC',
           testcases: { 
-            create: (customData.testcases || []).map((c: any, i: number) => ({ 
+            create: customCases.map((c: any, i: number) => ({ 
               input: c.input, 
               expectedOutput: c.expectedOutput, 
               order: i, 
@@ -337,16 +376,19 @@ router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
           }
         }
       });
+      
       await prisma.contestProblem.create({
         data: { 
           contestId, 
           problemId: problem.id, 
           points: 100, 
           titleSnapshot: problem.title, 
+          customDescription: customData.description,
           index: existingCount, 
           label: nextLabel, 
           platform: 'DIVINECODE',
-          isMCQ: false 
+          isMCQ: false,
+          mcqTimeLimitSeconds: Number(customData.time || 0)
         } as any
       });
       return res.json({ success: true });
@@ -450,11 +492,9 @@ router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
     res.json({ success: true, recommendations: problems });
   }));
 
-  // 👉 ADD THIS ROUTE: Fixes the 404 error when clicking "Find Flaw"
-router.post('/contests/:id/problems/:problemId/ai-debug', asyncRoute(async (req, res) => {
+  router.post('/contests/:id/problems/:problemId/ai-debug', asyncRoute(async (req, res) => {
     const { userCode, problemDescription } = req.body;
     
-    // Call the real service function defined in aiService.ts
     const aiDebugData = await debugCodeWithAI(userCode, problemDescription);
     
     if (!aiDebugData || !aiDebugData.hint) {
