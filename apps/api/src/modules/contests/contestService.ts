@@ -132,7 +132,7 @@ export async function loadContestForViewer(contestId: string) {
       where: { id: contestId },
       include: {
         createdBy: true,
-        // 👉 PRISMA FIX: Removed orderBy completely to avoid 'createdAt' missing error.
+        // FIXED: Removed orderBy: { joinedAt } to prevent database crash
         participants: { include: { user: true, externalHandle: true, team: true } },
         problems: { include: { problem: { include: { editorial: true, officialSolutions: true, testcases: true } }, interviewQuestion: true }, orderBy: { index: 'asc' } },
         standings: { include: { participant: true } }
@@ -424,7 +424,16 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
 
 export async function approveParticipant(contestId: string, participantId: string, actorId: string) {
   const contest = await prisma.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
-  const actor = contest?.participants.find(p => p.userId === actorId);
-  if (!actor || (actor.role !== ContestParticipantRole.MANAGER && actor.userId !== contest?.createdById)) throw new Error('Unauthorized: Only managers or owners can approve participants.');
+  if (!contest) throw new Error('Contest not found');
+
+  // AUTHORIZATION FIX: Check for owner OR manager role
+  const actor = contest.participants.find(p => p.userId === actorId);
+  const isOwner = contest.createdById === actorId;
+  const isManager = actor?.role === ContestParticipantRole.MANAGER;
+
+  if (!isOwner && !isManager) {
+    throw new Error('Unauthorized: Only managers or owners can approve participants.');
+  }
+
   return await prisma.contestParticipant.update({ where: { id: participantId }, data: { isOfficial: true } });
 }

@@ -702,8 +702,10 @@ export default function ContestRoomPage() {
           </motion.section>
         )}
 
-        <PostContestAiRecommendations contestId={id as string} contestStatus={displayStatus} />
-
+{/* Only mount the recommendations when contest data is fully available */}
+{contest && (
+    <PostContestAiRecommendations contestId={id as string} contestStatus={displayStatus} />
+)}
         {!isActuallyOwnerMode && !viewerMember && displayStatus !== 'ENDED' && (
           <section style={{ ...panel, marginBottom: 18, border: '1px solid #38bdf8', background: 'linear-gradient(180deg, #0f172a, rgba(56, 189, 248, 0.05))', textAlign: 'center' }}>
             <h2 style={{color: '#38bdf8', margin: '0 0 10px 0', fontSize: 28}}>Register for {contest.title}</h2>

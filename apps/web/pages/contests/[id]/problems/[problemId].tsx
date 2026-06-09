@@ -532,9 +532,17 @@ export default function ContestProblemWorkspace() {
         </div>
       ) : (
         <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
-          <section style={{ width: '40%', overflowY: 'auto', background: '#0f172a', padding: 20 }}>
-              <div style={{ color: '#eef2ff', lineHeight: '1.6' }} dangerouslySetInnerHTML={{ __html: problem.customDescription || problem.problem?.description || 'No description available for this problem.' }} />
-          </section>
+         <section style={{ width: '40%', overflowY: 'auto', background: '#0f172a', padding: 20 }}>
+    {/* Problem Description Logic */}
+    <div 
+      style={{ color: '#eef2ff', lineHeight: '1.6' }} 
+      dangerouslySetInnerHTML={{ 
+        __html: problem.customDescription || 
+                problem.problem?.description || 
+                (problem.description ? problem.description : 'No description available for this problem.') 
+      }} 
+    />
+</section>
           <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
              <Editor height="65%" theme="vs-dark" language={monacoLanguage} value={code} onChange={(val) => setCode(val || '')} />
              <div style={{ height: '35%', background: '#1e1e1e', borderTop: '1px solid #333' }}>
