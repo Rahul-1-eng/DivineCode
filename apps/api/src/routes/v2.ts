@@ -300,7 +300,16 @@ export function mountV2Routes(app: Express, io: Server) {
       });
 
       await prisma.contestProblem.create({
-        data: { contestId, interviewQuestionId: newMcq.id, points: 50, titleSnapshot: newMcq.title, index: existingCount, label: nextLabel, platform: 'DIVINECODE', isMCQ: true }
+        data: { 
+            contestId, 
+            interviewQuestionId: newMcq.id, 
+            points: 50, 
+            titleSnapshot: newMcq.title, 
+            index: existingCount, 
+            label: nextLabel, 
+            platform: 'DIVINECODE', 
+            isMCQ: true 
+        } as any
       });
       return res.json({ success: true });
     }
