@@ -70,6 +70,8 @@ export default function ContestProblemWorkspace() {
   const [mcqData, setMcqData] = useState<any>(null);
   const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
   const [questionTimeLeft, setQuestionTimeLeft] = useState<number>(0);
+  const [redirectInfo, setRedirectInfo] = useState<any>(null);
+  const [problemType, setProblemType] = useState<'MCQ' | 'EXTERNAL' | 'INTERNAL' | 'UNKNOWN'>('UNKNOWN');
 
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -110,22 +112,30 @@ export default function ContestProblemWorkspace() {
         }
         setContest(cData);
         setIsLoading(false);
+        setMessages([]);
+        setSelectedOptions([]);
       })
-      .catch(() => setIsLoading(false));
+      .catch((err) => {
+        console.error('[Contest Load Error]', err);
+        setIsLoading(false);
+      });
   }, [id, session]);
 
-  const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemId), [contest, problemId]);
+  const problemIdStr = Array.isArray(problemId) ? problemId[0] : problemId;
+  const problem = useMemo(() => contest?.problems?.find((p: any) => p.id === problemIdStr), [contest, problemIdStr]);
   const timer = useContestTimer(new Date(contest?.startTime || 0), new Date(contest?.endTime || 0));
   
   const isMCQ = useMemo(() => {
-    return problem?.isMCQ === true || !!problem?.interviewQuestionId;
-  }, [problem]);
+    return problem?.isMCQ === true || !!problem?.interviewQuestionId || problemType === 'MCQ';
+  }, [problem, problemType]);
 
   useEffect(() => {
-     if (problem && problem.mcqTimeLimitSeconds > 0) {
-        setQuestionTimeLeft(problem.mcqTimeLimitSeconds);
-     }
-  }, [problem]);
+    if (problem && isMCQ && problem.mcqTimeLimitSeconds > 0) {
+      setQuestionTimeLeft(problem.mcqTimeLimitSeconds);
+    } else if (!isMCQ) {
+      setQuestionTimeLeft(0);
+    }
+  }, [problem, isMCQ, problemIdStr]);
 
   useEffect(() => {
     if (questionTimeLeft <= 0) return;
@@ -157,14 +167,56 @@ export default function ContestProblemWorkspace() {
   }, [problem, isMCQ]);
 
   useEffect(() => {
-    if (isMCQ) {
-      if (problem?.mcqData) setMcqData(typeof problem.mcqData === 'string' ? JSON.parse(problem.mcqData) : problem.mcqData);
-      else if (problem?.interviewQuestion) setMcqData(problem.interviewQuestion);
+    if (!problemIdStr) return;
+    const controller = new AbortController();
+
+    fetch(`${API_V2_BASE_URL}/problems/${problemIdStr}/redirect`, {
+      headers: { 'x-user-email': session?.user?.email || '' },
+      signal: controller.signal
+    })
+      .then((res) => res.ok ? res.json() : Promise.reject(new Error('Unable to fetch problem redirect data')))
+      .then((data) => {
+        setRedirectInfo(data);
+        setProblemType(data?.type || (problem?.isMCQ ? 'MCQ' : (problem?.externalUrl ? 'EXTERNAL' : 'INTERNAL')));
+      })
+      .catch((err) => {
+        console.warn('[Problem Redirect Fetch Error]', err);
+        setProblemType(problem?.isMCQ ? 'MCQ' : (problem?.externalUrl ? 'EXTERNAL' : 'INTERNAL'));
+      });
+
+    return () => controller.abort();
+  }, [problemIdStr, session?.user?.email, problem?.isMCQ, problem?.externalUrl]);
+
+  useEffect(() => {
+    if (isMCQ && problem) {
+      try {
+        if (problem?.interviewQuestion) {
+          setMcqData(problem.interviewQuestion);
+        } else if (problem?.mcqData) {
+          const data = typeof problem.mcqData === 'string' ? JSON.parse(problem.mcqData) : problem.mcqData;
+          setMcqData(data);
+        } else {
+          console.warn('[MCQ] No interviewQuestion or mcqData found', problem);
+          setMcqData(null);
+        }
+      } catch (e) {
+        console.error('[MCQ Parse Error]', e);
+        setMcqData(null);
+      }
+    } else {
+      setMcqData(null);
     }
-  }, [isMCQ, problem]);
+  }, [isMCQ, problem, problemIdStr]);
 
   const toggleVoice = async () => {
-    if (!contest?.viewerMember?.teamId) return toast.error("You must be in a team to use voice chat.");
+    if (!contest?.viewerMember?.teamId) {
+      toast.error("You must be in a team to use voice chat.");
+      return;
+    }
+    if (!socketRef.current) {
+      toast.error("Chat connection not established. Please wait...");
+      return;
+    }
     if (voiceStatus === 'connected' || voiceStatus === 'connecting') {
       setVoiceStatus('disconnected');
       socketRef.current?.emit('leave-voice', contest.viewerMember.teamId);
@@ -183,58 +235,104 @@ export default function ContestProblemWorkspace() {
         setVoiceStatus('connected');
         socketRef.current?.emit('join-voice', contest.viewerMember.teamId);
         toast.success("Voice channel joined!");
-      } catch (err) {
+      } catch (err: any) {
         setVoiceStatus('disconnected');
-        toast.error("Microphone access denied.");
+        console.error('[Voice Error]', err);
+        toast.error(err?.message?.includes('Permission') ? "Microphone access denied by user." : "Could not access microphone. Check permissions.");
       }
     }
   };
 
   useEffect(() => {
-    if (!id || !session || !contest?.viewerMember?.teamId) return;
-    socketRef.current = io(API_BASE_URL, { transports: ['websocket'], reconnection: true });
-    const socket = socketRef.current;
+    if (!id || !session?.user?.email || !contest?.viewerMember?.teamId) {
+      return;
+    }
     
-    socket.on('connect', () => { 
-      socket.emit('joinContest', id); 
-      socket.emit('joinTeam', contest.viewerMember.teamId);
-    });
-
-    socket.on('teamMessage', (incomingMessage) => {
-      setMessages((prev) => {
-        if (prev.some(m => m.id === incomingMessage.id)) return prev;
-        return [...prev, incomingMessage];
+    try {
+      socketRef.current = io(API_BASE_URL, { 
+        transports: ['websocket'], 
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: 5
       });
-    });
+      const socket = socketRef.current;
+      
+      socket.on('connect', () => {
+        console.log('[Socket] Connected');
+        socket.emit('joinContest', id); 
+        socket.emit('joinTeam', contest.viewerMember.teamId);
+      });
 
-    socket.on('team_problem_solved', (data) => {
-      if (data.userId !== (session.user?.name || session.user?.email)) {
-        toast.success(`🎉 A teammate just solved a problem!`, { duration: 5000, icon: '🚀' });
-        playSuccessSound();
-      }
-    });
+      socket.on('connect_error', (error: any) => {
+        console.error('[Socket Error]', error);
+        toast.error('Chat connection failed. Will retry...', { duration: 3000 });
+      });
 
-    return () => { 
-      socket.disconnect(); 
-      socketRef.current = null; 
-      if (localStreamRef.current) localStreamRef.current.getTracks().forEach(track => track.stop());
-      Object.values(peersRef.current).forEach(pc => pc.close());
-    };
-  }, [id, session, contest?.viewerMember?.teamId]);
+      socket.on('teamMessage', (incomingMessage: any) => {
+        if (!incomingMessage || !incomingMessage.id) return;
+        setMessages((prev) => {
+          const isDuplicate = prev.some(m => m.id === incomingMessage.id);
+          if (isDuplicate) return prev;
+          return [...prev, incomingMessage];
+        });
+      });
+
+      socket.on('team_problem_solved', (data: any) => {
+        if (data?.userId !== (session.user?.name || session.user?.email)) {
+          toast.success(`🎉 A teammate just solved a problem!`, { duration: 5000, icon: '🚀' });
+          playSuccessSound();
+        }
+      });
+
+      socket.on('disconnect', () => {
+        console.log('[Socket] Disconnected');
+      });
+
+      return () => { 
+        try {
+          socket.disconnect();
+        } catch (e) {
+          console.error('[Socket Disconnect Error]', e);
+        }
+        socketRef.current = null; 
+        if (localStreamRef.current) {
+          localStreamRef.current.getTracks().forEach(track => track.stop());
+        }
+        Object.values(peersRef.current).forEach(pc => pc.close());
+        peersRef.current = {};
+      };
+    } catch (err) {
+      console.error('[Socket Init Error]', err);
+      toast.error('Failed to initialize chat');
+    }
+  }, [id, session?.user?.email, contest?.viewerMember?.teamId, contest?.viewerMember]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const handleSendMessage = () => {
-    if (!chatInput.trim() || !contest?.viewerMember?.teamId) return;
-    if (socketRef.current) {
-      const senderIdentifier = contest.viewerMember.userId || contest.viewerMember.user?.id || session?.user?.email;
+    if (!chatInput.trim()) return;
+    if (!contest?.viewerMember?.teamId) {
+      toast.error("You must be in a team to send messages.");
+      return;
+    }
+    if (!socketRef.current) {
+      toast.error("Chat not connected. Please wait...");
+      return;
+    }
+    try {
+      const senderIdentifier = session?.user?.email || session?.user?.name || 'Anonymous';
       socketRef.current.emit('sendTeamMessage', {
-        contestId: id, teamId: contest.viewerMember.teamId,
+        contestId: id, 
+        teamId: contest.viewerMember.teamId,
         senderId: senderIdentifier,
         content: chatInput.trim()
       });
+      setChatInput('');
+    } catch (err) {
+      console.error('[Send Message Error]', err);
+      toast.error('Failed to send message');
     }
-    setChatInput('');
   };
 
   const sendToCPH = async () => {
@@ -374,20 +472,35 @@ export default function ContestProblemWorkspace() {
 
   const handleSubmitCode = async () => {
     if (isMCQ) {
-       if (selectedOptions.length === 0) return alert("Please select an answer before submitting.");
+      if (selectedOptions.length === 0) return alert("Please select an answer before submitting.");
+      if (!mcqData) return alert("MCQ data not loaded. Please refresh the page.");
     } else {
-       if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
-       if (problem?.platform === 'CODEFORCES' || problem?.externalUrl?.includes('codeforces')) {
-         setShowCfModal(true);
-         return;
-       }
+      if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
+      if (problemType === 'EXTERNAL' || problem?.platform === 'CODEFORCES' || problem?.externalUrl?.includes('codeforces')) {
+        const redirectUrl = redirectInfo?.redirectUrl || redirectInfo?.externalUrl || problem?.externalUrl;
+        if (redirectUrl) {
+          window.open(redirectUrl, '_blank');
+          return;
+        }
+        setShowCfModal(true);
+        return;
+      }
     }
     
     setSubmitting(true);
     setJudgeVerdict(null);
 
+    let finalCode: string;
+    try {
+      finalCode = isMCQ ? JSON.stringify(selectedOptions) : code;
+    } catch (e) {
+      console.error('[JSON Stringify Error]', e);
+      setJudgeVerdict({ status: 'Error', message: 'Failed to serialize your answer. Please try again.' });
+      setSubmitting(false);
+      return;
+    }
+
     const finalLanguage = isMCQ ? 'mcq' : language;
-    const finalCode = isMCQ ? JSON.stringify(selectedOptions) : code;
 
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
@@ -434,6 +547,8 @@ export default function ContestProblemWorkspace() {
   if (!contest || !problem) return <div style={page}>Problem not found.</div>;
 
   const monacoLanguage = language === 'cpp' ? 'cpp' : language === 'python' ? 'python' : 'java';
+  const externalUrl = redirectInfo?.redirectUrl || redirectInfo?.externalUrl || problem?.externalUrl || '';
+  const problemDescriptionHtml = problem?.customDescription || problem?.problem?.description || (problem?.description ? problem.description : 'No description available for this problem.');
 
   return (
     <main style={{...page, minHeight: '100vh', height: '100vh', overflow: 'hidden'}}>
@@ -506,64 +621,91 @@ export default function ContestProblemWorkspace() {
       {isMCQ ? (
         <div style={{ width: '100%', height: 'calc(100vh - 60px)', overflowY: 'auto', background: '#020617', display: 'flex', justifyContent: 'center' }}>
           <div style={{ width: '100%', maxWidth: 800, padding: '60px 20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 }}>
-              <strong style={{ color: '#38bdf8', fontSize: 16, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Question {problem?.label || ''}</strong>
-              {problem?.mcqTimeLimitSeconds > 0 && (
-                 <div style={{ fontSize: 24, fontWeight: 'bold', color: questionTimeLeft < 30 ? '#ef4444' : '#fbbf24', background: questionTimeLeft < 30 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(251,191,36,0.1)', padding: '5px 15px', borderRadius: 8 }}>
-                   {Math.floor(questionTimeLeft / 60)}:{(questionTimeLeft % 60).toString().padStart(2, '0')}
-                 </div>
+            {!mcqData ? (
+              <div style={{ textAlign: 'center', color: '#ef4444', fontSize: 16 }}>
+                <p>⚠️ MCQ Question data failed to load. Please refresh the page.</p>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 }}>
+                  <strong style={{ color: '#38bdf8', fontSize: 16, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Question {problem?.label || ''}</strong>
+                  {problem?.mcqTimeLimitSeconds > 0 && (
+                     <div style={{ fontSize: 24, fontWeight: 'bold', color: questionTimeLeft < 30 ? '#ef4444' : '#fbbf24', background: questionTimeLeft < 30 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(251,191,36,0.1)', padding: '5px 15px', borderRadius: 8 }}>
+                       {Math.floor(questionTimeLeft / 60)}:{(questionTimeLeft % 60).toString().padStart(2, '0')}
+                     </div>
+                  )}
+                </div>
+                
+                <h2 style={{ fontSize: 28, lineHeight: 1.6, margin: '0 0 15px', color: '#eef2ff' }} dangerouslySetInnerHTML={{ __html: mcqData?.prompt || problem?.customDescription || problem?.titleSnapshot }} />
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 40 }}>
+                  {mcqData?.options && Array.isArray(mcqData.options) && mcqData.options.length > 0 ? (
+                    mcqData.options.map((opt: string, idx: number) => (
+                      <button key={idx} onClick={() => setSelectedOptions(mcqData?.isMultiple ? (prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]) : [idx])} style={{ padding: '20px', borderRadius: 12, background: selectedOptions.includes(idx) ? 'rgba(34,211,238,.12)' : 'rgba(15,23,42,.6)', border: `2px solid ${selectedOptions.includes(idx) ? '#22d3ee' : '#334155'}`, color: '#eef2ff', cursor: 'pointer', textAlign: 'left' }}>
+                        {String.fromCharCode(65 + idx)}. {opt}
+                      </button>
+                    ))
+                  ) : (
+                    <p style={{ color: '#ef4444' }}>No options available for this question.</p>
+                  )}
+                </div>
+
+                <button onClick={handleSubmitCode} disabled={submitting || (problem.mcqTimeLimitSeconds > 0 && questionTimeLeft <= 0)} style={{...submitBtn, width: '100%', padding: '16px', fontSize: 18}}>
+                   {submitting ? 'Submitting...' : 'Confirm Answer'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      ) : problemType === 'EXTERNAL' && externalUrl ? (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 'calc(100vh - 60px)', width: '100%', padding: 20, background: '#020617' }}>
+          <div style={{ width: '100%', maxWidth: 900, padding: 30, borderRadius: 20, background: '#0f172a', border: '1px solid #334155' }}>
+            <div style={{ marginBottom: 20, padding: 20, borderRadius: 14, background: '#081327', border: '1px solid #475569' }}>
+              <strong style={{ display: 'block', color: '#38bdf8', marginBottom: 10, fontSize: 18 }}>External problem detected</strong>
+              <p style={{ margin: 0, color: '#cbd5e1', lineHeight: 1.7 }}>
+                This problem is sourced from an external platform. Use the original link below to view the full question and submit there if required.
+              </p>
+              <a href={externalUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 16, color: '#22d3ee', textDecoration: 'underline', fontWeight: 600 }}>
+                Open original question
+              </a>
+              {redirectInfo?.isAccessible === false && (
+                <p style={{ marginTop: 10, color: '#fca5a5', fontSize: 13 }}>
+                  Warning: the original link could not be verified as accessible. Please open the link directly.
+                </p>
               )}
             </div>
-            
-            <h2 style={{ fontSize: 28, lineHeight: 1.6, margin: '0 0 15px', color: '#eef2ff' }} dangerouslySetInnerHTML={{ __html: mcqData?.prompt || problem?.customDescription || problem?.titleSnapshot }} />
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 40 }}>
-              {mcqData?.options?.map((opt: string, idx: number) => (
-                <button key={idx} onClick={() => setSelectedOptions(mcqData?.isMultiple ? (prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]) : [idx])} style={{ padding: '20px', borderRadius: 12, background: selectedOptions.includes(idx) ? 'rgba(34,211,238,.12)' : 'rgba(15,23,42,.6)', border: `2px solid ${selectedOptions.includes(idx) ? '#22d3ee' : '#334155'}`, color: '#eef2ff', cursor: 'pointer', textAlign: 'left' }}>
-                  {String.fromCharCode(65 + idx)}. {opt}
-                </button>
-              ))}
-            </div>
-
-            <button onClick={handleSubmitCode} disabled={submitting || (problem.mcqTimeLimitSeconds > 0 && questionTimeLeft <= 0)} style={{...submitBtn, width: '100%', padding: '16px', fontSize: 18}}>
-               {submitting ? 'Submitting...' : 'Confirm Answer'}
-            </button>
+            <div style={{ color: '#eef2ff', lineHeight: '1.7' }} dangerouslySetInnerHTML={{ __html: problemDescriptionHtml }} />
           </div>
         </div>
       ) : (
         <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
-         <section style={{ width: '40%', overflowY: 'auto', background: '#0f172a', padding: 20 }}>
-    {/* Problem Description Logic */}
-    <div 
-      style={{ color: '#eef2ff', lineHeight: '1.6' }} 
-      dangerouslySetInnerHTML={{ 
-        __html: problem.customDescription || 
-                problem.problem?.description || 
-                (problem.description ? problem.description : 'No description available for this problem.') 
-      }} 
-    />
-</section>
+          <section style={{ width: '40%', overflowY: 'auto', background: '#0f172a', padding: 20 }}>
+            <div 
+              style={{ color: '#eef2ff', lineHeight: '1.6' }} 
+              dangerouslySetInnerHTML={{ __html: problemDescriptionHtml }} 
+            />
+          </section>
           <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
-             <Editor height="65%" theme="vs-dark" language={monacoLanguage} value={code} onChange={(val) => setCode(val || '')} />
-             <div style={{ height: '35%', background: '#1e1e1e', borderTop: '1px solid #333' }}>
-                <div style={tabsHeader}>
-                   <button onClick={() => setActiveTab('cph')} style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle}>TEST CASES</button>
-                   <button onClick={() => setActiveTab('terminal')} style={activeTab === 'terminal' ? activeTabStyle : inactiveTabStyle}>TERMINAL</button>
-                </div>
-                <div style={{ padding: 15, height: 'calc(100% - 40px)', overflowY: 'auto' }}>
-                   {activeTab === 'cph' && testcases.map((tc) => (
-                      <div key={tc.id} style={{ marginBottom: 10 }}>
-                         <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>Input:</div>
-                         <pre style={{ margin: 0, padding: 8, background: '#020617', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0', fontSize: 12 }}>{tc.input}</pre>
-                         <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 8, marginBottom: 4 }}>Expected:</div>
-                         <pre style={{ margin: 0, padding: 8, background: '#020617', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0', fontSize: 12 }}>{tc.expectedOutput}</pre>
-                      </div>
-                   ))}
-                   {activeTab === 'terminal' && (
-                      <pre style={{ margin: 0, color: '#4ade80', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap' }}>{terminalOutput}</pre>
-                   )}
-                </div>
-             </div>
+            <Editor height="65%" theme="vs-dark" language={monacoLanguage} value={code} onChange={(val) => setCode(val || '')} />
+            <div style={{ height: '35%', background: '#1e1e1e', borderTop: '1px solid #333' }}>
+              <div style={tabsHeader}>
+                <button onClick={() => setActiveTab('cph')} style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle}>TEST CASES</button>
+                <button onClick={() => setActiveTab('terminal')} style={activeTab === 'terminal' ? activeTabStyle : inactiveTabStyle}>TERMINAL</button>
+              </div>
+              <div style={{ padding: 15, height: 'calc(100% - 40px)', overflowY: 'auto' }}>
+                {activeTab === 'cph' && testcases.map((tc) => (
+                  <div key={tc.id} style={{ marginBottom: 10 }}>
+                    <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>Input:</div>
+                    <pre style={{ margin: 0, padding: 8, background: '#020617', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0', fontSize: 12 }}>{tc.input}</pre>
+                    <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 8, marginBottom: 4 }}>Expected:</div>
+                    <pre style={{ margin: 0, padding: 8, background: '#020617', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0', fontSize: 12 }}>{tc.expectedOutput}</pre>
+                  </div>
+                ))}
+                {activeTab === 'terminal' && (
+                  <pre style={{ margin: 0, color: '#4ade80', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap' }}>{terminalOutput}</pre>
+                )}
+              </div>
+            </div>
           </section>
         </div>
       )}
@@ -584,14 +726,24 @@ export default function ContestProblemWorkspace() {
               </div>
 
               <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
-                {messages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No messages yet. Say hi!</p> : (
+                {messages.length === 0 ? (
+                  <p style={{ textAlign: 'center', marginTop: '40%', color: '#64748b' }}>No messages yet. Say hi! 👋</p>
+                ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {messages.map(msg => (
-                      <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}><strong style={{ color: '#67e8f9' }}>{msg.sender?.username || 'Teammate'}</strong><span style={{ color: '#64748b' }}>{new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
-                        <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.content}</div>
-                      </motion.div>
-                    ))}
+                    {messages.map((msg: any) => {
+                      if (!msg || !msg.id) return null;
+                      const username = msg.sender?.username || msg.sender?.name || msg.senderId || 'Teammate';
+                      const timestamp = new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      return (
+                        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}>
+                            <strong style={{ color: '#67e8f9' }}>{username}</strong>
+                            <span style={{ color: '#64748b' }}>{timestamp}</span>
+                          </div>
+                          <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.content || '(empty message)'}</div>
+                        </motion.div>
+                      );
+                    })}
                     <div ref={messagesEndRef} />
                   </div>
                 )}

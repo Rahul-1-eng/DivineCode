@@ -151,11 +151,27 @@ export async function judgeQueuedSubmission(submissionId: string) {
 
     let isCorrect = false;
     try {
-      const submitted = JSON.parse(submission.code); // Expected e.g. [0, 2]
-      isCorrect = Array.isArray(submitted) && correctIndices.length > 0 && submitted.length === correctIndices.length && submitted.every((v: number) => correctIndices.includes(v));
-    } catch {
-      // Fallback just in case string code is a single index
-      isCorrect = correctIndices.includes(parseInt(submission.code));
+      let submitted: any;
+      try {
+        // Try parsing as JSON array first [0, 2]
+        submitted = JSON.parse(submission.code);
+      } catch (e) {
+        // Fallback: if it's a single number string, wrap it in array
+        const num = parseInt(submission.code, 10);
+        submitted = !isNaN(num) ? [num] : [];
+      }
+      
+      if (Array.isArray(submitted) && Array.isArray(correctIndices) && correctIndices.length > 0) {
+        // For multiple choice: check if selected indices match correct indices
+        const sortedSubmitted = [...submitted].sort((a, b) => a - b);
+        const sortedCorrect = [...correctIndices].sort((a, b) => a - b);
+        isCorrect = JSON.stringify(sortedSubmitted) === JSON.stringify(sortedCorrect);
+      } else {
+        isCorrect = false;
+      }
+    } catch (parseError) {
+      console.error('[MCQ Parse Error]', parseError);
+      isCorrect = false;
     }
 
     const verdict = isCorrect ? Verdict.ACCEPTED : Verdict.WRONG_ANSWER;

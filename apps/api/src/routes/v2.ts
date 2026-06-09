@@ -5,7 +5,8 @@ import { enqueueJudgeSubmission } from '../queues/queues';
 import { canManageContest, sanitizeContestForViewer, viewerFromRequest } from '../modules/contests/contestRules';
 import { 
   createContestV2, listContestsV2, loadContestForViewer, reorderContestProblemV2, 
-  addContestProblemV2, removeContestProblemV2, replaceContestProblemV2, registerForContestV2, approveParticipant 
+  addContestProblemV2, removeContestProblemV2, replaceContestProblemV2, registerForContestV2, approveParticipant,
+  createTeamForContest, joinTeamWithInviteCode, requestToJoinTeam
 } from '../modules/contests/contestService';
 import { createQueuedContestSubmission, unlockHiddenTestCase } from '../modules/contests/submissionService';
 import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge0Service';
@@ -92,10 +93,31 @@ export function mountV2Routes(app: Express, io: Server) {
       try {
         const message = await prisma.teamMessage.create({
           data: { contestId: data.contestId, teamId: data.teamId, senderId: data.senderId, content: data.content },
-          include: { sender: { select: { id: true, username: true, avatarUrl: true } } }
+          include: { 
+            sender: { 
+              select: { 
+                id: true, 
+                username: true, 
+                email: true,
+                name: true,
+                avatarUrl: true 
+              } 
+            } 
+          }
         });
-        io.to(`team:${data.teamId}`).emit('teamMessage', message);
-      } catch (err) {}
+        // Ensure sender data is properly formatted
+        const formattedMessage = {
+          ...message,
+          sender: message.sender ? {
+            id: message.sender.id,
+            username: message.sender.username,
+            email: message.sender.email,
+            name: message.sender.name,
+            avatarUrl: message.sender.avatarUrl
+          } : null
+        };
+        io.to(`team:${data.teamId}`).emit('teamMessage', formattedMessage);
+      } catch (err) { console.error('[TeamMessage Error]', err); }
     });
 
     socket.on('join-voice', (teamId) => {
@@ -168,6 +190,41 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ success: true, participant: updated });
   }));
 
+  // NEW: Create a team/group for the contest
+  router.post('/contests/:id/team/create', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    if (!viewer.userId) throw new Error("Unauthorized");
+    const { teamName } = req.body;
+    if (!teamName || !teamName.trim()) throw new Error("Team name is required");
+    
+    const result = await createTeamForContest(req.params.id, teamName.trim(), viewer.userId);
+    res.json({ success: true, ...result });
+  }));
+
+  // NEW: Join team with invitation code
+  router.post('/contests/:id/team/join-invite', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    if (!viewer.userId) throw new Error("Unauthorized");
+    const { inviteCode } = req.body;
+    if (!inviteCode) throw new Error("Invite code is required");
+    
+    const result = await joinTeamWithInviteCode(req.params.id, inviteCode, viewer.userId);
+    const contest = await loadContestForViewer(req.params.id);
+    res.json(sanitizeContestForViewer(contest!, viewer));
+  }));
+
+  // NEW: Request to join existing team (pending approval)
+  router.post('/contests/:id/team/request-join', asyncRoute(async (req, res) => {
+    const viewer = viewerFromRequest(req);
+    if (!viewer.userId) throw new Error("Unauthorized");
+    const { teamName } = req.body;
+    if (!teamName) throw new Error("Team name is required");
+    
+    const result = await requestToJoinTeam(req.params.id, teamName, viewer.userId);
+    const contest = await loadContestForViewer(req.params.id);
+    res.json(sanitizeContestForViewer(contest!, viewer));
+  }));
+
   router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contestId = req.params.id;
@@ -199,7 +256,7 @@ export function mountV2Routes(app: Express, io: Server) {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)' }, 
         timeout: 5000 
       });
-      res.send(data);
+      res.json({ success: true, html: data });
     } catch (e) {
       console.warn(`[Proxy] Scrape failed for ${url}, sending fallback.`);
       res.json({ requiresRedirect: true, url }); 
@@ -307,7 +364,7 @@ export function mountV2Routes(app: Express, io: Server) {
       });
 
       const updatedProblem = await prisma.contestProblem.create({
-        data: { contestId, problemId: problem.id, points: 100, titleSnapshot: problem.title, index: existingCount, label: nextLabel, platform: platform as any }
+        data: { contestId, problemId: problem.id, points: 100, titleSnapshot: problem.title, index: existingCount, label: nextLabel, platform: platform as any, externalUrl: url, requiresRedirect: true }
       });
       return res.json({ success: true, problem: updatedProblem });
     }
@@ -476,12 +533,73 @@ export function mountV2Routes(app: Express, io: Server) {
      res.json({ success: true, generatedCount: testCases.length });
   }));
 
+  router.get('/problems/:id/redirect', asyncRoute(async (req, res) => {
+    const problem = await prisma.contestProblem.findUnique({
+      where: { id: req.params.id },
+      include: { problem: true, interviewQuestion: true }
+    });
+
+    if (!problem) {
+      return res.status(404).json({ error: 'Problem not found' });
+    }
+
+    // Handle different question types
+    const response: any = {
+      id: problem.id,
+      title: problem.titleSnapshot,
+      type: problem.isMCQ ? 'MCQ' : problem.externalUrl ? 'EXTERNAL' : 'INTERNAL',
+      isMCQ: problem.isMCQ,
+      platform: problem.platform,
+      externalUrl: problem.externalUrl || null,
+      customDescription: problem.customDescription || null,
+      customTestCases: problem.customTestCases || null
+    };
+
+    // If it's a MCQ, include interview question data
+    if (problem.isMCQ && problem.interviewQuestion) {
+      response.interviewQuestion = {
+        id: problem.interviewQuestion.id,
+        prompt: problem.interviewQuestion.prompt,
+        options: problem.interviewQuestion.options || [],
+        correctIndices: problem.interviewQuestion.correctIndices || [],
+        isMultiple: problem.interviewQuestion.isMultiple,
+        mcqTimeLimitSeconds: problem.mcqTimeLimitSeconds
+      };
+    }
+
+    // If it's external, provide redirect URL
+    if (problem.externalUrl && !problem.isMCQ) {
+      response.redirectUrl = problem.externalUrl;
+      response.requiresRedirect = true;
+      
+      // Validate URL accessibility
+      try {
+        const { status } = await axios.head(problem.externalUrl, { timeout: 5000 });
+        response.isAccessible = status >= 200 && status < 400;
+      } catch (err) {
+        response.isAccessible = false;
+        response.error = 'External problem URL is not accessible. Will redirect anyway.';
+      }
+    }
+
+    res.json(response);
+  }));
+
   router.post('/contests/:id/ai-recommendations', asyncRoute(async (req, res) => {
     const problems = await prisma.aiProblemDataset.findMany({
       take: 3,
       orderBy: { createdAt: 'desc' }
     });
-    res.json({ success: true, recommendations: problems });
+    
+    // Add redirect flag and proper URL handling
+    const enriched = problems.map(p => ({
+      ...p,
+      requiresRedirect: p.platform !== 'DIVINECODE' && !!p.originalUrl,
+      externalUrl: p.originalUrl,
+      link: p.originalUrl || '#'
+    }));
+    
+    res.json({ success: true, recommendations: enriched });
   }));
   
   router.post('/contests/:id/recommend-problems', asyncRoute(async (req, res) => {
@@ -489,7 +607,16 @@ export function mountV2Routes(app: Express, io: Server) {
       take: 2,
       orderBy: { createdAt: 'desc' }
     });
-    res.json({ success: true, recommendations: problems });
+    
+    // Add redirect flag and proper URL handling
+    const enriched = problems.map(p => ({
+      ...p,
+      requiresRedirect: p.platform !== 'DIVINECODE' && !!p.originalUrl,
+      externalUrl: p.originalUrl,
+      link: p.originalUrl || '#'
+    }));
+    
+    res.json({ success: true, recommendations: enriched });
   }));
 
   router.post('/contests/:id/problems/:problemId/ai-debug', asyncRoute(async (req, res) => {

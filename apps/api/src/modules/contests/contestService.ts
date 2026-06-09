@@ -38,7 +38,8 @@ function parseCodeforcesCode(problem: ProblemInput) {
 }
 
 function externalUrl(problem: ProblemInput, platform: Platform) {
-  if (problem.url) return problem.url; 
+  if (problem.url) return problem.url;
+  if (problem.externalUrl) return problem.externalUrl;
   if (platform === Platform.CODEFORCES) {
     const parsed = parseCodeforcesCode(problem);
     if (parsed.contestCode && parsed.problemIndex) return `https://codeforces.com/problemset/problem/${parsed.contestCode}/${parsed.problemIndex}`;
@@ -106,15 +107,18 @@ async function assertUnsolvedByAll(members: MemberInput[], problems: ProblemInpu
 async function createContestProblemRow(tx: Prisma.TransactionClient, input: { contestId: string; problem: ProblemInput; index: number; addedById?: string | null; }) {
   const platform = toPlatform(input.problem.platform);
   const label = displayLabel(input.index);
+  const problemExternalUrl = input.problem.url || externalUrl(input.problem, platform) || '';
   const data = {
       contestId: input.contestId,
       problemId: input.problem.problemId || input.problem.id || null,
       interviewQuestionId: input.problem.interviewQuestionId || null,
       titleSnapshot: String(input.problem.title || `Problem ${label}`).trim(),
       customDescription: input.problem.description || null,
+      customTestCases: input.problem.testcases || null,
       imageUrl: input.problem.imageUrl || null, 
       platform: platform, 
-      externalUrl: input.problem.url || externalUrl(input.problem, platform) || '', 
+      externalUrl: problemExternalUrl, 
+      requiresRedirect: Boolean(problemExternalUrl),
       index: input.index,
       label: label, 
       points: Math.max(1, Number(input.problem.points || 1000)),
@@ -246,8 +250,41 @@ export async function deleteContestV2(contestId: string, actorId?: string) {
 }
 
 export async function listContestsV2() {
-  const contests = await prisma.contest.findMany({ include: { createdBy: true, _count: { select: { participants: true, problems: true } } }, orderBy: { createdAt: 'desc' }, take: 40 });
-  return contests.map((contest) => ({ id: contest.id, title: contest.title, description: contest.description || '', startTime: contest.startTime, durationMinutes: contest.durationMinutes, isRated: contest.isRated, status: contest.status, membersCount: contest._count.participants, problemsCount: contest._count.problems, questionCount: 0, createdAt: contest.createdAt, ownerEmail: contest.createdBy?.email, createdById: contest.createdById }));
+  const contests = await prisma.contest.findMany({ 
+    include: { 
+      createdBy: true, 
+      participants: { select: { id: true } },
+      problems: { select: { id: true, isMCQ: true } },
+      _count: { select: { participants: true, problems: true } } 
+    }, 
+    orderBy: { createdAt: 'desc' }, 
+    take: 40 
+  });
+  
+  return contests.map((contest) => {
+    const mcqCount = contest.problems.filter(p => p.isMCQ).length;
+    const codingCount = contest.problems.filter(p => !p.isMCQ).length;
+    const totalProblems = contest.problems.length;
+    
+    return { 
+      id: contest.id, 
+      title: contest.title, 
+      description: contest.description || '', 
+      startTime: contest.startTime, 
+      durationMinutes: contest.durationMinutes, 
+      isRated: contest.isRated, 
+      status: contest.status, 
+      membersCount: contest._count.participants, 
+      participantsCount: contest._count.participants,
+      problemsCount: totalProblems,
+      questionCount: totalProblems,
+      mcqCount: mcqCount,
+      codingProblemsCount: codingCount,
+      createdAt: contest.createdAt, 
+      ownerEmail: contest.createdBy?.email, 
+      createdById: contest.createdById 
+    };
+  });
 }
 
 export async function extendContestV2(contestId: string, minutes: number, actorId?: string) {
@@ -350,21 +387,42 @@ export async function removeContestProblemV2(contestId: string, contestProblemId
 }
 
 export async function replaceContestProblemV2(contestId: string, contestProblemId: string, problem: ProblemInput, actorId?: string) {
-  const existing = await prisma.contestProblem.findFirst({ where: { id: contestProblemId, contestId } });
-  if (!existing) throw new Error('Problem not found');
-  const platform = toPlatform(problem.platform);
-  const parsedCodeforces = platform === Platform.CODEFORCES ? parseCodeforcesCode(problem) : null;
-  const externalId = problem.externalId || problem.code || (parsedCodeforces ? `${parsedCodeforces.contestCode}${parsedCodeforces.problemIndex}` : null);
+  try {
+    const existing = await prisma.contestProblem.findFirst({ where: { id: contestProblemId, contestId } });
+    if (!existing) throw new Error('Problem not found');
+    const platform = toPlatform(problem.platform);
+    const parsedCodeforces = platform === Platform.CODEFORCES ? parseCodeforcesCode(problem) : null;
+    const externalId = problem.externalId || problem.code || (parsedCodeforces ? `${parsedCodeforces.contestCode}${parsedCodeforces.problemIndex}` : null);
 
-  await prisma.$transaction(async (tx) => {
-    const updated = await tx.contestProblem.update({
-      where: { id: contestProblemId },
-      data: { problemId: problem.problemId || problem.id || null, titleSnapshot: String(problem.title || externalId || existing.titleSnapshot).trim(), platform, externalId, externalUrl: externalUrl(problem, platform), points: Math.max(1, Number(problem.points || existing.points)), addedById: actorId || existing.addedById }
+    await prisma.$transaction(async (tx) => {
+      const updatedExternalUrl = problem.url || problem.externalUrl || externalUrl(problem, platform);
+      const updated = await tx.contestProblem.update({
+        where: { id: contestProblemId },
+        data: { 
+          problemId: problem.problemId || problem.id || null, 
+          titleSnapshot: String(problem.title || externalId || existing.titleSnapshot).trim(), 
+          platform, 
+          externalId, 
+          externalUrl: updatedExternalUrl, 
+          requiresRedirect: Boolean(updatedExternalUrl),
+          points: Math.max(1, Number(problem.points || existing.points)), 
+          addedById: actorId || existing.addedById,
+          customDescription: problem.description ?? existing.customDescription,
+          customTestCases: problem.testcases ?? existing.customTestCases,
+          isMCQ: problem.interviewQuestionId ? true : (problem.mcqData ? true : existing.isMCQ),
+          mcqTimeLimitSeconds: problem.mcqTimeLimitSeconds ?? existing.mcqTimeLimitSeconds,
+          mcqData: problem.mcqData ?? existing.mcqData,
+          interviewQuestionId: problem.interviewQuestionId ?? existing.interviewQuestionId
+        }
+      });
+      await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_REPLACE', entityType: 'ContestProblem', entityId: contestProblemId, before: existing as any, after: updated as any } });
     });
-    await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_REPLACE', entityType: 'ContestProblem', entityId: contestProblemId, before: existing as any, after: updated as any } });
-  });
-  void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
-  return loadContestForViewer(contestId);
+    void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+    return loadContestForViewer(contestId);
+  } catch (err: any) {
+    console.error('[Contest Edit Error]', err.message);
+    throw new Error(`Failed to update problem: ${err.message}`);
+  }
 }
 
 export async function overrideSubmissionPoints(contestId: string, submissionId: string, manualPoints: number | null, actorId: string) {
@@ -436,4 +494,119 @@ export async function approveParticipant(contestId: string, participantId: strin
   }
 
   return await prisma.contestParticipant.update({ where: { id: participantId }, data: { isOfficial: true } });
+}
+
+// NEW: Create a team/group for current user
+export async function createTeamForContest(contestId: string, teamName: string, userId: string) {
+  try {
+    const contest = await prisma.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
+    if (!contest) throw new Error('Contest not found');
+    
+    // Check if user is already in a team
+    const existing = await prisma.contestParticipant.findFirst({ where: { contestId, userId, teamId: { not: null } } });
+    if (existing) throw new Error('You are already in a team. Leave that team first.');
+
+    // Check if team name already exists
+    const existingTeam = await prisma.contestTeam.findFirst({ where: { contestId, name: teamName } });
+    if (existingTeam) throw new Error('Team name already exists. Choose a different name.');
+
+    // Create team and add user as leader
+    const team = await prisma.contestTeam.create({ data: { contestId, name: teamName } });
+    
+    // Create participant record with user as team leader
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new Error('User not found');
+
+    await prisma.contestParticipant.create({
+      data: {
+        contestId,
+        userId,
+        displayName: user.name || user.email,
+        teamId: team.id,
+        teamName: teamName,
+        role: ContestParticipantRole.MANAGER, // Leader is a manager
+        isOfficial: true
+      }
+    });
+
+    void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+    return { success: true, team, inviteCode: team.inviteCode };
+  } catch (err: any) {
+    console.error('[Create Team Error]', err.message);
+    throw err;
+  }
+}
+
+// NEW: Join team with invitation code
+export async function joinTeamWithInviteCode(contestId: string, inviteCode: string, userId: string) {
+  try {
+    const contest = await prisma.contest.findUnique({ where: { id: contestId } });
+    if (!contest) throw new Error('Contest not found');
+
+    const team = await prisma.contestTeam.findFirst({ where: { inviteCode, contestId } });
+    if (!team) throw new Error('Invalid or expired invite code');
+
+    // Check if already in contest
+    const existing = await prisma.contestParticipant.findFirst({ where: { contestId, userId } });
+    if (existing) throw new Error('You are already registered for this contest');
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new Error('User not found');
+
+    // Add user to team (auto-approved when using valid invite code)
+    await prisma.contestParticipant.create({
+      data: {
+        contestId,
+        userId,
+        displayName: user.name || user.email,
+        teamId: team.id,
+        teamName: team.name,
+        role: ContestParticipantRole.PARTICIPANT,
+        isOfficial: true // Auto-approved with valid invite code
+      }
+    });
+
+    void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+    return { success: true, team };
+  } catch (err: any) {
+    console.error('[Join Team Error]', err.message);
+    throw err;
+  }
+}
+
+// NEW: Request to join existing team (pending approval)
+export async function requestToJoinTeam(contestId: string, teamName: string, userId: string) {
+  try {
+    const contest = await prisma.contest.findUnique({ where: { id: contestId } });
+    if (!contest) throw new Error('Contest not found');
+
+    const team = await prisma.contestTeam.findFirst({ where: { contestId, name: teamName } });
+    if (!team) throw new Error('Team not found');
+
+    // Check if already in contest
+    const existing = await prisma.contestParticipant.findFirst({ where: { contestId, userId } });
+    if (existing) throw new Error('You are already registered for this contest');
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new Error('User not found');
+
+    // Add user to team (pending approval)
+    await prisma.contestParticipant.create({
+      data: {
+        contestId,
+        userId,
+        displayName: user.name || user.email,
+        teamId: team.id,
+        teamName: team.name,
+        role: ContestParticipantRole.PARTICIPANT,
+        isOfficial: false // Pending approval
+      }
+    });
+
+    void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
+    return { success: true, team, status: 'pending_approval' };
+  } catch (err: any) {
+    console.error('[Join Request Error]', err.message);
+    throw err;
+  }
 }

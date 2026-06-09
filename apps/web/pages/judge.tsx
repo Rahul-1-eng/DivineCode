@@ -119,11 +119,10 @@ export default function JudgePage() {
          return;
       }
 
-      if (!res.ok) throw new Error();
+      if (!res.ok || !data.html) throw new Error();
       
-      const html = await res.text();
       const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
+      const doc = parser.parseFromString(data.html, 'text/html');
       const inputNodes = Array.from(doc.querySelectorAll('.input pre')).map(el => el.textContent?.trim() || '');
       const outputNodes = Array.from(doc.querySelectorAll('.output pre')).map(el => el.textContent?.trim() || '');
       

@@ -98,13 +98,20 @@ export default function GlobalNavigationAndMashupCreator() {
           generateAiTests: generateAiTests // Include Checkbox value
       };
       payload.displayTitle = customTitle;
-    } else {
-      if (!mcqPrompt || mcqCorrect.length === 0) return toast.error('Enter question and select correct options');
+    } else if (activeTab === 'MCQ') {
+      const trimmedPrompt = mcqPrompt.trim();
+      const trimmedOptions = mcqOptions.map(opt => opt.trim());
+      const validOptions = trimmedOptions.filter(opt => opt.length > 0);
+      if (!trimmedPrompt) return toast.error('Enter MCQ question text');
+      if (validOptions.length < 2) return toast.error('Provide at least two answer options');
+      if (mcqCorrect.length === 0) return toast.error('Select at least one correct option');
       payload.isMCQ = true;
-      payload.title = "Theory MCQ: " + mcqPrompt.substring(0, 20);
+      payload.title = `Theory MCQ: ${trimmedPrompt.substring(0, 40)}`;
       payload.mcqTimeLimitSeconds = mcqTimeLimit;
-      payload.mcqData = { prompt: mcqPrompt, options: mcqOptions, correctIndices: mcqCorrect, timeLimit: mcqTimeLimit };
+      payload.mcqData = { prompt: trimmedPrompt, options: trimmedOptions, correctIndices: mcqCorrect, timeLimit: mcqTimeLimit };
       payload.displayTitle = payload.title;
+    } else {
+      return toast.error('Unknown problem type');
     }
     
     setCompiledProblems([...compiledProblems, payload]);
@@ -266,6 +273,9 @@ export default function GlobalNavigationAndMashupCreator() {
                 <button key={t} onClick={() => setActiveTab(t as any)} style={{ padding: '8px 16px', background: activeTab === t ? '#38bdf8' : '#1e293b', color: activeTab === t ? '#000' : '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}>{t}</button>
               ))}
             </div>
+            <div style={{ marginBottom: 20, padding: 16, borderRadius: 10, background: '#0f172a', border: '1px solid #334155', color: '#cbd5e1' }}>
+              {activeTab === 'URL' ? 'Add an external problem via URL or Codeforces code. The contest workspace will render this as a redirect-only problem.' : activeTab === 'CUSTOM' ? 'Create a custom coding problem with description, test cases, and optional AI-generated hidden tests.' : 'Build an MCQ question that will open in its own MCQ-only workspace separate from the code editor.'}
+            </div>
 
             {activeTab === 'URL' && (
                <div>
@@ -360,7 +370,7 @@ export default function GlobalNavigationAndMashupCreator() {
               
               {compiledProblems.map((p, i) => (
                 <div key={i} style={{ padding: '10px', background: '#1e293b', borderRadius: 4, margin: '8px 0', border: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{i + 1}. {p.displayTitle}</span>
+                  <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{i + 1}. [{p.type}] {p.displayTitle}</span>
                   <div style={{ display: 'flex', gap: 5, justifyContent: 'flex-end' }}>
                     <button onClick={() => moveProblem(i, 'UP')} disabled={i === 0} style={iconBtn}>↑</button>
                     <button onClick={() => moveProblem(i, 'DOWN')} disabled={i === compiledProblems.length - 1} style={iconBtn}>↓</button>

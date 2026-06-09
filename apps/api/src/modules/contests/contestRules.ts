@@ -74,40 +74,64 @@ function sanitizeProblem(problem: any, showMeta: boolean) {
     index: problem.index,
     label: problem.label || 'Q',
     title: problem.titleSnapshot || 'Unknown Problem',
+    titleSnapshot: problem.titleSnapshot || 'Unknown Problem',
     platform: problem.platform || 'DIVINECODE',
     externalId: problem.externalId,
     externalUrl: problem.externalUrl,
-    url: problem.externalUrl,
-    isLocked: Boolean(problem.isLocked)
+    url: problem.externalUrl,    requiresRedirect: Boolean(problem.requiresRedirect || problem.externalUrl),    isLocked: Boolean(problem.isLocked),
+    isMCQ: Boolean(problem.isMCQ || problem.interviewQuestionId),
+    interviewQuestionId: problem.interviewQuestionId || null,
+    mcqTimeLimitSeconds: problem.mcqTimeLimitSeconds || 0,
+    customDescription: problem.customDescription || null,
+    customTestCases: problem.customTestCases || null
   };
 
   if (!showMeta) return base;
 
-  return {
+  const problemData = problem.problem
+    ? {
+        id: problem.problem.id,
+        slug: problem.problem.slug,
+        title: problem.problem.title,
+        statement: problem.problem.statement,
+        inputFormat: problem.problem.inputFormat,
+        outputFormat: problem.problem.outputFormat,
+        constraints: problem.problem.constraints,
+        difficultyRating: problem.problem.difficultyRating,
+        difficultyLabel: problem.problem.difficultyLabel,
+        tags: problem.problem.tags || [],
+        timeLimitMs: problem.problem.timeLimitMs,
+        memoryLimitMb: problem.problem.memoryLimitMb,
+        testcases: problem.problem.testcases || [],
+        editorial: problem.problem.editorial || null,
+        officialSolutions: problem.problem.officialSolutions || []
+      }
+    : null;
+
+  const result = {
     ...base,
     points: problem.points || 0,
     rating: problem.problem?.difficultyRating || null,
     difficulty: problem.problem?.difficultyLabel || null,
     tags: problem.problem?.tags || [],
-    problem: problem.problem
-      ? {
-          id: problem.problem.id,
-          slug: problem.problem.slug,
-          title: problem.problem.title,
-          statement: problem.problem.statement,
-          inputFormat: problem.problem.inputFormat,
-          outputFormat: problem.problem.outputFormat,
-          constraints: problem.problem.constraints,
-          difficultyRating: problem.problem.difficultyRating,
-          difficultyLabel: problem.problem.difficultyLabel,
-          tags: problem.problem.tags || [],
-          timeLimitMs: problem.problem.timeLimitMs,
-          memoryLimitMb: problem.problem.memoryLimitMb,
-          editorial: problem.problem.editorial || null,
-          officialSolutions: problem.problem.officialSolutions || []
-        }
-      : null
+    problem: problemData
   };
+
+  // CRITICAL: Include interviewQuestion for MCQ problems
+  if (problem.interviewQuestion) {
+    (result as any).interviewQuestion = {
+      id: problem.interviewQuestion.id,
+      title: problem.interviewQuestion.title,
+      prompt: problem.interviewQuestion.prompt,
+      options: problem.interviewQuestion.options || [],
+      correctIndices: problem.interviewQuestion.correctIndices || [],
+      isMultiple: Boolean(problem.interviewQuestion.isMultiple),
+      difficulty: problem.interviewQuestion.difficulty,
+      expectedAnswer: problem.interviewQuestion.expectedAnswer
+    };
+  }
+
+  return result;
 }
 
 export function sanitizeContestForViewer(contest: any, viewer: ViewerContext, now = new Date()) {

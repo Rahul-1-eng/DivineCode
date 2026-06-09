@@ -52,14 +52,16 @@ export default function SubmitPage() {
         setProblem(p);
         if (p?.externalUrl && p?.requiresRedirect) {
            fetch(`${API_V2_BASE_URL}/proxy/problem?url=${encodeURIComponent(p.externalUrl)}`)
-             .then(res => res.text()).then(html => setProxiedHtml(html)).catch(() => {});
+             .then(res => res.json())
+             .then((data) => { if (data.html) setProxiedHtml(data.html); })
+             .catch(() => {});
         }
       })
       .catch(() => null);
   }, [contestId, problemId, session, status]);
 
   const isMCQ = !!problem?.interviewQuestionId;
-  const requiresRedirect = problem?.requiresRedirect === true || problem?.platform === 'OTHER';
+  const requiresRedirect = problem?.requiresRedirect === true || Boolean(problem?.externalUrl);
 
   // MCQ Timer Logic
   useEffect(() => {
