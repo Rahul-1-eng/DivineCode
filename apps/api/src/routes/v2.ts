@@ -258,7 +258,7 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
   }));
 
-  router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
+router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
     const { type, url, customData, mcqData } = req.body;
     const contestId = req.params.id;
 
@@ -285,31 +285,39 @@ export function mountV2Routes(app: Express, io: Server) {
         }
       });
 
-      const updated = await prisma.contestProblem.create({
+      const updatedProblem = await prisma.contestProblem.create({
         data: { contestId, problemId: problem.id, points: 100, titleSnapshot: problem.title, index: existingCount, label: nextLabel, platform: platform as any }
       });
-      return res.json({ success: true, problem: updated });
+      return res.json({ success: true, problem: updatedProblem });
     }
 
     if (type === 'MCQ' && mcqData) {
       let defaultTrack = await prisma.interviewTrack.findFirst();
       if (!defaultTrack) defaultTrack = await prisma.interviewTrack.create({ data: { slug: 'theory', title: 'Theory Track', type: 'DSA' } });
 
-      const newMcq = await prisma.interviewQuestion.create({
-        data: { title: mcqData.prompt.substring(0, 30) + '...', prompt: mcqData.prompt, trackId: defaultTrack.id, options: mcqData.options, correctIndices: mcqData.correctIndices, isMultiple: mcqData.correctIndices.length > 1, difficulty: 'Medium' }
+      const newMcqRow = await prisma.interviewQuestion.create({
+        data: { 
+          title: mcqData.prompt.substring(0, 30) + '...', 
+          prompt: mcqData.prompt, 
+          trackId: defaultTrack.id, 
+          options: mcqData.options, 
+          correctIndices: mcqData.correctIndices, 
+          isMultiple: mcqData.correctIndices.length > 1, 
+          difficulty: 'Medium' 
+        }
       });
 
       await prisma.contestProblem.create({
         data: { 
-            contestId, 
-            interviewQuestionId: newMcq.id, 
-            points: 50, 
-            titleSnapshot: newMcq.title, 
-            index: existingCount, 
-            label: nextLabel, 
-            platform: 'DIVINECODE', 
-            isMCQ: true 
-        } as any
+          contestId, 
+          interviewQuestionId: newMcqRow.id, 
+          points: 50, 
+          titleSnapshot: newMcqRow.title, 
+          index: existingCount, 
+          label: nextLabel, 
+          platform: 'DIVINECODE', 
+          isMCQ: true 
+        } as any 
       });
       return res.json({ success: true });
     }
@@ -330,7 +338,16 @@ export function mountV2Routes(app: Express, io: Server) {
         }
       });
       await prisma.contestProblem.create({
-        data: { contestId, problemId: problem.id, points: 100, titleSnapshot: problem.title, index: existingCount, label: nextLabel, platform: 'DIVINECODE' }
+        data: { 
+          contestId, 
+          problemId: problem.id, 
+          points: 100, 
+          titleSnapshot: problem.title, 
+          index: existingCount, 
+          label: nextLabel, 
+          platform: 'DIVINECODE',
+          isMCQ: false 
+        } as any
       });
       return res.json({ success: true });
     }
