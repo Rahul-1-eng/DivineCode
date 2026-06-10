@@ -120,11 +120,10 @@ export default function ContestRoomPage() {
   const startTimeMs = contest ? new Date(contest.startTime).getTime() : 0;
   const isEndedDynamically = contest ? Date.now() > startTimeMs + (contest.durationMinutes * 60000) : false;
   const displayStatus = isEndedDynamically ? 'ENDED' : contest?.status;
+  const isActuallyOwnerMode = isOwner && ownerMode === 'ADMIN';
 
   const isScheduledLockScreen = nowTick < startTimeMs;
   const halfTimeMs = startTimeMs + ((contest?.durationMinutes || 0) * 60000 / 2);
-  
-  // 👉 FIXED: Removed !isOwner check so the contest owner can test as a player and unregister
   const canUnregister = viewerMember && nowTick < halfTimeMs && displayStatus !== 'ENDED';
 
   const playSuccessSound = () => { try { new Audio('/accepted.mp3').play().catch(()=>{}); } catch (e) {} };
@@ -235,7 +234,6 @@ export default function ContestRoomPage() {
       if (res.ok) {
         toast.success('Successfully unregistered.');
         const data = await res.json();
-        // 👉 FIXED: Explicitly nullify viewerMember so the frontend instantly renders the registration lobby again
         data.viewerMember = null;
         setContest(data);
         await loadSubmissions(); 
@@ -559,6 +557,23 @@ export default function ContestRoomPage() {
     return Boolean(isTeamLeader && viewerMember?.teamId && member.teamId === viewerMember.teamId);
   };
 
+  // 👉 FIXED: Dynamically filter visible submissions based on Admin vs Play Mode
+  const visibleSubmissions = useMemo(() => {
+    if (isActuallyOwnerMode || isFinal || displayStatus === 'ENDED') return submissions;
+    if (!viewerMember) return [];
+    
+    return submissions.filter(sub => {
+      const subMember = memberById[sub.memberId || sub.participantId];
+      if (!subMember) return false;
+      
+      if (viewerMember.teamId) {
+        return subMember.teamId === viewerMember.teamId;
+      } else {
+        return (sub.memberId || sub.participantId) === viewerMember.id;
+      }
+    });
+  }, [submissions, isActuallyOwnerMode, isFinal, displayStatus, viewerMember, memberById]);
+
   const memberSubmissions = selectedMember ? submissions.filter((submission) => submission.memberId === selectedMember.memberId || submission.participantId === selectedMember.memberId) : [];
   const mySubmissions = viewerMember ? submissions.filter((s) => s.memberId === viewerMember.id || s.participantId === viewerMember.id || s.userId === (session?.user?.name || session?.user?.email)) : [];
   const myTotalAttempts = mySubmissions.length;
@@ -594,8 +609,6 @@ export default function ContestRoomPage() {
   if (!session) return <main style={page}><section style={gate}><h1>Sign in required</h1><p style={{ color: '#a8b3c7' }}>Sign in first.</p><a href="/signin" style={primaryLink}>Sign in with Google</a></section></main>;
   if (error) return <main style={page}><h1>{error}</h1><a href="/contests" style={link}>Back to contests</a></main>;
   if (!contest) return <CentralSpinner text="Loading contest room..." />;
-
-  const isActuallyOwnerMode = isOwner && ownerMode === 'ADMIN';
 
   return (
     <main style={page}>
@@ -827,9 +840,12 @@ export default function ContestRoomPage() {
                         <strong style={{ color: '#e2e8f0' }}>{team.name}</strong>
                         <span style={{ color: '#94a3b8', fontSize: 13 }}>{team.membersCount || 0} joined{team.pendingCount ? `, ${team.pendingCount} pending` : ''}</span>
                       </div>
-                      {team.inviteCode && (
+                      
+                      {/* 👉 FIXED: Invite Code Privacy Rule Enforced */}
+                      {team.inviteCode && viewerMember?.teamId === team.id && (
                         <div style={{ marginTop: 8, color: '#38bdf8', fontWeight: 'bold', letterSpacing: 2 }}>Invite: {team.inviteCode}</div>
                       )}
+                      
                       {pendingMembers.length > 0 && (
                         <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
                           {pendingMembers.map((m: any) => (
@@ -922,6 +938,15 @@ export default function ContestRoomPage() {
                       </div>
                     )}
                   </div>
+                ))}
+                
+                {/* 👉 FIXED: Render Invite Codes dynamically for Admin viewing */}
+                <h3 style={{ marginTop: 20 }}>Group Invite Codes</h3>
+                {availableTeams.map((team: any) => (
+                   <div key={team.id} style={{ padding: '8px 12px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#eef2ff' }}>{team.name}</span>
+                      <strong style={{ color: '#38bdf8', letterSpacing: 2 }}>{team.inviteCode}</strong>
+                   </div>
                 ))}
               </section>}
 
@@ -1032,8 +1057,10 @@ export default function ContestRoomPage() {
               <h2>
                 {isFinal || timeLeft === 0 ? 'All submissions' : isActuallyOwnerMode ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}
               </h2>
-              {submissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
-              {submissions.length > 0 && (
+              {visibleSubmissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
+              
+              {/* 👉 FIXED: Render `visibleSubmissions` to strictly adhere to Contest Play vs Admin Mode */}
+              {visibleSubmissions.length > 0 && (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={table}>
                     <thead>
@@ -1046,7 +1073,7 @@ export default function ContestRoomPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {submissions.map((sub: any, index: number) => (
+                      {visibleSubmissions.map((sub: any, index: number) => (
                         <tr key={sub.id || index} style={{ borderBottom: '1px solid #334155' }}>
                           <td style={td}>{new Date(sub.createdAt).toLocaleTimeString()}</td>
                           <td style={td}>{sub.userId}</td>

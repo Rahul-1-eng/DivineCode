@@ -25,13 +25,48 @@ submissionRouter.get('/contest/:contestId', async (req, res) => {
 });
 
 // Endpoint for LeetCode style "Run Code" (Runs against only sample test cases)
+// Endpoint for LeetCode style "Run Code" (Runs against only sample test cases)
 submissionRouter.post('/run-samples', async (req, res) => {
   const { problemId, code, language } = req.body;
 
   try {
-    const samples = await prisma.testcase.findMany({
+    // 1. First, try fetching from the relational Testcase table (for standard contest problems)
+    let samples = await prisma.testcase.findMany({
       where: { problemId, isPublic: true }
     });
+
+    // 2. Fallback for AI Avatar / Practice Dataset problems
+    if (samples.length === 0) {
+      const aiProblem = await prisma.aiProblemDataset.findUnique({
+        where: { id: problemId }
+      });
+
+      // 👉 FIXED: Extract inputs and outputs from the nested JSON array column safely
+      if (aiProblem && aiProblem.testcases) {
+        try {
+          const parsedCases = typeof aiProblem.testcases === 'string'
+            ? JSON.parse(aiProblem.testcases)
+            : (aiProblem.testcases as any);
+
+          if (Array.isArray(parsedCases) && parsedCases.length > 0) {
+            // Map the parsed JSON objects into structured sample objects matching the Testcase layout
+            samples = parsedCases.map((tc: any, idx: number) => ({
+              id: `ai-sample-${idx}`,
+              problemId,
+              input: tc.input || tc.stdin || '',
+              expectedOutput: tc.expectedOutput || tc.output || '',
+              order: idx + 1,
+              type: 'SAMPLE',
+              isPublic: true,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            })) as any;
+          }
+        } catch (jsonErr) {
+          console.error('[JSON Parse Error] Failed to read AI dataset testcases field:', jsonErr);
+        }
+      }
+    }
 
     if (samples.length === 0) {
       return res.status(400).json({ error: 'No sample test cases configured for this problem.' });
@@ -69,7 +104,6 @@ submissionRouter.post('/:id/report', async (req, res) => {
       }
     });
 
-    // 👉 FIXED: Socket room name must include 'contest:' prefix to match v2.ts
     const submission = await prisma.submission.findUnique({ where: { id } });
     if (submission && submission.contestId) {
       const io = req.app.get('io');
@@ -90,7 +124,6 @@ submissionRouter.post('/:id/override', async (req, res) => {
     const { id } = req.params;
     const { manualPoints } = req.body;
     
-    // Update the submission with manual points
     const submission = await prisma.submission.update({
       where: { id },
       data: { manualPoints: manualPoints !== null ? Number(manualPoints) : null }
@@ -99,7 +132,6 @@ submissionRouter.post('/:id/override', async (req, res) => {
     if (submission.contestId) {
       await recomputeContestStandings(submission.contestId);
       
-      // 👉 FIXED: Tell the frontend to instantly recalculate the leaderboard
       const io = req.app.get('io');
       if (io) {
         io.to(`contest:${submission.contestId}`).emit('standings:update');

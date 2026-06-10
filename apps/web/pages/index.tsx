@@ -14,7 +14,6 @@ const features = [
   { title: 'Submission Judge', href: '/judge', icon: '⚙️', text: 'Judge0-ready for custom problems, CF sync for external problems.' }
 ];
 
-// 👉 NEW: Pre-guided questions for the home page
 const SUGGESTED_QUESTIONS = [
   "How do I create a Codeforces mashup contest?",
   "How do the Elo ratings and Coins work here?",
@@ -54,10 +53,11 @@ export default function Home() {
     
     const systemPrompt = "You are the DivineCode AI Guide. You help users use this competitive programming platform. If they upload images of errors or unexpected questions, analyze them and process them correctly. Keep answers highly concise, friendly, and use markdown.";
     
+    // 👉 FIXED: Sliced off the first UI greeting to ensure strict alternating User/Model roles for Gemini
     const payloadHistory = [
       { role: 'user', text: systemPrompt },
       { role: 'model', text: 'Understood. I will act as the guide.' },
-      ...chatHistory.map(m => ({ role: m.role, text: m.text }))
+      ...chatHistory.slice(1).map(m => ({ role: m.role === 'ai' ? 'model' : 'user', text: m.text }))
     ];
 
     try {
@@ -167,7 +167,6 @@ export default function Home() {
                    </div>
                 ))}
                 
-                {/* 👉 NEW: Pre-guided suggested questions! */}
                 {chatHistory.length === 1 && !isAiTyping && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
                     <p style={{ color: '#94a3b8', fontSize: 12, margin: 0 }}>Suggested Prompts:</p>

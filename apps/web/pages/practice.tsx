@@ -4,7 +4,6 @@ import { useSession } from 'next-auth/react';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
-// 👉 NEW: DSA-Specific Pre-guided questions
 const SUGGESTED_QUESTIONS = [
   "Can you suggest a roadmap for learning Dynamic Programming?",
   "How should I approach tricky graph traversal problems?",
@@ -61,12 +60,13 @@ export default function PracticePage() {
     setChatMessages(prev => [...prev, userMsg]);
     setIsAiTyping(true);
     
-    const systemPrompt = "You are the DivineCode Practice Guide. Recommend problems, explain concepts, and analyze any uploaded images accurately.";
+    const systemPrompt = "You are the DivineCode Practice Guide. Recommend problems, explain concepts, and analyze any uploaded images accurately. Keep answers highly concise, friendly, and use markdown.";
     
+    // 👉 FIXED: Sliced off the first UI greeting to ensure strict alternating User/Model roles
     const payloadHistory = [
       { role: 'user', text: systemPrompt },
       { role: 'model', text: 'Understood. I will help them practice.' },
-      ...chatMessages.map(m => ({ role: m.role, text: m.text }))
+      ...chatMessages.slice(1).map(m => ({ role: m.role === 'ai' ? 'model' : 'user', text: m.text }))
     ];
 
     try {
@@ -182,8 +182,7 @@ export default function PracticePage() {
                      {msg.image && <img src={msg.image} alt="Uploaded" style={{ width: '100%', borderRadius: 8, marginTop: 10 }} />}
                    </div>
                 ))}
-
-                {/* 👉 NEW: Pre-guided suggested questions! */}
+                
                 {chatMessages.length === 1 && !isAiTyping && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
                     <p style={{ color: '#94a3b8', fontSize: 12, margin: 0 }}>Suggested Prompts:</p>

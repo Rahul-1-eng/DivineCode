@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import { useSession } from 'next-auth/react';
@@ -18,14 +18,12 @@ export default function ProblemWorkspace() {
   const [running, setRunning] = useState(false);
   const [activeTab, setActiveTab] = useState<'console' | 'ai'>('console');
 
-  // 👉 NEW: AI Explainer State
   const [aiExplanation, setAiExplanation] = useState('');
   const [isExplaining, setIsExplaining] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     
-    // 👉 FIXED: Infinity Loading Bug - Fetching from the actual correct AI Dataset where these problems live
     fetch(`${API_BASE_URL}/api/v2/ai-dataset`, { headers: { 'x-user-email': session?.user?.email || '' } })
       .then((r) => r.json())
       .then(data => {
@@ -40,6 +38,28 @@ export default function ProblemWorkspace() {
       })
       .catch(err => setProblem({ error: true, title: 'Error', description: 'Failed to load.' }));
   }, [id, session]);
+
+  const problemDescriptionHtml = problem?.descriptionHtml || problem?.description || problem?.content || 'No description available for this problem.';
+
+  // 👉 FIXED: Safe JSON Parsing utility for the frontend types
+  const sampleData = useMemo(() => {
+    if (!problem || !problem.testcases) return { input: '', output: '' };
+    try {
+      const parsed = typeof problem.testcases === 'string' 
+        ? JSON.parse(problem.testcases) 
+        : problem.testcases;
+      
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return {
+          input: parsed[0].input || parsed[0].stdin || '',
+          output: parsed[0].expectedOutput || parsed[0].output || ''
+        };
+      }
+    } catch (e) {
+      console.error("Failed parsing testcase array on frontend:", e);
+    }
+    return { input: '', output: '' };
+  }, [problem]);
 
   async function runCode() {
     if (!problem || problem.error) return;
@@ -56,12 +76,11 @@ export default function ProblemWorkspace() {
     } catch (err) { alert('Failed to connect to execution server.'); } finally { setRunning(false); }
   }
 
-  // 👉 FIXED: Generating proper AI Explanations inside the IDE
   async function handleGenerateExplanation() {
     if (!problem || problem.error) return;
     setIsExplaining(true);
     try {
-      const prompt = `Please explain the optimal approach for this problem step-by-step.\n\nTitle: ${problem.title}\nDescription: ${problem.description}\n\nMy Code:\n${code}`;
+      const prompt = `Please explain the optimal approach for this problem step-by-step.\n\nTitle: ${problem.title}\nDescription: ${problemDescriptionHtml}\n\nMy Code:\n${code}`;
       const res = await fetch(`${API_BASE_URL}/api/v2/ai/chat`, {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
@@ -92,17 +111,19 @@ export default function ProblemWorkspace() {
         <a href="/practice" style={{ color: '#67e8f9', textDecoration: 'none', fontWeight: 900, display: 'inline-block', marginBottom: 16 }}>← Back to Practice</a>
         <h1 style={{ margin: '0 0 8px 0', color: problem.error ? '#ef4444' : '#fff' }}>{problem.title}</h1>
         {!problem.error && <div style={{ color: '#67e8f9', marginBottom: 20 }}>Difficulty: {problem.difficulty || problem.rating || 'Unrated'}</div>}
-        <div style={{ lineHeight: 1.7, color: '#cbd5e1', fontSize: '15px' }} dangerouslySetInnerHTML={{__html: problem.description}}></div>
+        
+        <div style={{ lineHeight: 1.7, color: '#cbd5e1', fontSize: '15px' }} dangerouslySetInnerHTML={{__html: problemDescriptionHtml}}></div>
 
-        {(problem.stdin || problem.expectedOutput) && (
+        {/* 👉 FIXED: Render safely via our memoized sampleData container */}
+        {(sampleData.input || sampleData.output) && (
           <div style={{ marginTop: 24, padding: 16, borderRadius: 12, background: '#020617', border: '1px solid rgba(148,163,184,.18)' }}>
-            {problem.stdin && (
+            {sampleData.input && (
               <><strong style={{ display: 'block', marginBottom: 8, color: '#94a3b8' }}>Sample Input</strong>
-              <pre style={{ margin: '0 0 16px 0', color: '#e2e8f0', background: '#0f172a', padding: 12, borderRadius: 8 }}>{problem.stdin}</pre></>
+              <pre style={{ margin: '0 0 16px 0', color: '#e2e8f0', background: '#0f172a', padding: 12, borderRadius: 8, whiteSpace: 'pre-wrap' }}>{sampleData.input}</pre></>
             )}
-            {problem.expectedOutput && (
+            {sampleData.output && (
               <><strong style={{ display: 'block', marginBottom: 8, color: '#94a3b8' }}>Expected Output</strong>
-              <pre style={{ margin: 0, color: '#e2e8f0', background: '#0f172a', padding: 12, borderRadius: 8 }}>{problem.expectedOutput}</pre></>
+              <pre style={{ margin: 0, color: '#e2e8f0', background: '#0f172a', padding: 12, borderRadius: 8, whiteSpace: 'pre-wrap' }}>{sampleData.output}</pre></>
             )}
           </div>
         )}
