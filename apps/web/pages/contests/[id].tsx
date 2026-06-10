@@ -531,19 +531,42 @@ export default function ContestRoomPage() {
     }));
   }, [contest, memberById]);
 
+  // 👉 FIXED: Team Standings Logic. Do NOT sum up team scores across individual members! Use the true backend calculation.
   const teamStandings = useMemo(() => {
     const grouped: Record<string, any> = {};
     (contest?.standings || []).forEach((standing: any) => {
       const member = memberById[standing.memberId] || {};
       const team = member.teamName || member.team || 'Individuals';
-      if (!grouped[team]) grouped[team] = { team, solved: 0, penalty: 0, score: 0, players: [] };
-      let safeScore = standing.score || 0;
-      if (safeScore === 0 && standing.solvedProblems) safeScore = standing.solvedProblems.reduce((sum: number, pId: string) => sum + (problemById[pId]?.points || 1000), 0);
-      grouped[team].solved += standing.solved || 0; grouped[team].penalty += standing.penalty || 0; grouped[team].score += safeScore;
-      grouped[team].players.push({ ...standing, codeforcesHandle: member.codeforcesHandle || member.externalHandle?.handle, team, score: safeScore });
+      
+      if (!grouped[team]) {
+        // Initialize the top-level team row using the backend's team score
+        grouped[team] = { 
+            team, 
+            solved: standing.solved || 0, 
+            penalty: standing.penalty || 0, 
+            score: standing.score || 0, 
+            players: [] 
+        };
+      }
+      
+      // Push the individual member's contribution as a nested sub-row
+      grouped[team].players.push({ 
+          ...standing, 
+          codeforcesHandle: member.codeforcesHandle || member.externalHandle?.handle, 
+          team, 
+          score: standing.individualScore || 0,
+          solved: standing.individualSolved || 0,
+          penalty: standing.individualPenalty || 0
+      });
     });
-    return Object.values(grouped).map((team: any) => ({ ...team, players: team.players.sort((a: any, b: any) => b.solved - a.solved || a.penalty - b.penalty) })).sort((a: any, b: any) => b.solved - a.solved || a.penalty - b.penalty || a.team.localeCompare(b.team));
-  }, [contest, memberById, problemById]);
+    
+    return Object.values(grouped)
+      .map((team: any) => ({ 
+          ...team, 
+          players: team.players.sort((a: any, b: any) => b.score - a.score || a.penalty - b.penalty) 
+      }))
+      .sort((a: any, b: any) => b.score - a.score || a.penalty - b.penalty || a.team.localeCompare(b.team));
+  }, [contest, memberById]);
 
   const canInspectMember = (memberId: string) => {
     if (isOwner || isFinal || timeLeft === 0) return true;
@@ -557,7 +580,6 @@ export default function ContestRoomPage() {
     return Boolean(isTeamLeader && viewerMember?.teamId && member.teamId === viewerMember.teamId);
   };
 
-  // 👉 FIXED: Dynamically filter visible submissions based on Admin vs Play Mode
   const visibleSubmissions = useMemo(() => {
     if (isActuallyOwnerMode || isFinal || displayStatus === 'ENDED') return submissions;
     if (!viewerMember) return [];
@@ -840,12 +862,9 @@ export default function ContestRoomPage() {
                         <strong style={{ color: '#e2e8f0' }}>{team.name}</strong>
                         <span style={{ color: '#94a3b8', fontSize: 13 }}>{team.membersCount || 0} joined{team.pendingCount ? `, ${team.pendingCount} pending` : ''}</span>
                       </div>
-                      
-                      {/* 👉 FIXED: Invite Code Privacy Rule Enforced */}
                       {team.inviteCode && viewerMember?.teamId === team.id && (
                         <div style={{ marginTop: 8, color: '#38bdf8', fontWeight: 'bold', letterSpacing: 2 }}>Invite: {team.inviteCode}</div>
                       )}
-                      
                       {pendingMembers.length > 0 && (
                         <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
                           {pendingMembers.map((m: any) => (
@@ -940,7 +959,6 @@ export default function ContestRoomPage() {
                   </div>
                 ))}
                 
-                {/* 👉 FIXED: Render Invite Codes dynamically for Admin viewing */}
                 <h3 style={{ marginTop: 20 }}>Group Invite Codes</h3>
                 {availableTeams.map((team: any) => (
                    <div key={team.id} style={{ padding: '8px 12px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
@@ -951,17 +969,17 @@ export default function ContestRoomPage() {
               </section>}
 
               <section style={isActuallyOwnerMode && !isFinal ? panelWide : { ...panelWide, gridColumn: '1 / -1' }}>
-  <h2>Problems</h2>
-  
-  <div style={{ marginBottom: '20px', padding: '15px', background: '#0f172a', borderRadius: '8px', border: '1px solid #334155' }}>
-    <h3 style={{ margin: '0 0 10px 0', color: '#94a3b8' }}>Contest Breakdown</h3>
-    <div style={{ display: 'flex', gap: '20px' }}>
-      <span style={{ color: '#fff' }}>Coding Problems: <strong style={{ color: '#38bdf8'}}>{codingCount}</strong></span>
-      <span style={{ color: '#fff' }}>Theory / MCQs: <strong style={{ color: '#fbbf24'}}>{mcqCount}</strong></span>
-    </div>
-  </div>
+                <h2>Problems</h2>
+                
+                <div style={{ marginBottom: '20px', padding: '15px', background: '#0f172a', borderRadius: '8px', border: '1px solid #334155' }}>
+                  <h3 style={{ margin: '0 0 10px 0', color: '#94a3b8' }}>Contest Breakdown</h3>
+                  <div style={{ display: 'flex', gap: '20px' }}>
+                    <span style={{ color: '#fff' }}>Coding Problems: <strong style={{ color: '#38bdf8'}}>{codingCount}</strong></span>
+                    <span style={{ color: '#fff' }}>Theory / MCQs: <strong style={{ color: '#fbbf24'}}>{mcqCount}</strong></span>
+                  </div>
+                </div>
 
-  {contest.problems.length === 0 ? (
+                {contest.problems.length === 0 ? (
                   <p style={{ color: '#94a3b8' }}>No problems queued yet.</p>
                 ) : (
                   <div style={{ display: 'grid', gap: 12 }}>
@@ -969,9 +987,7 @@ export default function ContestRoomPage() {
                       const label = String.fromCharCode(65 + index);
                       const actualTitle = p.titleSnapshot || p.problem?.title || `Problem ${label}`;
                       const visibleTitle = canSeeProblemMeta ? actualTitle : `Problem ${label}`;
-                      
                       const safeProblemHref = `/contests/${contest.id}/problems/${p.id}`; 
-                      
                       const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
 
                       return <div key={p.id} style={{ ...problemRow, borderColor: isSolvedByTeam ? 'rgba(74, 222, 128, 0.4)' : 'rgba(148,163,184,.16)' }}>
@@ -1059,7 +1075,6 @@ export default function ContestRoomPage() {
               </h2>
               {visibleSubmissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
               
-              {/* 👉 FIXED: Render `visibleSubmissions` to strictly adhere to Contest Play vs Admin Mode */}
               {visibleSubmissions.length > 0 && (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={table}>
@@ -1224,7 +1239,7 @@ const primaryButton: CSSProperties = { ...primaryLink, width: '100%', marginBott
 const ghostButton: CSSProperties = { padding: '11px 15px', borderRadius: 999, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', fontWeight: 800, cursor: 'pointer', marginBottom: 10 };
 const dangerButton: CSSProperties = { ...ghostButton, width: '100%', border: '1px solid rgba(248,113,113,.4)', color: '#fecaca' };
 const smallInput: CSSProperties = { width: '100%', padding: 11, marginBottom: 10, border: '1px solid rgba(148,163,184,.25)', borderRadius: 12, background: 'rgba(15,23,42,.8)', color: '#eef2ff', outline: 'none' };
-const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 800, letterSpacing: '.12em', textTransform: 'uppercase' };
+const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase' };
 const hero: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, flexWrap: 'wrap', margin: '24px 0' };
 const timerCard: CSSProperties = { minWidth: 170, padding: 22, borderRadius: 24, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', display: 'grid', gap: 4, textAlign: 'center' };
 const grid: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(260px, .8fr) minmax(320px, 1.7fr)', gap: 18 };

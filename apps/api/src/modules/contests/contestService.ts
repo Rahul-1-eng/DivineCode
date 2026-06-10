@@ -500,7 +500,7 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
   } catch (error) { throw error; }
 }
 
-// 👉 FIXED: Approval checks if the actor is the FIRST member (joinedAt) of the target team, or the contest owner
+// 👉 FIXED: Single, correct definition of approveParticipant
 export async function approveParticipant(contestId: string, participantId: string, actorId: string) {
   const contest = await prisma.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
   if (!contest) throw new Error('Contest not found');
@@ -510,14 +510,13 @@ export async function approveParticipant(contestId: string, participantId: strin
 
   const isContestOwner = contest.createdById === actorId;
   
+  // Filter team members who are official to find the founder (earliest joinedAt)
   const teamParticipants = contest.participants.filter(p => p.teamId === targetParticipant.teamId && p.isOfficial);
-  
-  // Find the absolute first team member (founder) by checking the joinedAt timestamp
   const firstTeamMember = teamParticipants.sort((a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime())[0];
   const isTeamCreator = firstTeamMember && firstTeamMember.userId === actorId;
 
   if (!isContestOwner && !isTeamCreator) {
-    throw new Error('Unauthorized: Only the first founding member of this group or the contest creator can approve requests.');
+    throw new Error('Unauthorized: Only the first founding member or contest creator can approve.');
   }
 
   const updated = await prisma.contestParticipant.update({ where: { id: participantId }, data: { isOfficial: true } });
@@ -585,7 +584,6 @@ export async function createTeamForContest(contestId: string, teamName: string, 
   }
 }
 
-// 👉 FIXED: Typescript strict optional parameters
 export async function joinTeamWithInviteCode(contestId: string, inviteCode: string, userId: string, codeforcesHandle?: string, isOfficial?: boolean) {
   const officialFlag = isOfficial ?? false;
   try {

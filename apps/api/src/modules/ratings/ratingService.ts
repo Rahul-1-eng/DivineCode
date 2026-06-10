@@ -32,7 +32,7 @@ export async function processContestRewards(contestId: string) {
 
       // 1. Calculate Multiplayer Elo Delta
       for (const pB of participants) {
-        // 👉 FIX: Don't compare against yourself, AND don't steal/lose Elo against your own teammates!
+        // Don't compare against yourself, AND don't steal/lose Elo against your own teammates!
         if (pA.id === pB.id || !pB.user || !pB.standing) continue;
         if (pA.teamId && pA.teamId === pB.teamId) continue;
 
@@ -47,7 +47,7 @@ export async function processContestRewards(contestId: string) {
       }
 
       const rawDelta = Math.round(K_FACTOR * (actualWins - expectedWins));
-      // 👉 Gamification: Cap maximum rating loss at -100 to prevent user churn, uncapped upside.
+      // Gamification: Cap maximum rating loss at -100 to prevent user churn, uncapped upside.
       const ratingDelta = Math.max(-100, rawDelta);
       const newRating = Math.max(100, oldRating + ratingDelta); 
 
@@ -56,12 +56,12 @@ export async function processContestRewards(contestId: string) {
       
       const personalSolves = new Set(
         contest.submissions
-          // 👉 FIX: Cast to String to handle both Prisma Enum ('ACCEPTED') and External Syncs ('OK')
+          // Cast to String to handle both Prisma Enum ('ACCEPTED') and External Syncs ('OK')
           .filter(s => s.participantId === pA.id && s.status === SubmissionStatus.FINISHED && (String(s.verdict).includes('ACCEPT') || String(s.verdict) === 'OK'))
           .map(s => s.contestProblemId)
       ).size;
 
-      // 👉 FIX: Placement Bonuses
+      // Placement Bonuses
       let rankBonus = 0;
       if (pA.standing.rank === 1) rankBonus = 150;
       else if (pA.standing.rank === 2) rankBonus = 100;

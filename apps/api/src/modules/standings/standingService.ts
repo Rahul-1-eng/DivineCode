@@ -27,7 +27,7 @@ export async function recomputeContestStandings(contestId: string) {
       where: { id: contestId },
       include: {
         participants: { 
-          where: { isOfficial: true }, // 👉 FIXED: Ignore pending unapproved members!
+          where: { isOfficial: true }, // Ignore pending unapproved members
           include: { standing: true } 
         },
         problems: true,
@@ -39,46 +39,51 @@ export async function recomputeContestStandings(contestId: string) {
 
     const freezeTime = contest.freezeTime ? new Date(contest.freezeTime).getTime() : null;
 
+    // Create a Points Lookup Map based on the problem's assigned points
+    const pointsMap = new Map<string, number>();
+    contest.problems.forEach(p => pointsMap.set(p.id, p.points));
+
     // Track Team State (for shared group score)
     const teamState = new Map<string, Map<string, { wrongAttempts: number, acceptedAt?: Date, manualPoints: number | null, isFrozen: boolean }>>();
     
     // Track Individual State (for personal leaderboard)
     const individualState = new Map<string, Map<string, { wrongAttempts: number, acceptedAt?: Date, manualPoints: number | null }>>();
 
-    for (const submission of contest.submissions) {
-      if (!submission.teamId || !submission.contestProblemId) continue;
-      if (!isCountableSubmission(contest, submission)) continue;
+  for (const sub of contest.submissions) {
+      if (!sub.teamId || !sub.contestProblemId) continue;
+      if (!isCountableSubmission(contest, sub)) continue;
 
-      const problemId = String(submission.contestProblemId);
-      const submissionTime = new Date(submission.createdAt).getTime();
+      const pId = String(sub.contestProblemId);
+      const submissionTime = new Date(sub.createdAt).getTime();
       const isSubmissionFrozen = freezeTime !== null && submissionTime > freezeTime;
-      const isAccepted = submission.verdict === Verdict.ACCEPTED && submission.status === SubmissionStatus.FINISHED;
+      const isAccepted = (sub.verdict === Verdict.ACCEPTED || String(sub.verdict) === 'OK') && sub.status === SubmissionStatus.FINISHED;
 
-      // --- TEAM LOGIC ---
-      if (!teamState.has(submission.teamId)) teamState.set(submission.teamId, new Map());
-      const tMap = teamState.get(submission.teamId)!;
-      const tState = tMap.get(problemId) || { wrongAttempts: 0, manualPoints: null, isFrozen: false };
+      // --- TEAM LOGIC (Points given once per team) ---
+      if (!teamState.has(sub.teamId)) teamState.set(sub.teamId, new Map());
+      const tMap = teamState.get(sub.teamId)!;
+      const tState = tMap.get(pId) || { wrongAttempts: 0, acceptedAt: undefined, manualPoints: null, isFrozen: false };
       
-      if (!tState.acceptedAt || submission.manualPoints !== null) {
-        if (isAccepted) { tState.acceptedAt = submission.createdAt; tState.isFrozen = isSubmissionFrozen; }
-        else if (isWrongAttempt(submission) && !isSubmissionFrozen) tState.wrongAttempts += 1;
+      // Only count the first ACCEPTED submission for the team score
+      if (!tState.acceptedAt || sub.manualPoints !== null) {
+        if (isAccepted) { tState.acceptedAt = sub.createdAt; tState.isFrozen = isSubmissionFrozen; }
+        else if (isWrongAttempt(sub) && !isSubmissionFrozen) tState.wrongAttempts += 1;
         
-        if (submission.manualPoints !== null) tState.manualPoints = submission.manualPoints;
-        tMap.set(problemId, tState);
+        if (sub.manualPoints !== null) tState.manualPoints = sub.manualPoints;
+        tMap.set(pId, tState);
       }
 
-      // --- INDIVIDUAL LOGIC ---
-      if (!submission.participantId) continue;
-      if (!individualState.has(submission.participantId)) individualState.set(submission.participantId, new Map());
-      const iMap = individualState.get(submission.participantId)!;
-      const iState = iMap.get(problemId) || { wrongAttempts: 0, manualPoints: null };
+      // --- INDIVIDUAL LOGIC (Points given per individual) ---
+      if (!sub.participantId) continue;
+      if (!individualState.has(sub.participantId)) individualState.set(sub.participantId, new Map());
+      const iMap = individualState.get(sub.participantId)!;
+      const iState = iMap.get(pId) || { wrongAttempts: 0, acceptedAt: undefined, manualPoints: null };
       
-      if (!iState.acceptedAt || submission.manualPoints !== null) {
-        if (isAccepted) { iState.acceptedAt = submission.createdAt; }
-        else if (isWrongAttempt(submission) && !isSubmissionFrozen) { iState.wrongAttempts += 1; }
+      if (!iState.acceptedAt || sub.manualPoints !== null) {
+        if (isAccepted) { iState.acceptedAt = sub.createdAt; }
+        else if (isWrongAttempt(sub) && !isSubmissionFrozen) { iState.wrongAttempts += 1; }
         
-        if (submission.manualPoints !== null) iState.manualPoints = submission.manualPoints;
-        iMap.set(problemId, iState);
+        if (sub.manualPoints !== null) iState.manualPoints = sub.manualPoints;
+        iMap.set(pId, iState);
       }
     }
 
@@ -89,14 +94,18 @@ export async function recomputeContestStandings(contestId: string) {
       
       let teamPenalty = solvedEntries.reduce((sum, [, state]) => sum + acceptedMinute(contest, state.acceptedAt!) + (state.wrongAttempts * PENALTY_PER_WRONG_ATTEMPT), 0);
       const testcasePenalty = participant.standing?.testcasePenalty || 0;
-      let teamScore = solvedEntries.reduce((sum, [, state]) => sum + (state.manualPoints !== null ? state.manualPoints : 1000), 0) - teamPenalty - testcasePenalty;
+      
+      // Calculate team score using exact problem points
+      let teamScore = solvedEntries.reduce((sum, [id, state]) => sum + (state.manualPoints !== null ? state.manualPoints : (pointsMap.get(id) || 1000)), 0) - teamPenalty - testcasePenalty;
 
       // 2. Individual Score Calculation
       const iMap = individualState.has(participant.id) ? individualState.get(participant.id)! : new Map();
       const iSolved = [...iMap.entries()].filter(([, state]) => state.acceptedAt);
       
       let individualPenalty = iSolved.reduce((sum, [, state]) => sum + acceptedMinute(contest, state.acceptedAt!) + (state.wrongAttempts * PENALTY_PER_WRONG_ATTEMPT), 0);
-      const iScore = iSolved.reduce((sum, [, state]) => sum + (state.manualPoints !== null ? state.manualPoints : 1000), 0) - individualPenalty - testcasePenalty;
+      
+      // Calculate individual score using exact problem points
+      const iScore = iSolved.reduce((sum, [id, state]) => sum + (state.manualPoints !== null ? state.manualPoints : (pointsMap.get(id) || 1000)), 0) - individualPenalty - testcasePenalty;
 
       return {
         participantId: participant.id,
@@ -106,6 +115,7 @@ export async function recomputeContestStandings(contestId: string) {
         penalty: teamPenalty,
         score: teamScore,
         individualScore: iScore,
+        individualPenalty,
         individualSolved: iSolved.length,
         testcasePenalty: testcasePenalty,
         solvedProblemIds: solvedEntries.map(([id]) => id),

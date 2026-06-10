@@ -39,9 +39,6 @@ export default function ProblemWorkspace() {
       .catch(err => setProblem({ error: true, title: 'Error', description: 'Failed to load.' }));
   }, [id, session]);
 
-  const problemDescriptionHtml = problem?.descriptionHtml || problem?.description || problem?.content || 'No description available for this problem.';
-
-  // 👉 FIXED: Safe JSON Parsing utility for the frontend types
   const sampleData = useMemo(() => {
     if (!problem || !problem.testcases) return { input: '', output: '' };
     try {
@@ -80,7 +77,7 @@ export default function ProblemWorkspace() {
     if (!problem || problem.error) return;
     setIsExplaining(true);
     try {
-      const prompt = `Please explain the optimal approach for this problem step-by-step.\n\nTitle: ${problem.title}\nDescription: ${problemDescriptionHtml}\n\nMy Code:\n${code}`;
+      const prompt = `Please explain the optimal approach for this problem step-by-step.\n\nTitle: ${problem.title}\n\nMy Code:\n${code}`;
       const res = await fetch(`${API_BASE_URL}/api/v2/ai/chat`, {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
@@ -104,6 +101,8 @@ export default function ProblemWorkspace() {
 
   const monacoLanguage = language === 'cpp' ? 'cpp' : language === 'python' ? 'python' : 'c';
 
+  const problemDescriptionHtml = problem.descriptionHtml || problem.description || problem.content || '';
+
   return (
     <main style={{ display: 'flex', height: '100vh', background: '#070a16', color: '#fff', fontFamily: 'Inter, sans-serif' }}>
       
@@ -112,9 +111,17 @@ export default function ProblemWorkspace() {
         <h1 style={{ margin: '0 0 8px 0', color: problem.error ? '#ef4444' : '#fff' }}>{problem.title}</h1>
         {!problem.error && <div style={{ color: '#67e8f9', marginBottom: 20 }}>Difficulty: {problem.difficulty || problem.rating || 'Unrated'}</div>}
         
-        <div style={{ lineHeight: 1.7, color: '#cbd5e1', fontSize: '15px' }} dangerouslySetInnerHTML={{__html: problemDescriptionHtml}}></div>
+        {problemDescriptionHtml ? (
+            <div style={{ lineHeight: 1.7, color: '#cbd5e1', fontSize: '15px' }} dangerouslySetInnerHTML={{__html: problemDescriptionHtml}}></div>
+        ) : (
+            problem.originalUrl && (
+               <div style={{ padding: 16, background: '#1e293b', borderRadius: 8, border: '1px solid #334155' }}>
+                  <p style={{ color: '#94a3b8', margin: '0 0 10px 0' }}>This problem is securely hosted on an external platform.</p>
+                  <a href={problem.originalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontWeight: 'bold', textDecoration: 'none' }}>Open Original Problem Statement ↗</a>
+               </div>
+            )
+        )}
 
-        {/* 👉 FIXED: Render safely via our memoized sampleData container */}
         {(sampleData.input || sampleData.output) && (
           <div style={{ marginTop: 24, padding: 16, borderRadius: 12, background: '#020617', border: '1px solid rgba(148,163,184,.18)' }}>
             {sampleData.input && (
