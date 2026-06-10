@@ -223,8 +223,6 @@ export async function createContestV2(input: CreateContestInput) {
       data: { inviteCode: inviteCode(title), title, description: input.description || null, type: input.type || ContestType.GROUP, status: startTime.getTime() <= Date.now() ? ContestStatus.RUNNING : ContestStatus.SCHEDULED, startTime, endTime, freezeTime, durationMinutes, isRated: Boolean(input.isRated), allowLateJoin: Boolean(input.allowLateJoin), hideProblemMetaDuringContest: input.hideProblemMetaDuringContest !== false, allowTeamSubmissionView: input.allowTeamSubmissionView !== false, createdById: owner.id }
     });
 
-    // 👉 FIXED: We no longer auto-register the owner as a participant! They remain unregistered by default.
-    // This allows the creator to see the Lobby UI and join a group or solo queue like anyone else.
     const playerMembers = members; 
 
     const uniqueTeamNames = [...new Set(playerMembers.map(m => m.teamName).filter(n => n && n !== 'Individuals' && n !== 'Solo'))];
@@ -502,6 +500,7 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
   } catch (error) { throw error; }
 }
 
+// 👉 FIXED: Approval checks if the actor is the FIRST member (joinedAt) of the target team, or the contest owner
 export async function approveParticipant(contestId: string, participantId: string, actorId: string) {
   const contest = await prisma.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
   if (!contest) throw new Error('Contest not found');
@@ -510,12 +509,15 @@ export async function approveParticipant(contestId: string, participantId: strin
   if (!targetParticipant) throw new Error('Target player request not found');
 
   const isContestOwner = contest.createdById === actorId;
-  const actorParticipant = contest.participants.find(p => p.userId === actorId);
   
-  const isTeamMember = actorParticipant && targetParticipant.teamId && actorParticipant.teamId === targetParticipant.teamId && actorParticipant.isOfficial;
+  const teamParticipants = contest.participants.filter(p => p.teamId === targetParticipant.teamId && p.isOfficial);
+  
+  // Find the absolute first team member (founder) by checking the joinedAt timestamp
+  const firstTeamMember = teamParticipants.sort((a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime())[0];
+  const isTeamCreator = firstTeamMember && firstTeamMember.userId === actorId;
 
-  if (!isContestOwner && !isTeamMember) {
-    throw new Error('Unauthorized: Only official team members or the contest creator can approve requests.');
+  if (!isContestOwner && !isTeamCreator) {
+    throw new Error('Unauthorized: Only the first founding member of this group or the contest creator can approve requests.');
   }
 
   const updated = await prisma.contestParticipant.update({ where: { id: participantId }, data: { isOfficial: true } });
@@ -523,7 +525,9 @@ export async function approveParticipant(contestId: string, participantId: strin
   return updated;
 }
 
-export async function createTeamForContest(contestId: string, teamName: string, userId: string, codeforcesHandle?: string, isOfficial: boolean = false) {
+// 👉 FIXED: Typescript strict optional parameters
+export async function createTeamForContest(contestId: string, teamName: string, userId: string, codeforcesHandle?: string, isOfficial?: boolean) {
+  const officialFlag = isOfficial ?? false;
   try {
     const result = await prisma.$transaction(async (tx) => {
       const contest = await tx.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
@@ -554,7 +558,7 @@ export async function createTeamForContest(contestId: string, teamName: string, 
               teamId: team.id,
               teamName,
               role: ContestParticipantRole.PARTICIPANT,
-              isOfficial
+              isOfficial: officialFlag
             }
           })
         : await tx.contestParticipant.create({
@@ -566,7 +570,7 @@ export async function createTeamForContest(contestId: string, teamName: string, 
               teamId: team.id,
               teamName,
               role: ContestParticipantRole.PARTICIPANT,
-              isOfficial
+              isOfficial: officialFlag
             }
           });
 
@@ -581,7 +585,9 @@ export async function createTeamForContest(contestId: string, teamName: string, 
   }
 }
 
-export async function joinTeamWithInviteCode(contestId: string, inviteCode: string, userId: string, codeforcesHandle?: string, isOfficial: boolean = false) {
+// 👉 FIXED: Typescript strict optional parameters
+export async function joinTeamWithInviteCode(contestId: string, inviteCode: string, userId: string, codeforcesHandle?: string, isOfficial?: boolean) {
+  const officialFlag = isOfficial ?? false;
   try {
     const result = await prisma.$transaction(async (tx) => {
       const contest = await tx.contest.findUnique({ where: { id: contestId } });
@@ -609,7 +615,7 @@ export async function joinTeamWithInviteCode(contestId: string, inviteCode: stri
               teamId: team.id,
               teamName: team.name,
               role: ContestParticipantRole.PARTICIPANT,
-              isOfficial
+              isOfficial: officialFlag
             }
           })
         : await tx.contestParticipant.create({
@@ -621,7 +627,7 @@ export async function joinTeamWithInviteCode(contestId: string, inviteCode: stri
               teamId: team.id,
               teamName: team.name,
               role: ContestParticipantRole.PARTICIPANT,
-              isOfficial 
+              isOfficial: officialFlag 
             }
           });
 

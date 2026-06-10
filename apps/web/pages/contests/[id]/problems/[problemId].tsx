@@ -187,11 +187,14 @@ export default function ContestProblemWorkspace() {
     return () => controller.abort();
   }, [problemIdStr, session?.user?.email, problem?.isMCQ, problem?.externalUrl]);
 
+  // 👉 FIXED: Fallback added to retrieve MCQ details from redirectInfo if lagging on the parent container
   useEffect(() => {
     if (isMCQ && problem) {
       try {
         if (problem?.interviewQuestion) {
           setMcqData(problem.interviewQuestion);
+        } else if (redirectInfo?.interviewQuestion) {
+          setMcqData(redirectInfo.interviewQuestion);
         } else if (problem?.mcqData) {
           const data = typeof problem.mcqData === 'string' ? JSON.parse(problem.mcqData) : problem.mcqData;
           setMcqData(data);
@@ -204,7 +207,7 @@ export default function ContestProblemWorkspace() {
     } else {
       setMcqData(null);
     }
-  }, [isMCQ, problem, problemIdStr]);
+  }, [isMCQ, problem, redirectInfo, problemIdStr]);
 
   const toggleVoice = async () => {
     if (!contest?.viewerMember?.teamId) {
@@ -380,7 +383,6 @@ export default function ContestProblemWorkspace() {
   };
 
   const runCustomCode = async () => {
-    // 👉 FIXED: Forgiving code validation logic
     if (code.trim() === '' || code.trim() === '// Write your solution here...') {
        return alert("Please write your code in the editor before running the terminal.");
     }
@@ -403,7 +405,6 @@ export default function ContestProblemWorkspace() {
   };
 
   const runAllTestcases = async () => {
-    // 👉 FIXED: Forgiving code validation logic
     if (code.trim() === '' || code.trim() === '// Write your solution here...') {
        return alert("Please write your code in the editor before running test cases.");
     }
@@ -468,7 +469,6 @@ export default function ContestProblemWorkspace() {
       if (selectedOptions.length === 0) return alert("Please select an answer before submitting.");
       if (!mcqData) return alert("MCQ data not loaded. Please refresh the page.");
     } else {
-      // 👉 FIXED: Forgiving code validation logic
       if (code.trim() === '' || code.trim() === '// Write your solution here...') {
          return alert("Please write your code in the editor before submitting.");
       }
@@ -676,29 +676,21 @@ export default function ContestProblemWorkspace() {
             )}
           </div>
         </div>
-      ) : problemType === 'EXTERNAL' && externalUrl ? (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 'calc(100vh - 60px)', width: '100%', padding: 20, background: '#020617' }}>
-          <div style={{ width: '100%', maxWidth: 900, padding: 30, borderRadius: 20, background: '#0f172a', border: '1px solid #334155' }}>
-            <div style={{ marginBottom: 20, padding: 20, borderRadius: 14, background: '#081327', border: '1px solid #475569' }}>
-              <strong style={{ display: 'block', color: '#38bdf8', marginBottom: 10, fontSize: 18 }}>External problem detected</strong>
-              <p style={{ margin: 0, color: '#cbd5e1', lineHeight: 1.7 }}>
-                This problem is sourced from an external platform. Use the original link below to view the full question and submit there if required.
-              </p>
-              <a href={externalUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 16, color: '#22d3ee', textDecoration: 'underline', fontWeight: 600 }}>
-                Open original question
-              </a>
-              {redirectInfo?.isAccessible === false && (
-                <p style={{ marginTop: 10, color: '#fca5a5', fontSize: 13 }}>
-                  Warning: the original link could not be verified as accessible. Please open the link directly.
-                </p>
-              )}
-            </div>
-            <div style={{ color: '#eef2ff', lineHeight: '1.7' }} dangerouslySetInnerHTML={{ __html: problemDescriptionHtml }} />
-          </div>
-        </div>
       ) : (
+        /* 👉 FIXED: Unified Split Layout View for both INTERNAL, AI Avatar, and EXTERNAL problems */
         <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
           <section style={{ width: '40%', overflowY: 'auto', background: '#0f172a', padding: 20 }}>
+            {problemType === 'EXTERNAL' && externalUrl && (
+              <div style={{ marginBottom: 20, padding: 20, borderRadius: 14, background: '#081327', border: '1px solid #334155' }}>
+                <strong style={{ display: 'block', color: '#38bdf8', marginBottom: 10, fontSize: 16 }}>External problem detected</strong>
+                <p style={{ margin: 0, color: '#cbd5e1', lineHeight: 1.7 }}>
+                  This problem is sourced from an external platform. You can code your solution here or open it natively.
+                </p>
+                <a href={externalUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 16, color: '#22d3ee', textDecoration: 'underline', fontWeight: 600 }}>
+                  Open original question ↗
+                </a>
+              </div>
+            )}
             <div 
               style={{ color: '#eef2ff', lineHeight: '1.6' }} 
               dangerouslySetInnerHTML={{ __html: problemDescriptionHtml }} 
@@ -706,13 +698,11 @@ export default function ContestProblemWorkspace() {
           </section>
           <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
             <Editor height="65%" theme="vs-dark" language={monacoLanguage} value={code} onChange={(val) => setCode(val || '')} />
-            <div style={{ height: '35%', background: '#1e1e1e', borderTop: '1px solid #333' }}>
+            <div style={{ height: '35%', background: '#1e1e1e', borderTop: '1px solid #333' }}> </div>
               <div style={tabsHeader}>
                 <button onClick={() => setActiveTab('cph')} style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle}>TEST CASES</button>
                 <button onClick={() => setActiveTab('terminal')} style={activeTab === 'terminal' ? activeTabStyle : inactiveTabStyle}>TERMINAL</button>
               </div>
-              
-              {/* 👉 FIXED: Improved Test Cases UI output & added Terminal input box */}
               <div style={{ padding: 15, height: 'calc(100% - 40px)', overflowY: 'auto' }}>
                 {activeTab === 'cph' && testcases.map((tc, index) => (
                   <div key={tc.id} style={{ marginBottom: 15, padding: 12, background: '#020617', border: `1px solid ${tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' ? '#f87171' : tc.status === 'running' ? '#eab308' : '#334155'}`, borderRadius: 8 }}>
@@ -739,7 +729,6 @@ export default function ContestProblemWorkspace() {
                     )}
                   </div>
                 ))}
-
                 {activeTab === 'terminal' && (
                   <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10 }}>
                     <div>
@@ -748,7 +737,7 @@ export default function ContestProblemWorkspace() {
                          value={customInput} 
                          onChange={(e) => setCustomInput(e.target.value)}
                          style={{ width: '100%', height: 80, background: '#020617', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: 10, fontFamily: 'monospace', outline: 'none', resize: 'vertical' }}
-                         placeholder="Enter any custom input data here before clicking Terminal ▶..."
+                         placeholder="Enter custom input data here..."
                        />
                     </div>
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -758,10 +747,9 @@ export default function ContestProblemWorkspace() {
                   </div>
                 )}
               </div>
-            </div>
-          </section>
-        </div>
-      )}
+            </section>
+          </div>
+        )}
 
       {contest?.viewerMember?.teamId && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
