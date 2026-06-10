@@ -424,6 +424,7 @@ model ContestStanding {
   id               String             @id @default(cuid())
   contestId        String
   participantId    String             @unique
+  individualPenalty Int?    // Add this line
   rank             Int?
   solved           Int                @default(0)
   penalty          Int                @default(0)
