@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
-import { useSession } from 'next-auth/react'; // 👉 Added import
+import { useSession } from 'next-auth/react';
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -9,7 +9,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4
 export default function ProblemWorkspace() {
   const router = useRouter();
   const { id } = router.query;
-  const { data: session } = useSession(); // 👉 Extracted session
+  const { data: session } = useSession(); 
 
   const [problem, setProblem] = useState<any>(null);
   const [language, setLanguage] = useState('cpp');
@@ -18,30 +18,62 @@ export default function ProblemWorkspace() {
   const [running, setRunning] = useState(false);
   const [activeTab, setActiveTab] = useState<'console' | 'ai'>('console');
 
+  // 👉 NEW: AI Explainer State
+  const [aiExplanation, setAiExplanation] = useState('');
+  const [isExplaining, setIsExplaining] = useState(false);
+
   useEffect(() => {
     if (!id) return;
-    fetch(`${API_BASE_URL}/api/problems/${id}`)
+    
+    // 👉 FIXED: Infinity Loading Bug - Fetching from the actual correct AI Dataset where these problems live
+    fetch(`${API_BASE_URL}/api/v2/ai-dataset`, { headers: { 'x-user-email': session?.user?.email || '' } })
       .then((r) => r.json())
-      .then(data => setProblem(data))
-      .catch(err => console.error("Failed to load problem:", err));
-  }, [id]);
+      .then(data => {
+         if (data.problems) {
+            const found = data.problems.find((p: any) => p.id === id);
+            if (found) {
+               setProblem(found);
+            } else {
+               setProblem({ error: true, title: 'Not Found', description: 'Could not find this problem in the database.' });
+            }
+         }
+      })
+      .catch(err => setProblem({ error: true, title: 'Error', description: 'Failed to load.' }));
+  }, [id, session]);
 
   async function runCode() {
-    if (!problem) return;
+    if (!problem || problem.error) return;
     setRunning(true);
     setActiveTab('console');
     try {
       const res = await fetch(`${API_BASE_URL}/api/v2/submissions/run-samples`, {
         method: 'POST', 
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-email': session?.user?.email || '' // 👉 Security Header Fix
-        },
+        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ problemId: problem.id, code, language })
       });
       const data = await res.json();
       setOutputs(data.results || []);
     } catch (err) { alert('Failed to connect to execution server.'); } finally { setRunning(false); }
+  }
+
+  // 👉 FIXED: Generating proper AI Explanations inside the IDE
+  async function handleGenerateExplanation() {
+    if (!problem || problem.error) return;
+    setIsExplaining(true);
+    try {
+      const prompt = `Please explain the optimal approach for this problem step-by-step.\n\nTitle: ${problem.title}\nDescription: ${problem.description}\n\nMy Code:\n${code}`;
+      const res = await fetch(`${API_BASE_URL}/api/v2/ai/chat`, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ message: prompt })
+      });
+      const data = await res.json();
+      setAiExplanation(data.reply);
+    } catch (err) {
+      setAiExplanation("Error connecting to AI Mentor. Please try again.");
+    } finally {
+      setIsExplaining(false);
+    }
   }
 
   if (!problem) return (
@@ -56,11 +88,10 @@ export default function ProblemWorkspace() {
   return (
     <main style={{ display: 'flex', height: '100vh', background: '#070a16', color: '#fff', fontFamily: 'Inter, sans-serif' }}>
       
-      {/* Left Panel: Description */}
       <section style={{ width: '40%', padding: 30, overflowY: 'auto', borderRight: '1px solid #1e293b', background: '#0f172a' }}>
         <a href="/practice" style={{ color: '#67e8f9', textDecoration: 'none', fontWeight: 900, display: 'inline-block', marginBottom: 16 }}>← Back to Practice</a>
-        <h1 style={{ margin: '0 0 8px 0' }}>{problem.title}</h1>
-        <div style={{ color: '#67e8f9', marginBottom: 20 }}>Difficulty: {problem.difficulty || problem.rating || 'Unrated'}</div>
+        <h1 style={{ margin: '0 0 8px 0', color: problem.error ? '#ef4444' : '#fff' }}>{problem.title}</h1>
+        {!problem.error && <div style={{ color: '#67e8f9', marginBottom: 20 }}>Difficulty: {problem.difficulty || problem.rating || 'Unrated'}</div>}
         <div style={{ lineHeight: 1.7, color: '#cbd5e1', fontSize: '15px' }} dangerouslySetInnerHTML={{__html: problem.description}}></div>
 
         {(problem.stdin || problem.expectedOutput) && (
@@ -77,7 +108,6 @@ export default function ProblemWorkspace() {
         )}
       </section>
 
-      {/* Right Panel: Editor & Terminal */}
       <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#020617' }}>
         <div style={{ padding: 12, background: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b' }}>
           <select value={language} onChange={(e) => setLanguage(e.target.value)} style={selectControl}>
@@ -85,7 +115,7 @@ export default function ProblemWorkspace() {
             <option value="python">Python 3</option>
             <option value="c">C</option>
           </select>
-          <button onClick={runCode} disabled={running} style={runBtn}>{running ? 'Running...' : 'Run Code ▶'}</button>
+          <button onClick={runCode} disabled={running || problem.error} style={runBtn}>{running ? 'Running...' : 'Run Code ▶'}</button>
         </div>
 
         <div style={{ flex: 1 }}>
@@ -95,8 +125,7 @@ export default function ProblemWorkspace() {
           />
         </div>
 
-        {/* Terminal Split */}
-        <div style={{ height: '35%', background: '#020617', borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ height: '40%', background: '#020617', borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', background: '#0f172a' }}>
             <button style={activeTab === 'console' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('console')}>Console Output</button>
             <button style={activeTab === 'ai' ? activeTabStyle : inactiveTabStyle} onClick={() => setActiveTab('ai')}>AI Explainer</button>
@@ -118,10 +147,28 @@ export default function ProblemWorkspace() {
             )}
 
             {activeTab === 'ai' && (
-              <div style={{ textAlign: 'center', paddingTop: 20 }}>
-                <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>🤖 Interactive AI Explainer</h3>
-                <p style={{ color: '#cbd5e1' }}>Stuck? Let the AI break down the optimal approach step-by-step.</p>
-                <button style={{ background: '#5356ff', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' }}>Generate Explanation</button>
+              <div style={{ paddingTop: 10 }}>
+                {aiExplanation ? (
+                  <div style={{ background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid #334155' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                       <h3 style={{ color: '#a5b4fc', margin: 0 }}>🤖 AI Mentor Analysis</h3>
+                       <button onClick={handleGenerateExplanation} disabled={isExplaining} style={{ background: 'transparent', border: '1px solid #a5b4fc', color: '#a5b4fc', padding: '6px 12px', borderRadius: 8, cursor: 'pointer' }}>
+                         {isExplaining ? 'Thinking...' : 'Regenerate'}
+                       </button>
+                    </div>
+                    <div style={{ color: '#cbd5e1', fontSize: 15, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                      {aiExplanation}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', marginTop: 40 }}>
+                    <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>🤖 Interactive AI Explainer</h3>
+                    <p style={{ color: '#cbd5e1', marginBottom: 20 }}>Stuck? Let the AI break down the optimal approach step-by-step.</p>
+                    <button onClick={handleGenerateExplanation} disabled={isExplaining || problem.error} style={{ background: '#5356ff', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' }}>
+                      {isExplaining ? 'Analyzing problem and code...' : 'Generate Explanation'}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

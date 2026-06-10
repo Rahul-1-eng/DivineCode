@@ -192,8 +192,9 @@ export function mountV2Routes(app: Express, io: Server) {
     });
   });
 
+// 👉 FIXED: Upgraded AI endpoint to handle Multimodal Image (Base64) Payload
   router.post('/ai/chat', asyncRoute(async (req, res) => {
-    const { message, history } = req.body;
+    const { message, history, image } = req.body;
     const apiKey = process.env.AI_API_KEY;
     if (!apiKey) return res.json({ reply: "I am unable to think right now. Please check the AI_API_KEY in the environment variables." });
 
@@ -209,7 +210,17 @@ export function mountV2Routes(app: Express, io: Server) {
          });
       }
       
-      contents.push({ role: 'user', parts: [{ text: message || 'Hello' }] });
+      const currentParts: any[] = [];
+      if (message) currentParts.push({ text: message });
+      else if (!message && image) currentParts.push({ text: 'Please analyze this image and answer any related questions.' });
+
+      if (image) {
+          const mimeType = image.match(/data:(.*?);base64/)?.[1] || 'image/jpeg';
+          const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+          currentParts.push({ inlineData: { data: base64Data, mimeType } });
+      }
+
+      contents.push({ role: 'user', parts: currentParts });
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
       const { data } = await axios.post(url, { contents });
@@ -217,7 +228,7 @@ export function mountV2Routes(app: Express, io: Server) {
       res.json({ reply: data.candidates[0].content.parts[0].text });
     } catch (e: any) {
       console.error('[AI Chat] Error:', e.response?.data || e.message);
-      res.json({ reply: "My neural pathways are a bit tangled right now due to a network timeout. Please try asking again!" });
+      res.json({ reply: "My neural pathways are a bit tangled right now. Please try asking again!" });
     }
   }));
 
@@ -273,8 +284,10 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
+  // 👉 FIXED: Ensures viewer.userId exists before trying to query the DB, resolving any phantom matching issues.
   router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req);
+    if (!viewer.userId) throw new Error("Unauthorized to unregister. User ID missing.");
     const contestId = req.params.id;
     
     const participant = await prisma.contestParticipant.findFirst({

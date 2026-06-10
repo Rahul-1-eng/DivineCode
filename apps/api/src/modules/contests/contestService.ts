@@ -223,14 +223,9 @@ export async function createContestV2(input: CreateContestInput) {
       data: { inviteCode: inviteCode(title), title, description: input.description || null, type: input.type || ContestType.GROUP, status: startTime.getTime() <= Date.now() ? ContestStatus.RUNNING : ContestStatus.SCHEDULED, startTime, endTime, freezeTime, durationMinutes, isRated: Boolean(input.isRated), allowLateJoin: Boolean(input.allowLateJoin), hideProblemMetaDuringContest: input.hideProblemMetaDuringContest !== false, allowTeamSubmissionView: input.allowTeamSubmissionView !== false, createdById: owner.id }
     });
 
-    await tx.contestParticipant.create({
-      data: { contestId: created.id, userId: owner.id, displayName: owner.name || 'Owner', role: ContestParticipantRole.OWNER, isOfficial: true }
-    });
-
-    const playerMembers = members.filter((member) => {
-      const emailMatchesOwner = member.email && owner.email && member.email.trim().toLowerCase() === owner.email.trim().toLowerCase();
-      return !emailMatchesOwner && member.userId !== owner.id;
-    });
+    // 👉 FIXED: We no longer auto-register the owner as a participant! They remain unregistered by default.
+    // This allows the creator to see the Lobby UI and join a group or solo queue like anyone else.
+    const playerMembers = members; 
 
     const uniqueTeamNames = [...new Set(playerMembers.map(m => m.teamName).filter(n => n && n !== 'Individuals' && n !== 'Solo'))];
     const teamRecordMap = new Map<string, string>();

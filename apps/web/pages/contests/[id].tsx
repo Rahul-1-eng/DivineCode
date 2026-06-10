@@ -123,7 +123,9 @@ export default function ContestRoomPage() {
 
   const isScheduledLockScreen = nowTick < startTimeMs;
   const halfTimeMs = startTimeMs + ((contest?.durationMinutes || 0) * 60000 / 2);
-  const canUnregister = viewerMember && !isOwner && nowTick < halfTimeMs && displayStatus !== 'ENDED';
+  
+  // 👉 FIXED: Removed !isOwner check so the contest owner can test as a player and unregister
+  const canUnregister = viewerMember && nowTick < halfTimeMs && displayStatus !== 'ENDED';
 
   const playSuccessSound = () => { try { new Audio('/accepted.mp3').play().catch(()=>{}); } catch (e) {} };
 
@@ -232,7 +234,11 @@ export default function ContestRoomPage() {
       
       if (res.ok) {
         toast.success('Successfully unregistered.');
-        await loadContest(); 
+        const data = await res.json();
+        // 👉 FIXED: Explicitly nullify viewerMember so the frontend instantly renders the registration lobby again
+        data.viewerMember = null;
+        setContest(data);
+        await loadSubmissions(); 
       } else {
         const data = await res.json();
         toast.error(data.error || 'Failed to unregister');
@@ -1127,9 +1133,9 @@ export default function ContestRoomPage() {
             <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
               
               <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
-                <strong style={{ color: '#a5b4fc' }}>{viewerMember.teamId ? 'Team Chat' : 'Global Contest Chat'}</strong>
+                <strong style={{ color: '#a5b4fc' }}>{viewerMember?.teamId ? 'Team Chat' : 'Global Contest Chat'}</strong>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  {viewerMember.teamId && (
+                  {viewerMember?.teamId && (
                     <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)', color: voiceStatus === 'connected' ? '#4ade80' : '#fff', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
                       {voiceStatus === 'connected' ? '🟢 Voice On' : voiceStatus === 'connecting' ? '⏳ Connecting...' : '🎤 Join Voice'}
                     </button>
@@ -1139,7 +1145,7 @@ export default function ContestRoomPage() {
               </div>
 
               <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
-                {viewerMember.teamId ? (
+                {viewerMember?.teamId ? (
                   messages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No messages yet. Say hi!</p> : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {messages.map(msg => (
