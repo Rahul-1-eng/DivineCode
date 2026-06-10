@@ -4,7 +4,7 @@ import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
 import { io, Socket } from 'socket.io-client';
 import toast, { Toaster } from 'react-hot-toast';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export async function getServerSideProps() { return { props: {} }; }
 
@@ -52,7 +52,7 @@ export default function ContestProblemWorkspace() {
   const [code, setCode] = useState('// Write your solution here...');
   const [language, setLanguage] = useState('cpp');
   
-  const [activeTab, setActiveTab] = useState<'cph' | 'terminal' | 'testcases'>('cph');
+  const [activeTab, setActiveTab] = useState<'cph' | 'terminal'>('cph');
   const [terminalOutput, setTerminalOutput] = useState<string>('Welcome to DivineCode Integrated Terminal.\nReady to compile and run...\n');
   const [customInput, setCustomInput] = useState<string>('');
   
@@ -196,11 +196,9 @@ export default function ContestProblemWorkspace() {
           const data = typeof problem.mcqData === 'string' ? JSON.parse(problem.mcqData) : problem.mcqData;
           setMcqData(data);
         } else {
-          console.warn('[MCQ] No interviewQuestion or mcqData found', problem);
           setMcqData(null);
         }
       } catch (e) {
-        console.error('[MCQ Parse Error]', e);
         setMcqData(null);
       }
     } else {
@@ -237,7 +235,6 @@ export default function ContestProblemWorkspace() {
         toast.success("Voice channel joined!");
       } catch (err: any) {
         setVoiceStatus('disconnected');
-        console.error('[Voice Error]', err);
         toast.error(err?.message?.includes('Permission') ? "Microphone access denied by user." : "Could not access microphone. Check permissions.");
       }
     }
@@ -259,13 +256,11 @@ export default function ContestProblemWorkspace() {
       const socket = socketRef.current;
       
       socket.on('connect', () => {
-        console.log('[Socket] Connected');
         socket.emit('joinContest', id); 
         socket.emit('joinTeam', contest.viewerMember.teamId);
       });
 
       socket.on('connect_error', (error: any) => {
-        console.error('[Socket Error]', error);
         toast.error('Chat connection failed. Will retry...', { duration: 3000 });
       });
 
@@ -285,16 +280,8 @@ export default function ContestProblemWorkspace() {
         }
       });
 
-      socket.on('disconnect', () => {
-        console.log('[Socket] Disconnected');
-      });
-
       return () => { 
-        try {
-          socket.disconnect();
-        } catch (e) {
-          console.error('[Socket Disconnect Error]', e);
-        }
+        try { socket.disconnect(); } catch (e) { }
         socketRef.current = null; 
         if (localStreamRef.current) {
           localStreamRef.current.getTracks().forEach(track => track.stop());
@@ -303,7 +290,6 @@ export default function ContestProblemWorkspace() {
         peersRef.current = {};
       };
     } catch (err) {
-      console.error('[Socket Init Error]', err);
       toast.error('Failed to initialize chat');
     }
   }, [id, session?.user?.email, contest?.viewerMember?.teamId, contest?.viewerMember]);
@@ -330,8 +316,35 @@ export default function ContestProblemWorkspace() {
       });
       setChatInput('');
     } catch (err) {
-      console.error('[Send Message Error]', err);
       toast.error('Failed to send message');
+    }
+  };
+
+  const handleAiDebug = async () => {
+    if (code.trim() === '' || code.trim() === '// Write your solution here...') {
+       return alert("Please write some code in the editor before asking the AI for debug assistance.");
+    }
+    if (confirm("Using the AI Tutor deducts 50 points from your score. Proceed?")) {
+      setAiDebuggerLoading(true);
+      setAiError(false);
+      try {
+        const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemIdStr}/ai-debug`, {
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
+          body: JSON.stringify({ userCode: code, problemDescription: problem?.titleSnapshot }) 
+        });
+        const data = await res.json();
+        if (res.ok) {
+           setAiDebugResult(data.aiDebugData);
+        } else {
+           toast.error(data.error || "AI Service Error");
+        }
+      } catch (err) { 
+        setAiError(true);
+        toast.error("AI connection failed. Please retry."); 
+      } finally { 
+        setAiDebuggerLoading(false); 
+      }
     }
   };
 
@@ -367,7 +380,10 @@ export default function ContestProblemWorkspace() {
   };
 
   const runCustomCode = async () => {
-    if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
+    // 👉 FIXED: Forgiving code validation logic
+    if (code.trim() === '' || code.trim() === '// Write your solution here...') {
+       return alert("Please write your code in the editor before running the terminal.");
+    }
     setActiveTab('terminal');
     setTerminalOutput(`> Compiling and running...\n`);
     try {
@@ -387,9 +403,12 @@ export default function ContestProblemWorkspace() {
   };
 
   const runAllTestcases = async () => {
+    // 👉 FIXED: Forgiving code validation logic
+    if (code.trim() === '' || code.trim() === '// Write your solution here...') {
+       return alert("Please write your code in the editor before running test cases.");
+    }
     setActiveTab('cph');
     for (let i = 0; i < testcases.length; i++) {
-      if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
       const newCases = [...testcases];
       newCases[i].status = 'running';
       newCases[i].output = '';
@@ -444,38 +463,15 @@ export default function ContestProblemWorkspace() {
     } catch (e) { alert("Failed to connect to Codeforces sync engine."); } finally { setIsSyncing(false); }
   };
 
-  const handleAiDebug = async () => {
-    if (!code.trim()) return alert("Write some code to debug!");
-    if (confirm("Using the AI Tutor deducts 50 points from your score. Proceed?")) {
-      setAiDebuggerLoading(true);
-      setAiError(false);
-      try {
-        const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}/ai-debug`, {
-          method: 'POST', 
-          headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
-          body: JSON.stringify({ userCode: code, problemDescription: problem?.titleSnapshot }) 
-        });
-        const data = await res.json();
-        if (res.ok) {
-           setAiDebugResult(data.aiDebugData);
-        } else {
-           toast.error(data.error || "AI Service Error");
-        }
-      } catch (err) { 
-        setAiError(true);
-        toast.error("AI connection failed. Please retry."); 
-      } finally { 
-        setAiDebuggerLoading(false); 
-      }
-    }
-  };
-
   const handleSubmitCode = async () => {
     if (isMCQ) {
       if (selectedOptions.length === 0) return alert("Please select an answer before submitting.");
       if (!mcqData) return alert("MCQ data not loaded. Please refresh the page.");
     } else {
-      if (!code.trim() || code.includes('// Write your solution')) return alert("Please write code first.");
+      // 👉 FIXED: Forgiving code validation logic
+      if (code.trim() === '' || code.trim() === '// Write your solution here...') {
+         return alert("Please write your code in the editor before submitting.");
+      }
       if (problemType === 'EXTERNAL' || problem?.platform === 'CODEFORCES' || problem?.externalUrl?.includes('codeforces')) {
         const redirectUrl = redirectInfo?.redirectUrl || redirectInfo?.externalUrl || problem?.externalUrl;
         if (redirectUrl) {
@@ -494,7 +490,6 @@ export default function ContestProblemWorkspace() {
     try {
       finalCode = isMCQ ? JSON.stringify(selectedOptions) : code;
     } catch (e) {
-      console.error('[JSON Stringify Error]', e);
       setJudgeVerdict({ status: 'Error', message: 'Failed to serialize your answer. Please try again.' });
       setSubmitting(false);
       return;
@@ -506,7 +501,7 @@ export default function ContestProblemWorkspace() {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
         method: 'POST', 
         headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
-        body: JSON.stringify({ contestProblemId: problemId, code: finalCode, language: finalLanguage })
+        body: JSON.stringify({ contestProblemId: problemIdStr, code: finalCode, language: finalLanguage })
       });
       const submission = await res.json();
       if (!res.ok) throw new Error(submission.error || 'Could not create submission');
@@ -563,6 +558,27 @@ export default function ContestProblemWorkspace() {
         </div>
       )}
 
+      {aiDebugResult && (
+        <div style={modalOverlay}>
+          <div style={{...modalContent, border: '1px solid #a855f7'}}>
+            <h2 style={{ margin: '0 0 10px 0', color: '#a855f7' }}>🤖 AI Debug Analysis</h2>
+            
+            <strong style={{ color: '#eef2ff' }}>Hint:</strong>
+            <p style={{ color: '#cbd5e1', marginBottom: 15 }}>{aiDebugResult.hint}</p>
+
+            <strong style={{ color: '#eef2ff' }}>Failing Input:</strong>
+            <pre style={{ background: '#020617', padding: 10, borderRadius: 8, color: '#e2e8f0', marginTop: 5, whiteSpace: 'pre-wrap' }}>{aiDebugResult.input}</pre>
+
+            <strong style={{ color: '#eef2ff' }}>Expected Output:</strong>
+            <pre style={{ background: '#020617', padding: 10, borderRadius: 8, color: '#4ade80', marginTop: 5, whiteSpace: 'pre-wrap' }}>{aiDebugResult.expectedOutput}</pre>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+              <button onClick={() => setAiDebugResult(null)} style={{...primaryBtn, background: '#a855f7'}}>Dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {judgeVerdict && (
         <div style={modalOverlay}>
           <div style={{...modalContent, border: `1px solid ${judgeVerdict.status.includes('Accept') ? '#4ade80' : '#f87171'}`}}>
@@ -604,6 +620,9 @@ export default function ContestProblemWorkspace() {
         <div style={{ display: 'flex', gap: 10 }}>
           {!isMCQ && (
             <>
+              <button onClick={handleAiDebug} disabled={aiDebuggerLoading} style={{...ghostBtn, borderColor: '#a855f7', color: '#a855f7'}}>
+                {aiDebuggerLoading ? '🤖 Analyzing...' : '🤖 AI Debug'}
+              </button>
               <select value={language} onChange={(e) => setLanguage(e.target.value)} style={selectBox}>
                 <option value="cpp">C++ 17</option>
                 <option value="python">Python 3</option>
@@ -692,17 +711,51 @@ export default function ContestProblemWorkspace() {
                 <button onClick={() => setActiveTab('cph')} style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle}>TEST CASES</button>
                 <button onClick={() => setActiveTab('terminal')} style={activeTab === 'terminal' ? activeTabStyle : inactiveTabStyle}>TERMINAL</button>
               </div>
+              
+              {/* 👉 FIXED: Improved Test Cases UI output & added Terminal input box */}
               <div style={{ padding: 15, height: 'calc(100% - 40px)', overflowY: 'auto' }}>
-                {activeTab === 'cph' && testcases.map((tc) => (
-                  <div key={tc.id} style={{ marginBottom: 10 }}>
+                {activeTab === 'cph' && testcases.map((tc, index) => (
+                  <div key={tc.id} style={{ marginBottom: 15, padding: 12, background: '#020617', border: `1px solid ${tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' ? '#f87171' : tc.status === 'running' ? '#eab308' : '#334155'}`, borderRadius: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                       <strong style={{ color: '#e2e8f0', fontSize: 14 }}>Test Case {index + 1}</strong>
+                       {tc.status !== 'idle' && (
+                         <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' ? '#f87171' : '#eab308', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', padding: '2px 8px', background: 'rgba(255,255,255,0.05)', borderRadius: 12 }}>
+                           {tc.status}
+                         </span>
+                       )}
+                    </div>
                     <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>Input:</div>
-                    <pre style={{ margin: 0, padding: 8, background: '#020617', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0', fontSize: 12 }}>{tc.input}</pre>
-                    <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 8, marginBottom: 4 }}>Expected:</div>
-                    <pre style={{ margin: 0, padding: 8, background: '#020617', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0', fontSize: 12 }}>{tc.expectedOutput}</pre>
+                    <pre style={{ margin: 0, padding: 8, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 4, color: '#e2e8f0', fontSize: 12, whiteSpace: 'pre-wrap' }}>{tc.input}</pre>
+                    <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 8, marginBottom: 4 }}>Expected Output:</div>
+                    <pre style={{ margin: 0, padding: 8, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 4, color: '#e2e8f0', fontSize: 12, whiteSpace: 'pre-wrap' }}>{tc.expectedOutput}</pre>
+
+                    {tc.status !== 'idle' && (
+                      <>
+                        <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 8, marginBottom: 4 }}>Actual Output:</div>
+                        <pre style={{ margin: 0, padding: 8, background: tc.status === 'passed' ? 'rgba(74, 222, 128, 0.1)' : 'rgba(248, 113, 113, 0.1)', border: `1px solid ${tc.status === 'passed' ? '#4ade80' : '#f87171'}`, borderRadius: 4, color: tc.status === 'passed' ? '#4ade80' : '#f87171', fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                          {tc.output || '[No Output / Execution Failed]'}
+                        </pre>
+                      </>
+                    )}
                   </div>
                 ))}
+
                 {activeTab === 'terminal' && (
-                  <pre style={{ margin: 0, color: '#4ade80', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap' }}>{terminalOutput}</pre>
+                  <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10 }}>
+                    <div>
+                       <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>Custom Input (stdin):</div>
+                       <textarea 
+                         value={customInput} 
+                         onChange={(e) => setCustomInput(e.target.value)}
+                         style={{ width: '100%', height: 80, background: '#020617', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: 10, fontFamily: 'monospace', outline: 'none', resize: 'vertical' }}
+                         placeholder="Enter any custom input data here before clicking Terminal ▶..."
+                       />
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                       <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>Terminal Output:</div>
+                       <pre style={{ flex: 1, margin: 0, padding: 12, background: '#020617', color: '#4ade80', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap', border: '1px solid #334155', borderRadius: 8, minHeight: 120, overflowY: 'auto' }}>{terminalOutput}</pre>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>

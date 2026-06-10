@@ -155,7 +155,6 @@ export function mountV2Routes(app: Express, io: Server) {
             } 
           }
         });
-        // Ensure sender data is properly formatted
         const formattedMessage = {
           ...message,
           sender: message.sender ? {
@@ -240,31 +239,28 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ success: true, participant: updated });
   }));
 
-  // NEW: Create a team/group for the contest
   router.post('/contests/:id/team/create', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req, true);
     if (!viewer.userId) throw new Error("Unauthorized");
-    const { teamName, codeforcesHandle } = req.body;
+    const { teamName, codeforcesHandle, isOfficial } = req.body;
     if (!teamName || !teamName.trim()) throw new Error("Team name is required");
     
-    await createTeamForContest(req.params.id, teamName.trim(), viewer.userId, codeforcesHandle);
+    await createTeamForContest(req.params.id, teamName.trim(), viewer.userId, codeforcesHandle, Boolean(isOfficial));
     const contest = await loadContestForViewer(req.params.id);
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
-  // NEW: Join team with invitation code
   router.post('/contests/:id/team/join-invite', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req, true);
     if (!viewer.userId) throw new Error("Unauthorized");
-    const { inviteCode, codeforcesHandle } = req.body;
+    const { inviteCode, codeforcesHandle, isOfficial } = req.body;
     if (!inviteCode) throw new Error("Invite code is required");
     
-    await joinTeamWithInviteCode(req.params.id, inviteCode, viewer.userId, codeforcesHandle);
+    await joinTeamWithInviteCode(req.params.id, inviteCode, viewer.userId, codeforcesHandle, Boolean(isOfficial));
     const contest = await loadContestForViewer(req.params.id);
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
-  // NEW: Request to join existing team (pending approval)
   router.post('/contests/:id/team/request-join', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req, true);
     if (!viewer.userId) throw new Error("Unauthorized");
@@ -423,16 +419,12 @@ export function mountV2Routes(app: Express, io: Server) {
 
   router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
     const viewer = await requireContestOwner(req);
-    // We now capture generateAiTests for URL problems
     const { type, url, customData, mcqData, generateAiTests } = req.body;
     const contestId = req.params.id;
 
     const existingCount = await prisma.contestProblem.count({ where: { contestId } });
     const nextLabel = String.fromCharCode(65 + existingCount);
 
-    // ============================================
-    // 1. URL SCALER LOGIC
-    // ============================================
     if (type === 'URL' && url) {
       let scrapedTitle = 'External Problem Resource';
       let scrapedHtml = `<div style="text-align:center;"><a href="${url}">View Problem Here</a></div>`;
@@ -449,7 +441,6 @@ export function mountV2Routes(app: Express, io: Server) {
         }
       } catch (err) {}
 
-      // Add AI generated test cases if the user checked the box!
       if (generateAiTests && scrapedHtml.length > 50) {
           const aiCases = await generateToughTestCases(scrapedHtml);
           if (aiCases && aiCases.length > 0) {
@@ -480,9 +471,6 @@ export function mountV2Routes(app: Express, io: Server) {
       return res.json(sanitizeContestForViewer(contest!, viewer));
     }
 
-    // ============================================
-    // 2. MCQ LOGIC
-    // ============================================
     if (type === 'MCQ' && mcqData) {
       let defaultTrack = await prisma.interviewTrack.findFirst();
       if (!defaultTrack) defaultTrack = await prisma.interviewTrack.create({ data: { slug: 'theory', title: 'Theory Track', type: 'DSA' } });
@@ -516,13 +504,9 @@ export function mountV2Routes(app: Express, io: Server) {
       return res.json(sanitizeContestForViewer(contest!, viewer));
     }
 
-    // ============================================
-    // 3. CUSTOM INPUT LOGIC
-    // ============================================
     if (type === 'CUSTOM' && customData) {
       let customCases = customData.testcases || [];
       
-      // Add AI generated test cases if the user checked the box!
       if (customData.generateAiTests && customData.description.length > 20) {
          const aiCases = await generateToughTestCases(customData.description);
          if (aiCases && aiCases.length > 0) {
@@ -657,7 +641,6 @@ export function mountV2Routes(app: Express, io: Server) {
       return res.status(404).json({ error: 'Problem not found' });
     }
 
-    // Handle different question types
     const response: any = {
       id: problem.id,
       title: problem.titleSnapshot,
@@ -669,7 +652,6 @@ export function mountV2Routes(app: Express, io: Server) {
       customTestCases: problem.customTestCases || null
     };
 
-    // If it's a MCQ, include interview question data
     if (problem.isMCQ && problem.interviewQuestion) {
       response.interviewQuestion = {
         id: problem.interviewQuestion.id,
@@ -681,12 +663,9 @@ export function mountV2Routes(app: Express, io: Server) {
       };
     }
 
-    // If it's external, provide redirect URL
     if (problem.externalUrl && !problem.isMCQ) {
       response.redirectUrl = problem.externalUrl;
       response.requiresRedirect = true;
-      
-      // Validate URL accessibility
       try {
         const { status } = await axios.head(problem.externalUrl, { timeout: 5000 });
         response.isAccessible = status >= 200 && status < 400;
@@ -705,7 +684,6 @@ export function mountV2Routes(app: Express, io: Server) {
       orderBy: { createdAt: 'desc' }
     });
     
-    // Add redirect flag and proper URL handling
     const enriched = problems.map(p => ({
       ...p,
       requiresRedirect: p.platform !== 'DIVINECODE' && !!p.originalUrl,
@@ -722,7 +700,6 @@ export function mountV2Routes(app: Express, io: Server) {
       orderBy: { createdAt: 'desc' }
     });
     
-    // Add redirect flag and proper URL handling
     const enriched = problems.map(p => ({
       ...p,
       requiresRedirect: p.platform !== 'DIVINECODE' && !!p.originalUrl,
@@ -735,13 +712,10 @@ export function mountV2Routes(app: Express, io: Server) {
 
   router.post('/contests/:id/problems/:problemId/ai-debug', asyncRoute(async (req, res) => {
     const { userCode, problemDescription } = req.body;
-    
     const aiDebugData = await debugCodeWithAI(userCode, problemDescription);
-    
     if (!aiDebugData || !aiDebugData.hint) {
         return res.status(500).json({ error: "AI failed to generate a debug response." });
     }
-
     res.json({ success: true, aiDebugData });
   }));
 
@@ -751,7 +725,6 @@ export function mountV2Routes(app: Express, io: Server) {
   
   app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
   
-  // Base Routes
   app.use('/api/v2', router);
   app.use('/api/v2/submissions', submissionRouter); 
   app.use('/api/v2/interview', interviewRouter);

@@ -5,7 +5,7 @@ import { recomputeContestStandings } from '../standings/standingService';
 import { scrapeProblemFromUrl } from '../external-sync/problemScraper';
 import { generateToughTestCases } from '../ai/aiService';
 
-export type MemberInput = { username?: string; userId?: string; email?: string; name?: string; displayName?: string; teamName?: string; teamInviteCode?: string; codeforcesHandle?: string; ratingBefore?: number; };
+export type MemberInput = { username?: string; userId?: string; email?: string; name?: string; displayName?: string; teamName?: string; teamInviteCode?: string; codeforcesHandle?: string; ratingBefore?: number; isOfficial?: boolean; };
 
 export type ProblemInput = { id?: string; problemId?: string; interviewQuestionId?: string; title?: string; description?: string; mcqTimeLimitSeconds?: number; mcqData?: any; platform?: string; code?: string; contestCode?: string; problemIndex?: string; externalId?: string; url?: string; externalUrl?: string; points?: number; testcases?: any[]; imageUrl?: string; };
 
@@ -187,7 +187,16 @@ export async function registerForContestV2(contestId: string, input: MemberInput
 
     const needsApproval = isPending && !memberInput.teamInviteCode && (memberInput.teamName && memberInput.teamName !== 'Individuals');
     await tx.contestParticipant.create({
-      data: { contestId: contest.id, userId: user.id, externalHandleId: externalHandle?.id || null, displayName: memberInput.displayName!, teamName: memberInput.teamName, teamId: teamId, role, isOfficial: !needsApproval }
+      data: { 
+        contestId: contest.id, 
+        userId: user.id, 
+        externalHandleId: externalHandle?.id || null, 
+        displayName: memberInput.displayName!, 
+        teamName: memberInput.teamName, 
+        teamId: teamId, 
+        role, 
+        isOfficial: needsApproval ? false : (input.isOfficial ?? false) 
+      }
     });
   });
 
@@ -214,7 +223,6 @@ export async function createContestV2(input: CreateContestInput) {
       data: { inviteCode: inviteCode(title), title, description: input.description || null, type: input.type || ContestType.GROUP, status: startTime.getTime() <= Date.now() ? ContestStatus.RUNNING : ContestStatus.SCHEDULED, startTime, endTime, freezeTime, durationMinutes, isRated: Boolean(input.isRated), allowLateJoin: Boolean(input.allowLateJoin), hideProblemMetaDuringContest: input.hideProblemMetaDuringContest !== false, allowTeamSubmissionView: input.allowTeamSubmissionView !== false, createdById: owner.id }
     });
 
-    // Keep the contest creator in the room context without counting them as a team player.
     await tx.contestParticipant.create({
       data: { contestId: created.id, userId: owner.id, displayName: owner.name || 'Owner', role: ContestParticipantRole.OWNER, isOfficial: true }
     });
@@ -237,7 +245,7 @@ export async function createContestV2(input: CreateContestInput) {
       if (member.codeforcesHandle) externalHandle = await ensureCodeforcesHandle(tx, user.id, member.codeforcesHandle);
       else externalHandle = await tx.externalHandle.findFirst({ where: { userId: user.id, platform: Platform.CODEFORCES } });
       const teamId = (member.teamName && teamRecordMap.has(member.teamName)) ? teamRecordMap.get(member.teamName) : null;
-      await tx.contestParticipant.create({ data: { contestId: created.id, userId: user.id, externalHandleId: externalHandle?.id || null, displayName: member.displayName!, teamName: member.teamName, teamId: teamId || null, role: ContestParticipantRole.PARTICIPANT, isOfficial: true, ratingBefore: member.ratingBefore } });
+      await tx.contestParticipant.create({ data: { contestId: created.id, userId: user.id, externalHandleId: externalHandle?.id || null, displayName: member.displayName!, teamName: member.teamName, teamId: teamId || null, role: ContestParticipantRole.PARTICIPANT, isOfficial: member.isOfficial ?? true, ratingBefore: member.ratingBefore } });
     }
 
     for (const [index, problem] of problems.entries()) {
@@ -509,7 +517,6 @@ export async function approveParticipant(contestId: string, participantId: strin
   const isContestOwner = contest.createdById === actorId;
   const actorParticipant = contest.participants.find(p => p.userId === actorId);
   
-  // Checking if the approving actor is an official member of the same team.
   const isTeamMember = actorParticipant && targetParticipant.teamId && actorParticipant.teamId === targetParticipant.teamId && actorParticipant.isOfficial;
 
   if (!isContestOwner && !isTeamMember) {
@@ -521,7 +528,7 @@ export async function approveParticipant(contestId: string, participantId: strin
   return updated;
 }
 
-export async function createTeamForContest(contestId: string, teamName: string, userId: string, codeforcesHandle?: string) {
+export async function createTeamForContest(contestId: string, teamName: string, userId: string, codeforcesHandle?: string, isOfficial: boolean = false) {
   try {
     const result = await prisma.$transaction(async (tx) => {
       const contest = await tx.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
@@ -552,7 +559,7 @@ export async function createTeamForContest(contestId: string, teamName: string, 
               teamId: team.id,
               teamName,
               role: ContestParticipantRole.PARTICIPANT,
-              isOfficial: true
+              isOfficial
             }
           })
         : await tx.contestParticipant.create({
@@ -564,7 +571,7 @@ export async function createTeamForContest(contestId: string, teamName: string, 
               teamId: team.id,
               teamName,
               role: ContestParticipantRole.PARTICIPANT,
-              isOfficial: true
+              isOfficial
             }
           });
 
@@ -579,7 +586,7 @@ export async function createTeamForContest(contestId: string, teamName: string, 
   }
 }
 
-export async function joinTeamWithInviteCode(contestId: string, inviteCode: string, userId: string, codeforcesHandle?: string) {
+export async function joinTeamWithInviteCode(contestId: string, inviteCode: string, userId: string, codeforcesHandle?: string, isOfficial: boolean = false) {
   try {
     const result = await prisma.$transaction(async (tx) => {
       const contest = await tx.contest.findUnique({ where: { id: contestId } });
@@ -607,7 +614,7 @@ export async function joinTeamWithInviteCode(contestId: string, inviteCode: stri
               teamId: team.id,
               teamName: team.name,
               role: ContestParticipantRole.PARTICIPANT,
-              isOfficial: true
+              isOfficial
             }
           })
         : await tx.contestParticipant.create({
@@ -619,7 +626,7 @@ export async function joinTeamWithInviteCode(contestId: string, inviteCode: stri
               teamId: team.id,
               teamName: team.name,
               role: ContestParticipantRole.PARTICIPANT,
-              isOfficial: true 
+              isOfficial 
             }
           });
 

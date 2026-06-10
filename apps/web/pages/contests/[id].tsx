@@ -87,6 +87,7 @@ export default function ContestRoomPage() {
   const [regTeamName, setRegTeamName] = useState('');
   const [regTeamId, setRegTeamId] = useState('');
   const [regInviteCode, setRegInviteCode] = useState('');
+  const [isOfficial, setIsOfficial] = useState(false);
 
   const [ownerMode, setOwnerMode] = useState<'ADMIN' | 'PARTICIPANT'>('ADMIN');
 
@@ -116,7 +117,6 @@ export default function ContestRoomPage() {
   const isPendingViewer = Boolean(viewerMember && viewerMember.isOfficial === false);
   const isTeamLeader = Boolean(viewerMember?.teamId && ['OWNER', 'MANAGER'].includes(String(viewerMember?.role || '')));
 
-  // Dynamic End Time logic
   const startTimeMs = contest ? new Date(contest.startTime).getTime() : 0;
   const isEndedDynamically = contest ? Date.now() > startTimeMs + (contest.durationMinutes * 60000) : false;
   const displayStatus = isEndedDynamically ? 'ENDED' : contest?.status;
@@ -155,7 +155,6 @@ export default function ContestRoomPage() {
     if (!id || !session) return toast.error("Session expired");
     if (!regHandle.trim()) return toast.error("Codeforces handle is required");
     
-    // Safety check for Team Modes
     if (regMode === 'TEAM_NEW' && !regTeamName.trim()) return toast.error("Team name required");
     if (regMode === 'TEAM_REQUEST' && !regTeamId && !regTeamName.trim()) return toast.error("Choose a group to request approval.");
     if (regMode === 'TEAM_INVITE') {
@@ -168,7 +167,8 @@ export default function ContestRoomPage() {
     setSyncing(true);
 
     let endpoint = `${API_V2_BASE_URL}/contests/${id}/register`;
-    const payload: any = { codeforcesHandle: regHandle.trim() };
+    const payload: any = { codeforcesHandle: regHandle.trim(), isOfficial };
+
     if (regMode === 'SOLO') payload.teamName = 'Individuals';
     if (regMode === 'TEAM_NEW') {
       endpoint = `${API_V2_BASE_URL}/contests/${id}/team/create`;
@@ -221,7 +221,6 @@ export default function ContestRoomPage() {
 
   async function unregisterFromContest() {
     if (!confirm("Are you sure you want to unregister?")) return;
-    
     setLoadingText('Unregistering...'); 
     setSyncing(true);
 
@@ -238,11 +237,7 @@ export default function ContestRoomPage() {
         const data = await res.json();
         toast.error(data.error || 'Failed to unregister');
       }
-    } catch (err) {
-      toast.error('Network error.');
-    } finally {
-      setSyncing(false);
-    }
+    } catch (err) { toast.error('Network error.'); } finally { setSyncing(false); }
   }
 
   async function loadContest() {
@@ -443,7 +438,6 @@ export default function ContestRoomPage() {
 
     socket.on('lobbyMessage', (msg) => { setLobbyMessages(prev => [...prev, msg]); });
     
-    // 👉 FIXED: Listens to the single universal update event to trigger a clean data refresh
     socket.on('standings:update', () => { 
         loadContest(); 
         loadSubmissions();
@@ -729,10 +723,10 @@ export default function ContestRoomPage() {
           </motion.section>
         )}
 
-{/* Only mount the recommendations when contest data is fully available */}
-{contest && (
-    <PostContestAiRecommendations contestId={id as string} contestStatus={displayStatus} />
-)}
+        {contest && (
+            <PostContestAiRecommendations contestId={id as string} contestStatus={displayStatus} />
+        )}
+
         {!isActuallyOwnerMode && !viewerMember && displayStatus !== 'ENDED' && (
           <section style={{ ...panel, marginBottom: 18, border: '1px solid #38bdf8', background: 'linear-gradient(180deg, #0f172a, rgba(56, 189, 248, 0.05))', textAlign: 'center' }}>
             <h2 style={{color: '#38bdf8', margin: '0 0 10px 0', fontSize: 28}}>Register for {contest.title}</h2>
@@ -794,6 +788,19 @@ export default function ContestRoomPage() {
                   <input placeholder="ABC-123" style={smallInput} value={regInviteCode} onChange={e => setRegInviteCode(e.target.value)} />
                 </>
               )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 15, marginBottom: 5 }}>
+                <input 
+                  type="checkbox" 
+                  id="ratedCb" 
+                  checked={isOfficial} 
+                  onChange={e => setIsOfficial(e.target.checked)} 
+                  style={{ width: 16, height: 16, cursor: 'pointer' }} 
+                />
+                <label htmlFor="ratedCb" style={{ color: '#eef2ff', cursor: 'pointer', fontSize: 14 }}>
+                  Participate as Rated (Earn Coins & Rating Leaderboard)
+                </label>
+              </div>
 
               <button onClick={registerForContest} disabled={isRegistering} style={{...primaryButton, marginTop: 15}}>{isRegistering ? 'Registering...' : regMode === 'TEAM_REQUEST' ? 'Send Join Request' : 'Complete Registration'}</button>
             </div>
@@ -915,7 +922,6 @@ export default function ContestRoomPage() {
               <section style={isActuallyOwnerMode && !isFinal ? panelWide : { ...panelWide, gridColumn: '1 / -1' }}>
   <h2>Problems</h2>
   
-  {/* Contest Statistics */}
   <div style={{ marginBottom: '20px', padding: '15px', background: '#0f172a', borderRadius: '8px', border: '1px solid #334155' }}>
     <h3 style={{ margin: '0 0 10px 0', color: '#94a3b8' }}>Contest Breakdown</h3>
     <div style={{ display: 'flex', gap: '20px' }}>
@@ -933,7 +939,6 @@ export default function ContestRoomPage() {
                       const actualTitle = p.titleSnapshot || p.problem?.title || `Problem ${label}`;
                       const visibleTitle = canSeeProblemMeta ? actualTitle : `Problem ${label}`;
                       
-                      // 👉 FIXED URL: This now points correctly to the [problemId].tsx dynamic workspace
                       const safeProblemHref = `/contests/${contest.id}/problems/${p.id}`; 
                       
                       const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
