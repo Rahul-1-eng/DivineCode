@@ -27,7 +27,7 @@ export async function recomputeContestStandings(contestId: string) {
       where: { id: contestId },
       include: {
         participants: { 
-          where: { isOfficial: true }, // Ignore pending unapproved members
+          where: { isOfficial: true },
           include: { standing: true } 
         },
         problems: true,
@@ -38,18 +38,13 @@ export async function recomputeContestStandings(contestId: string) {
     if (!contest) throw new Error('Contest not found');
 
     const freezeTime = contest.freezeTime ? new Date(contest.freezeTime).getTime() : null;
-
-    // Create a Points Lookup Map based on the problem's assigned points
     const pointsMap = new Map<string, number>();
     contest.problems.forEach(p => pointsMap.set(p.id, p.points));
 
-    // Track Team State (for shared group score)
     const teamState = new Map<string, Map<string, { wrongAttempts: number, acceptedAt?: Date, manualPoints: number | null, isFrozen: boolean }>>();
-    
-    // Track Individual State (for personal leaderboard)
     const individualState = new Map<string, Map<string, { wrongAttempts: number, acceptedAt?: Date, manualPoints: number | null }>>();
 
-  for (const sub of contest.submissions) {
+    for (const sub of contest.submissions) {
       if (!sub.teamId || !sub.contestProblemId) continue;
       if (!isCountableSubmission(contest, sub)) continue;
 
@@ -63,7 +58,6 @@ export async function recomputeContestStandings(contestId: string) {
       const tMap = teamState.get(sub.teamId)!;
       const tState = tMap.get(pId) || { wrongAttempts: 0, acceptedAt: undefined, manualPoints: null, isFrozen: false };
       
-      // Only count the first ACCEPTED submission for the team score
       if (!tState.acceptedAt || sub.manualPoints !== null) {
         if (isAccepted) { tState.acceptedAt = sub.createdAt; tState.isFrozen = isSubmissionFrozen; }
         else if (isWrongAttempt(sub) && !isSubmissionFrozen) tState.wrongAttempts += 1;
@@ -88,23 +82,18 @@ export async function recomputeContestStandings(contestId: string) {
     }
 
     const standingRows = contest.participants.map((participant) => {
-      // 1. Team Score Calculation
       const tMap = participant.teamId && teamState.has(participant.teamId) ? teamState.get(participant.teamId)! : new Map();
       const solvedEntries = [...tMap.entries()].filter(([, state]) => state.acceptedAt && !state.isFrozen);
       
       let teamPenalty = solvedEntries.reduce((sum, [, state]) => sum + acceptedMinute(contest, state.acceptedAt!) + (state.wrongAttempts * PENALTY_PER_WRONG_ATTEMPT), 0);
       const testcasePenalty = participant.standing?.testcasePenalty || 0;
       
-      // Calculate team score using exact problem points
       let teamScore = solvedEntries.reduce((sum, [id, state]) => sum + (state.manualPoints !== null ? state.manualPoints : (pointsMap.get(id) || 1000)), 0) - teamPenalty - testcasePenalty;
 
-      // 2. Individual Score Calculation
       const iMap = individualState.has(participant.id) ? individualState.get(participant.id)! : new Map();
       const iSolved = [...iMap.entries()].filter(([, state]) => state.acceptedAt);
       
       let individualPenalty = iSolved.reduce((sum, [, state]) => sum + acceptedMinute(contest, state.acceptedAt!) + (state.wrongAttempts * PENALTY_PER_WRONG_ATTEMPT), 0);
-      
-      // Calculate individual score using exact problem points
       const iScore = iSolved.reduce((sum, [id, state]) => sum + (state.manualPoints !== null ? state.manualPoints : (pointsMap.get(id) || 1000)), 0) - individualPenalty - testcasePenalty;
 
       return {
@@ -123,17 +112,27 @@ export async function recomputeContestStandings(contestId: string) {
       };
     });
 
-    // Sort heavily by Score -> Penalty -> ID
-    standingRows.sort((a, b) => b.score - a.score || a.penalty - b.penalty || a.participantId.localeCompare(b.participantId));
-
-    let currentRank = 0;
-    let lastScoreKey = '';
-    standingRows.forEach((row, index) => {
-      const scoreKey = `${row.score}:${row.penalty}`;
-      if (scoreKey !== lastScoreKey) currentRank = index + 1;
-      row.rank = currentRank;
-      lastScoreKey = scoreKey;
+    // Precise sorting: Team Score > Team Penalty > Individual Score > Individual Penalty
+    standingRows.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.penalty !== b.penalty) return a.penalty - b.penalty;
+      if (b.individualScore !== a.individualScore) return b.individualScore - a.individualScore;
+      if (a.individualPenalty !== b.individualPenalty) return a.individualPenalty - b.individualPenalty;
+      return a.participantId.localeCompare(b.participantId);
     });
+
+    let currentRank = 1;
+    for (let i = 0; i < standingRows.length; i++) {
+      if (i > 0) {
+        const prev = standingRows[i - 1];
+        const curr = standingRows[i];
+        // If everything is perfectly tied, they share the exact same rank
+        if (curr.score !== prev.score || curr.penalty !== prev.penalty || curr.individualScore !== prev.individualScore || curr.individualPenalty !== prev.individualPenalty) {
+          currentRank = i + 1;
+        }
+      }
+      standingRows[i].rank = currentRank;
+    }
 
     for (const row of standingRows) {
       await tx.contestStanding.upsert({

@@ -68,13 +68,22 @@ async function scrapeCodeforces(url: string): Promise<ScrapedProblem> {
   }
 }
 
+// Update the scrapeGenericPlatform function inside problemScraper.ts
+
 async function scrapeGenericPlatform(url: string): Promise<ScrapedProblem> {
   try {
     const { data } = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } });
     const $ = cheerio.load(data);
     const title = $('h1').first().text().trim() || $('title').text().trim() || 'External Problem';
-    $('script, style, nav, footer, header, aside, .sidebar').remove();
-    const descriptionHtml = $('article').html() || $('main').html() || $('body').html() || '';
+    
+    // Less aggressive removal so we don't accidentally delete the problem body
+    $('script, style, nav, footer, header').remove();
+    
+    // Try to find the most common problem body containers
+    let descriptionHtml = $('.problem-description').html() || 
+                          $('.question-content').html() || 
+                          $('article').html() || 
+                          $('main').html() || '';
 
     const testcases: { input: string; expectedOutput: string }[] = [];
     const preTags = $('pre');
@@ -86,7 +95,14 @@ async function scrapeGenericPlatform(url: string): Promise<ScrapedProblem> {
       }
     }
 
-    return { title, descriptionHtml: `<h3>${title}</h3><div style="margin-top: 15px;">${descriptionHtml}</div>`, testcases, platform: 'OTHER', originalUrl: url, requiresRedirect: false };
+    return { 
+      title, 
+      descriptionHtml: descriptionHtml ? `<h3>${title}</h3><div style="margin-top: 15px;">${descriptionHtml}</div>` : 'Description formatting failed, please use the external link.', 
+      testcases, 
+      platform: 'OTHER', 
+      originalUrl: url, 
+      requiresRedirect: false 
+    };
   } catch (error) {
     return {
       title: 'External Problem',

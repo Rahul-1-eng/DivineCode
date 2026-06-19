@@ -192,7 +192,6 @@ export function mountV2Routes(app: Express, io: Server) {
     });
   });
 
-// 👉 FIXED: Upgraded AI endpoint to handle Multimodal Image (Base64) Payload
   router.post('/ai/chat', asyncRoute(async (req, res) => {
     const { message, history, image } = req.body;
     const apiKey = process.env.AI_API_KEY;
@@ -229,6 +228,27 @@ export function mountV2Routes(app: Express, io: Server) {
     } catch (e: any) {
       console.error('[AI Chat] Error:', e.response?.data || e.message);
       res.json({ reply: "My neural pathways are a bit tangled right now. Please try asking again!" });
+    }
+  }));
+
+  // 👉 FIXED: Added the missing general purpose AI Generation route used by the Playground (judge.tsx)
+  router.post('/ai/generate-testcases', asyncRoute(async (req, res) => {
+    const { problemDescription } = req.body;
+    
+    if (!problemDescription) {
+      return res.status(400).json({ error: 'Problem description or image payload required' });
+    }
+
+    try {
+      const testcases = await generateToughTestCases(problemDescription);
+      
+      if (!testcases || testcases.length === 0) {
+        return res.status(500).json({ error: 'Failed to generate testcases from the provided input' });
+      }
+      
+      res.json({ success: true, testcases });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'AI Generation Failed' });
     }
   }));
 
@@ -284,7 +304,6 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
-  // 👉 FIXED: Ensures viewer.userId exists before trying to query the DB, resolving any phantom matching issues.
   router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req);
     if (!viewer.userId) throw new Error("Unauthorized to unregister. User ID missing.");
@@ -608,19 +627,37 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(result);
   }));
 
+  // 👉 FIXED: Fully upgraded to support server-side pagination & searching
   router.get('/ai-dataset', asyncRoute(async (req, res) => {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const search = String(req.query.search || '').trim();
+
+    const whereClause: any = search ? {
+      OR: [
+        { title: { contains: search, mode: 'insensitive' } },
+        { tags: { has: search } }
+      ]
+    } : {};
+
     const problems = await prisma.aiProblemDataset.findMany({
+      where: whereClause,
       orderBy: { createdAt: 'desc' },
-      take: 50 
+      skip: (page - 1) * limit,
+      take: limit
     });
     
-    const count = await prisma.aiProblemDataset.count();
+    const totalFilteredCount = await prisma.aiProblemDataset.count({ where: whereClause });
+    const totalCount = await prisma.aiProblemDataset.count(); 
     
     res.json({ 
       success: true, 
-      count: count, 
-      message: `${count} Curated DSA and System Design questions loaded.`, 
-      problems 
+      count: totalFilteredCount,
+      totalCount: totalCount, 
+      message: `${totalFilteredCount} matching DSA and System Design questions loaded.`, 
+      problems,
+      totalPages: Math.ceil(totalFilteredCount / limit),
+      currentPage: page
     });
   }));
 

@@ -19,10 +19,9 @@ export async function processContestRewards(contestId: string) {
     if (!contest || !contest.isRated) return null;
 
     const participants = contest.participants.filter(p => p.standing && p.user);
-    if (participants.length == 0) return null; // Need at least 2 people for a rated event
+    if (participants.length == 0) return null; 
 
-    const updates = [];
-
+    // Execute updates sequentially inside the transaction to avoid lock/batching failures
     for (const pA of participants) {
       if (!pA.user || !pA.standing) continue;
 
@@ -30,38 +29,29 @@ export async function processContestRewards(contestId: string) {
       let expectedWins = 0;
       let actualWins = 0;
 
-      // 1. Calculate Multiplayer Elo Delta
       for (const pB of participants) {
-        // Don't compare against yourself, AND don't steal/lose Elo against your own teammates!
         if (pA.id === pB.id || !pB.user || !pB.standing) continue;
-        if (pA.teamId && pA.teamId === pB.teamId) continue;
+        if (pA.teamId && pA.teamId === pB.teamId) continue; // Don't steal Elo from teammates
 
         const ratingB = pB.ratingBefore || pB.user.rating || 1200;
-        
-        // Expected score against pB
         expectedWins += 1 / (1 + Math.pow(10, (ratingB - oldRating) / 400));
 
-        // Actual score against pB (1 for win, 0.5 for tie, 0 for loss)
         if (pA.standing.rank! < pB.standing.rank!) actualWins += 1;
         else if (pA.standing.rank === pB.standing.rank) actualWins += 0.5;
       }
 
       const rawDelta = Math.round(K_FACTOR * (actualWins - expectedWins));
-      // Gamification: Cap maximum rating loss at -100 to prevent user churn, uncapped upside.
       const ratingDelta = Math.max(-100, rawDelta);
       const newRating = Math.max(100, oldRating + ratingDelta); 
 
-      // 2. Calculate Coins (Personal + Group Contribution + Placement Bonuses)
       const groupSolves = pA.standing.solved || 0;
       
       const personalSolves = new Set(
         contest.submissions
-          // Cast to String to handle both Prisma Enum ('ACCEPTED') and External Syncs ('OK')
           .filter(s => s.participantId === pA.id && s.status === SubmissionStatus.FINISHED && (String(s.verdict).includes('ACCEPT') || String(s.verdict) === 'OK'))
           .map(s => s.contestProblemId)
       ).size;
 
-      // Placement Bonuses
       let rankBonus = 0;
       if (pA.standing.rank === 1) rankBonus = 150;
       else if (pA.standing.rank === 2) rankBonus = 100;
@@ -71,35 +61,33 @@ export async function processContestRewards(contestId: string) {
                                       (personalSolves * COINS_PER_PERSONAL_SOLVE) + 
                                       (groupSolves * COINS_PER_GROUP_SOLVE));
 
-      // 3. Queue Database Updates Atomically
-      updates.push(
-        tx.user.update({
-          where: { id: pA.userId! },
-          data: {
-            rating: newRating,
-            coins: { increment: earnedCoins }
-          }
-        }),
-        tx.contestParticipant.update({
-          where: { id: pA.id },
-          data: { ratingBefore: oldRating, ratingAfter: newRating }
-        }),
-        tx.ratingHistory.create({
-          data: {
-            userId: pA.userId!,
-            eventType: 'CONTEST',
-            oldRating,
-            newRating,
-            delta: ratingDelta,
-            reason: `Finished Rank #${pA.standing.rank} in ${contest.title}`,
-            contestId: contest.id
-          }
-        })
-      );
+      // Sequential awaits inside the transaction loop
+      await tx.user.update({
+        where: { id: pA.userId! },
+        data: {
+          rating: newRating,
+          coins: { increment: earnedCoins }
+        }
+      });
+
+      await tx.contestParticipant.update({
+        where: { id: pA.id },
+        data: { ratingBefore: oldRating, ratingAfter: newRating }
+      });
+
+      await tx.ratingHistory.create({
+        data: {
+          userId: pA.userId!,
+          eventType: 'CONTEST',
+          oldRating,
+          newRating,
+          delta: ratingDelta,
+          reason: `Finished Rank #${pA.standing.rank} in ${contest.title}`,
+          contestId: contest.id
+        }
+      });
     }
 
-    // Execute all updates simultaneously
-    await Promise.all(updates);
     return { success: true, processedCount: participants.length };
   });
 }

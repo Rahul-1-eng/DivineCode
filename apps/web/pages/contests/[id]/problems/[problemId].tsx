@@ -4,7 +4,7 @@ import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
 import { io, Socket } from 'socket.io-client';
 import toast, { Toaster } from 'react-hot-toast';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 export async function getServerSideProps() { return { props: {} }; }
 
@@ -543,7 +543,6 @@ export default function ContestProblemWorkspace() {
   const externalUrl = redirectInfo?.redirectUrl || redirectInfo?.externalUrl || problem?.externalUrl || '';
   const problemDescriptionHtml = problem?.customDescription || problem?.problem?.description || (problem?.description ? problem.description : 'No description available for this problem.');
 
-  // Safely extract the final MCQ prompt and options so it renders even if it is not fully joined
   const activeMcqPrompt = mcqData?.prompt || problem?.customDescription || problem?.titleSnapshot || 'No description provided';
   const activeMcqOptions = Array.isArray(mcqData?.options) ? mcqData.options : [];
 
@@ -656,7 +655,7 @@ export default function ContestProblemWorkspace() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 40 }}>
               {activeMcqOptions.length > 0 ? (
                 activeMcqOptions.map((opt: string, idx: number) => (
-                  <button key={idx} onClick={() => setSelectedOptions(mcqData?.isMultiple ? (prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]) : [idx])} style={{ padding: '20px', borderRadius: 12, background: selectedOptions.includes(idx) ? 'rgba(34,211,238,.12)' : 'rgba(15,23,42,.6)', border: `2px solid ${selectedOptions.includes(idx) ? '#22d3ee' : '#334155'}`, color: '#eef2ff', cursor: 'pointer', textAlign: 'left' }}>
+                  <button key={idx} onClick={() => setSelectedOptions(mcqData?.isMultiple ? (prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]) : [idx])} style={{ padding: '20px', borderRadius: 12, background: selectedOptions.includes(idx) ? 'rgba(34,211,238,.12)' : 'rgba(15,23,42,.6)', border: selectedOptions.includes(idx) ? '2px solid #22d3ee' : '2px solid #334155', color: '#eef2ff', cursor: 'pointer', textAlign: 'left' }}>
                     {String.fromCharCode(65 + idx)}. {opt}
                   </button>
                 ))
@@ -695,7 +694,7 @@ export default function ContestProblemWorkspace() {
   <div style={{ padding: 20, background: '#1e1b4b', borderRadius: 12, border: '1px solid #6366f1' }}>
     <p style={{ color: '#cbd5e1' }}>Problem description unavailable.</p>
     {externalUrl && (
-       <a href={externalUrl} target="_blank" style={{ color: '#38bdf8', fontWeight: 'bold' }}>View External Problem Link ↗</a>
+       <a href={externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontWeight: 'bold' }}>View External Problem Link ↗</a>
     )}
   </div>
 )}

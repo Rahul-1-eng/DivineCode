@@ -3,21 +3,18 @@ import express from 'express';
 import http from 'http';
 import path from 'path';
 import { Server } from 'socket.io';
+import jwt from 'jsonwebtoken';
 import { connectDB } from './db';
 import { mountV2Routes } from './routes/v2';
 import { startQueueWorkers } from './workers/index';
 import { setupDuelSockets } from './modules/duel/duelSocketService';
 import { setupContestSockets } from './modules/contests/contestSocketService';
-import { 
-    loadContestDocuments, 
-    loadSubmissionDocuments, 
-    upsertGoogleUser 
-} from './storage';
+// Mongo Cleanup: Stripped loadContestDocuments and loadSubmissionDocuments
+import { upsertGoogleUser } from './storage';
 
 const app = express();
 
 // 🛡️ THE ABSOLUTE CORS INTERCEPTOR 🛡️
-// This guarantees Vercel can always talk to Render, even during 502 crashes.
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
@@ -27,10 +24,10 @@ app.use((req, res, next) => {
   }
   
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  // Explicitly allow the Authorization header
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-user-email, x-user-name, x-worker-secret, x-user-id');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   
-  // Instantly approve all Preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -38,6 +35,23 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: '10mb' }));
+
+// 🛡️ SECURITY FIX: JWT VERIFICATION MIDDLEWARE 🛡️
+// Intercepts the Bearer token minted by Next.js and securely decodes it
+app.use((req: any, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    try {
+      // Must match the NEXTAUTH_SECRET on the frontend
+      const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET || '');
+      req.user = decoded; // Attach verified payload { id, email, name }
+    } catch (err) {
+      console.warn('Invalid or expired API token rejected.');
+    }
+  }
+  next();
+});
 
 const server = http.createServer(app);
 
@@ -50,21 +64,7 @@ const io = new Server(server, {
   } 
 });
 
-// --- STATE CONTAINERS ---
-const contests = new Map<string, any>();
-const submissions: any[] = [];
-
-async function restoreFromMongo() { 
-  try { 
-    const restoredContests = await loadContestDocuments(); 
-    const restoredSubmissions = await loadSubmissionDocuments(); 
-    contests.clear(); 
-    submissions.splice(0, submissions.length, ...restoredSubmissions); 
-    console.log(`Mongo restore complete: ${restoredContests.length} contest(s), ${submissions.length} submission(s).`); 
-  } catch (error) { 
-    console.error('Mongo restore failed:', error instanceof Error ? error.message : error); 
-  } 
-}
+// Mongo Cleanup: Removed the Maps, arrays, and restoreFromMongo() function entirely.
 
 // --- MODULE INITIALIZATION ---
 startQueueWorkers(io);
@@ -88,8 +88,7 @@ app.post('/api/auth/google', async (req, res) => {
 
 // --- STARTUP ---
 void connectDB().then(() => {
-    console.log('Database Connected');
-    return restoreFromMongo(); 
+    console.log('Database Connected. Booting engine...');
 }).catch(console.error);
 
 const PORT = Number(process.env.PORT) || 4000;

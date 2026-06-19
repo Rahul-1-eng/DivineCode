@@ -142,3 +142,38 @@ export async function debugCodeWithAI(userCode: string, problemDescription: stri
     return { hint: "Could not parse AI response", input: "", expectedOutput: "" };
   }
 }
+// Add this at the bottom of aiService.ts
+
+export async function askAiChatbot(query: string) {
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) return "API Key missing. Please configure your environment variables.";
+  
+  const lowerQuery = query.toLowerCase();
+
+  // 1. Instant Cache for FAQs
+  if (lowerQuery.includes("how to submit") || lowerQuery.includes("submit code")) {
+    return "To submit code, write your solution in the editor on the right, select your language, and click the green 'Submit 🚀' button. We'll run it against the hidden system test cases!";
+  }
+  if (lowerQuery.includes("cph") || lowerQuery.includes("competitive programming helper")) {
+    return "CPH (Competitive Programming Helper) is a browser extension that allows you to send test cases directly to VS Code. Make sure the extension is installed and running on port 10043.";
+  }
+  if (lowerQuery.includes("duel") || lowerQuery.includes("matchmaking")) {
+    return "In Duels, you can play 1v1 against other coders. You get 2 chances per question. A correct answer gives +100 points, and a wrong answer deducts 20 points!";
+  }
+  if (lowerQuery.includes("rating") || lowerQuery.includes("score")) {
+    return "Your rating and group scores are updated automatically at the end of the contest. Group scores rely on the first person to solve a problem in your team!";
+  }
+
+  // 2. Fallback to Gemini 
+  try {
+    const prompt = `You are a helpful coding assistant for the DivineCode platform. Answer this user query clearly and concisely: ${query}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const { data } = await axios.post(url, { 
+      contents: [{ parts: [{ text: prompt }] }],
+    });
+    return data.candidates[0].content.parts[0].text;
+  } catch (e: any) {
+    console.error("Chatbot API Error:", e.message);
+    return "My neural pathways are a bit tangled right now, please try asking again in a few moments.";
+  }
+}

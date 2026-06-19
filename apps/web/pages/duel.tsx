@@ -28,15 +28,18 @@ export default function DuelPage() {
   const [customRoomCode, setCustomRoomCode] = useState<string>('');
   const [joinInputCode, setJoinInputCode] = useState<string>('');
 
-  // 👉 NEW: States for Custom Question Selection
+  // States for Custom Question Selection
   const [availableQuestions, setAvailableQuestions] = useState<any[]>([]);
   const [useCustomQuestions, setUseCustomQuestions] = useState(false);
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>(Array(7).fill(''));
+  
+  // States for Attempt Tracking & UI Locking
+  const [myAttempts, setMyAttempts] = useState(0);
+  const [lockedOptions, setLockedOptions] = useState<number[]>([]);
 
   useEffect(() => {
     if (router.query.mode === 'custom') setDuelMode('custom_menu');
     
-    // Fetch available questions from the database for custom selection
     fetch(`${API_BASE_URL}/api/v2/interview/questions`)
       .then(res => res.json())
       .then(data => { if (Array.isArray(data)) setAvailableQuestions(data); })
@@ -75,19 +78,38 @@ export default function DuelPage() {
     socket.on('duel:state', (state) => { 
       setRoomId(state.roomId); 
       setPlayers(state.players); 
-      setQuestion(state.question); 
       setFinished(state.finished); 
-      setTime(20); 
+      
+      setQuestion((prevQ: any) => {
+        // Only reset the timer and options if the question actually changed!
+        if (prevQ?.id !== state.question?.id) {
+          setTime(20); 
+          setMyAttempts(0);
+          setLockedOptions([]);
+        }
+        return state.question;
+      });
+
       if (!state.finished && state.question) setStatus('Answer before the timer burns out.'); 
       if (state.finished) setStatus('Duel finished.'); 
     });
     
-    socket.on('duel:feedback', (data) => { 
-      setFeedback(`${data.playerName} answered ${data.correct ? 'correctly ✅' : 'wrong ❌'} · ${data.concept}`); 
+    socket.on('duel:feedback', (data) => {
+      // Track local attempts to lock buttons if we got it wrong
+      if (data.playerId === socketRef.current?.id && !data.correct) {
+        setMyAttempts(2 - (data.attemptsLeft || 0));
+      }
+      setFeedback(`${data.playerName} answered ${data.correct ? 'correctly ✅' : 'wrong ❌'} (${data.attemptsLeft || 0} chances left)`); 
     });
     
     return () => { socket.disconnect(); };
   }, []);
+
+  function answer(index: number) { 
+    if (!socketRef.current || !roomId || !question || myAttempts >= 2 || lockedOptions.includes(index)) return; 
+    setLockedOptions(prev => [...prev, index]); // Lock this specific button so they can't spam it
+    socketRef.current.emit('duel:answer', { roomId, questionId: question.id, answerIndex: index }); 
+  }
 
   useEffect(() => { 
     if (!question || finished) return; 
@@ -107,7 +129,6 @@ export default function DuelPage() {
   function createCustom() {
     if (!socketRef.current || joined) return;
     
-    // 👉 Validate that all 7 slots are filled if custom questions are toggled
     const filteredIds = selectedQuestionIds.filter(id => id !== '');
     if (useCustomQuestions && filteredIds.length < 7) {
       return alert("Please select exactly 7 questions for your custom loadout.");
@@ -115,7 +136,6 @@ export default function DuelPage() {
 
     const name = session?.user?.name || session?.user?.email || `Player-${Math.floor(Math.random() * 1000)}`; 
     
-    // 👉 Pass the question IDs to the backend
     socketRef.current.emit('duel:createCustom', { 
       name, 
       questionIds: useCustomQuestions ? filteredIds : undefined 
@@ -128,11 +148,6 @@ export default function DuelPage() {
     const name = session?.user?.name || session?.user?.email || `Player-${Math.floor(Math.random() * 1000)}`; 
     socketRef.current.emit('duel:joinCustom', { name, roomCode: joinInputCode });
     setJoined(true);
-  }
-
-  function answer(index: number) { 
-    if (!socketRef.current || !roomId || !question) return; 
-    socketRef.current.emit('duel:answer', { roomId, questionId: question.id, answerIndex: index }); 
   }
 
   const leader = [...players].sort((a, b) => b.score - a.score)[0];
@@ -203,8 +218,6 @@ export default function DuelPage() {
 
           {!joined && duelMode === 'custom_menu' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', maxWidth: 600, margin: '0 auto' }}>
-              
-              {/* 👉 NEW: Custom Question Builder UI */}
               <div style={configCard}>
                 <h3 style={{ margin: '0 0 10px', color: '#67e8f9' }}>Room Settings</h3>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 'bold', marginBottom: 16 }}>
@@ -293,12 +306,32 @@ export default function DuelPage() {
             <h1 style={{ fontSize: 'clamp(20px, 4vw, 28px)', margin: '24px 0' }}>{question.question}</h1>
             
             <div style={optionGrid}>
-              {question.options.map((opt: string, index: number) => (
-                <button key={opt} onClick={() => answer(index)} style={optionBtn}>
-                  <span style={letter}>{String.fromCharCode(65 + index)}</span>
-                  <span style={{ flex: 1, wordBreak: 'break-word' }}>{opt}</span>
-                </button>
-              ))}
+              {question.options.map((opt: string, index: number) => {
+                const isLocked = lockedOptions.includes(index);
+                const isOutOfAttempts = myAttempts >= 2;
+                const isDisabled = isLocked || isOutOfAttempts;
+
+                return (
+                  <button 
+                    key={opt} 
+                    onClick={() => answer(index)} 
+                    disabled={isDisabled}
+                    style={{
+                      ...optionBtn,
+                      opacity: isDisabled ? 0.6 : 1,
+                      cursor: isDisabled ? 'not-allowed' : 'pointer',
+                      background: isLocked ? 'rgba(239, 68, 68, 0.15)' : optionBtn.background,
+                      // Fully fix TS error by directly overriding the entire 'border' property instead of 'borderColor'
+                      border: isLocked ? '1px solid #ef4444' : optionBtn.border
+                    }}
+                  >
+                    <span style={{...letter, color: isLocked ? '#ef4444' : '#67e8f9', background: isLocked ? 'rgba(239, 68, 68, 0.15)' : letter.background}}>
+                      {String.fromCharCode(65 + index)}
+                    </span>
+                    <span style={{ flex: 1, wordBreak: 'break-word', color: isLocked ? '#fca5a5' : '#eef2ff' }}>{opt}</span>
+                  </button>
+                );
+              })}
             </div>
           </section>
         )}
@@ -324,10 +357,14 @@ const vsBadge: CSSProperties = { width: 64, height: 64, borderRadius: 999, displ
 const controlsContainer: CSSProperties = { marginTop: 20 };
 const configCard: CSSProperties = { padding: 20, borderRadius: 20, background: 'rgba(15,23,42,.6)', border: '1px solid rgba(148,163,184,.2)' };
 const selectInput: CSSProperties = { flex: 1, padding: 12, borderRadius: 12, border: '1px solid rgba(148,163,184,.2)', background: 'rgba(2,6,23,.8)', color: '#fff', fontSize: 14, outline: 'none' };
-const joinBtn: CSSProperties = { width: '100%', padding: 16, borderRadius: 18, border: 0, background: 'linear-gradient(135deg,#f97316,#22d3ee)', color: '#020617', fontWeight: 950, cursor: 'pointer', fontSize: 18, transition: 'transform 0.1s' };
+
+// Fixed type mapping error: Changed `border: 0` to `border: 'none'`
+const joinBtn: CSSProperties = { width: '100%', padding: 16, borderRadius: 18, border: 'none', background: 'linear-gradient(135deg,#f97316,#22d3ee)', color: '#020617', fontWeight: 950, cursor: 'pointer', fontSize: 18, transition: 'transform 0.1s' };
 const ghostBtn: CSSProperties = { border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', fontWeight: 900, borderRadius: 18, cursor: 'pointer', padding: 16, transition: 'background 0.2s' };
 const codeInput: CSSProperties = { flex: 1, padding: '16px 20px', borderRadius: 18, border: '1px solid rgba(148,163,184,.3)', background: 'rgba(2,6,23,.7)', color: '#fff', fontSize: 18, letterSpacing: 2, fontWeight: 'bold', outline: 'none' };
-const backBtn: CSSProperties = { background: 'transparent', border: 0, color: '#94a3b8', fontWeight: 'bold', cursor: 'pointer', marginTop: 10, padding: 10 };
+
+// Fixed type mapping error: Changed `border: 0` to `border: 'none'`
+const backBtn: CSSProperties = { background: 'transparent', border: 'none', color: '#94a3b8', fontWeight: 'bold', cursor: 'pointer', marginTop: 10, padding: 10 };
 const feedbackBox: CSSProperties = { marginTop: 16, padding: 15, borderRadius: 18, background: 'rgba(34,211,238,.1)', border: '1px solid rgba(34,211,238,.24)', textAlign: 'center', fontWeight: 'bold' };
 const questionCard: CSSProperties = { marginTop: 24, padding: 'clamp(16px, 4vw, 26px)', borderRadius: 28, background: 'rgba(2,6,23,.62)', border: '1px solid rgba(148,163,184,.2)', boxSizing: 'border-box' };
 const progress: CSSProperties = { color: '#67e8f9', fontWeight: 900, marginBottom: 12, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 14 };
@@ -335,6 +372,6 @@ const timer: CSSProperties = { color: '#fbbf24' };
 const bar: CSSProperties = { height: 8, borderRadius: 999, background: 'rgba(148,163,184,.18)', overflow: 'hidden' };
 const barFill: CSSProperties = { display: 'block', height: '100%', background: 'linear-gradient(135deg,#f97316,#22d3ee)' };
 const optionGrid: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 14 };
-const optionBtn: CSSProperties = { flex: '1 1 200px', padding: 16, borderRadius: 18, border: '1px solid rgba(148,163,184,.24)', background: 'rgba(15,23,42,.88)', color: '#eef2ff', textAlign: 'left', fontWeight: 800, cursor: 'pointer', display: 'flex', gap: 12, alignItems: 'center', boxSizing: 'border-box' };
+const optionBtn: CSSProperties = { flex: '1 1 200px', padding: 16, borderRadius: 18, border: '1px solid rgba(148,163,184,.24)', background: 'rgba(15,23,42,.88)', color: '#eef2ff', textAlign: 'left', fontWeight: 800, cursor: 'pointer', display: 'flex', gap: 12, alignItems: 'center', boxSizing: 'border-box', transition: 'all 0.2s ease-in-out' };
 const letter: CSSProperties = { flex: '0 0 32px', height: 32, borderRadius: 10, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(34,211,238,.16)', color: '#67e8f9' };
 const primaryLink: CSSProperties = { display: 'inline-block', padding: '11px 20px', borderRadius: 999, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', textDecoration: 'none', fontWeight: 900, border: 'none', cursor: 'pointer' };

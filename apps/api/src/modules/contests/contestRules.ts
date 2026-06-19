@@ -1,3 +1,4 @@
+
 export type ViewerContext = {
   userId?: string;
   email?: string;
@@ -9,13 +10,23 @@ function normalize(value: unknown) {
 }
 
 export function viewerFromRequest(req: any): ViewerContext {
+  // 🛡️ SECURITY FIX: Strip plaintext spoofable headers. 
+  // Trust only the JWT payload validated by the Express auth middleware.
+  if (req.user) {
+    return {
+      userId: String(req.user.id || '').trim() || undefined,
+      email: String(req.user.email || '').trim() || undefined,
+      name: String(req.user.name || '').trim() || undefined
+    };
+  }
+
+  // If no valid JWT is present, treat as unauthenticated guest.
   return {
-    userId: String(req.headers?.['x-user-id'] || req.query?.viewerUserId || req.body?.viewerUserId || '').trim() || undefined,
-    email: String(req.headers?.['x-user-email'] || req.query?.viewerEmail || req.body?.viewerEmail || '').trim() || undefined,
-    name: String(req.headers?.['x-user-name'] || req.query?.viewerName || req.body?.viewerName || '').trim() || undefined
+    userId: undefined,
+    email: undefined,
+    name: undefined
   };
 }
-
 export function contestEndTime(contest: any) {
   if (!contest || !contest.startTime) return new Date();
   return new Date(new Date(contest.startTime).getTime() + (contest.durationMinutes || 0) * 60000);
