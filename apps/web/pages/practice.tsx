@@ -40,18 +40,24 @@ export default function PracticePage() {
     { role: 'ai', text: 'Hello! I have access to over 5,000+ DSA questions. How can I help you practice today? Upload an image if you have a specific unexpected question!' }
   ]);
 
-  // Initial Data Fetch
+  // FULLY DYNAMIC API FETCH
   useEffect(() => {
-    Promise.all([
-      fetch(`${API_BASE_URL}/api/v2/ai-dataset`, { headers: { 'x-user-email': session?.user?.email || '' } }).then(r => r.json()),
-      fetch(`${API_BASE_URL}/api/v2/mcqs`, { headers: { 'x-user-email': session?.user?.email || '' } }).then(r => r.ok ? r.json() : [])
+    const headers = { 'x-user-email': session?.user?.email || '' };
+    
+    Promise.allSettled([
+      fetch(`${API_BASE_URL}/api/v2/ai-dataset`, { headers }).then(r => r.json()),
+      fetch(`${API_BASE_URL}/api/v2/mcqs`, { headers }).then(r => r.json())
     ])
-    .then(([dsaData, mcqResponse]) => { 
-      setProblems(Array.isArray(dsaData.problems) ? dsaData.problems : []); 
-      setMcqData(Array.isArray(mcqResponse) ? mcqResponse : []);
+    .then(([dsaRes, mcqRes]) => { 
+      if (dsaRes.status === 'fulfilled') {
+        setProblems(Array.isArray(dsaRes.value.problems) ? dsaRes.value.problems : []); 
+      }
+      if (mcqRes.status === 'fulfilled') {
+        setMcqData(Array.isArray(mcqRes.value) ? mcqRes.value : []);
+      }
       setLoading(false); 
     })
-    .catch(() => { setProblems([]); setLoading(false); });
+    .catch(() => { setLoading(false); });
   }, [session]); 
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages, isAiTyping]);
@@ -71,17 +77,15 @@ export default function PracticePage() {
     return `${m}:${s}`;
   };
 
-  // Daily Logical Games Logic
+  // Dynamically uses backend dataset
   const dailyLogicalGames = useMemo(() => {
-    // If the API hasn't loaded the MCQs yet, fallback safely. 
     const logicalPool = mcqData.filter(q => q.type === 'logical');
     if (logicalPool.length === 0) return [];
     
-    // Seed based on the current day of the year so it changes every 24 hours
     const dayOfYear = Math.floor(Date.now() / 86400000);
     const startIndex = dayOfYear % Math.max(1, logicalPool.length - 2);
     
-    return logicalPool.slice(startIndex, startIndex + 3); // Pick 3 per day
+    return logicalPool.slice(startIndex, startIndex + 3);
   }, [mcqData]);
 
   const submitLogicalGames = () => {
@@ -177,23 +181,15 @@ export default function PracticePage() {
           </div>
         </motion.div>
 
-        {/* Tab Selector */}
         <div style={{ display: 'flex', gap: 15, marginBottom: 25, borderBottom: '1px solid #1e293b', paddingBottom: 15 }}>
-          <button 
-            onClick={() => setActiveTab('coding')} 
-            style={activeTab === 'coding' ? activeTabStyle : inactiveTabStyle}
-          >
+          <button onClick={() => setActiveTab('coding')} style={activeTab === 'coding' ? activeTabStyle : inactiveTabStyle}>
             Terminal & Coding Problems
           </button>
-          <button 
-            onClick={() => setActiveTab('logical')} 
-            style={activeTab === 'logical' ? activeTabStyle : inactiveTabStyle}
-          >
+          <button onClick={() => setActiveTab('logical')} style={activeTab === 'logical' ? activeTabStyle : inactiveTabStyle}>
             Logical & Reasoning Games
           </button>
         </div>
 
-        {/* --- LOGICAL GAMES VIEW --- */}
         {activeTab === 'logical' && (
           <div style={{ background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30, flexWrap: 'wrap', gap: 20 }}>
@@ -202,7 +198,6 @@ export default function PracticePage() {
                 <p style={{ margin: 0, color: '#94a3b8' }}>Train your deductive reasoning. Problems reset every 24 hours.</p>
               </div>
               
-              {/* Stopwatch Controls */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 15, background: '#020617', padding: '10px 20px', borderRadius: 12, border: '1px solid #334155' }}>
                 <span style={{ fontSize: 28, fontWeight: 'bold', color: '#38bdf8', fontFamily: 'monospace', width: 90 }}>
                   {formatTime(stopwatchTime)}
@@ -222,8 +217,10 @@ export default function PracticePage() {
               </div>
             </div>
 
-            {dailyLogicalGames.length === 0 ? (
-              <p style={{ color: '#64748b' }}>Loading today's puzzles...</p>
+            {loading ? (
+              <p style={{ color: '#64748b', textAlign: 'center', padding: 40 }}>Initializing puzzle engine...</p>
+            ) : dailyLogicalGames.length === 0 ? (
+              <p style={{ color: '#f87171', textAlign: 'center', padding: 40 }}>Could not fetch today's puzzles from the server.</p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
                 {dailyLogicalGames.map((q, idx) => (
@@ -280,7 +277,6 @@ export default function PracticePage() {
           </div>
         )}
 
-        {/* --- CODING PROBLEMS VIEW --- */}
         {activeTab === 'coding' && (
           <>
             <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
@@ -350,7 +346,6 @@ export default function PracticePage() {
         )}
       </section>
 
-      {/* --- AI CHATBOT SYSTEM --- */}
       <div style={floatingAiWrapper}>
         <AnimatePresence>
           {isChatOpen && (
@@ -401,6 +396,7 @@ export default function PracticePage() {
   );
 }
 
+// Styles
 const page: CSSProperties = { minHeight: '100vh', padding: '30px 20px', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: '#020617', position: 'relative' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 };
 const brand: CSSProperties = { color: '#fff', textDecoration: 'none', fontWeight: 900, fontSize: 22, display: 'flex', alignItems: 'center', gap: 12 };
@@ -409,7 +405,6 @@ const pill: CSSProperties = { color: '#dbeafe', textDecoration: 'none', padding:
 const hero: CSSProperties = { padding: 40, borderRadius: 24, background: 'radial-gradient(circle at top right, rgba(34,211,238,.1), transparent 30rem), #0f172a', border: '1px solid #1e293b', marginBottom: 30, display: 'flex' };
 const eyebrow: CSSProperties = { color: '#22d3ee', fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 0 };
 
-// Tabs Styling
 const activeTabStyle: CSSProperties = { background: 'transparent', color: '#38bdf8', border: 'none', borderBottom: '2px solid #38bdf8', paddingBottom: 10, fontSize: 18, fontWeight: 'bold', cursor: 'pointer' };
 const inactiveTabStyle: CSSProperties = { background: 'transparent', color: '#64748b', border: 'none', borderBottom: '2px solid transparent', paddingBottom: 10, fontSize: 18, fontWeight: 'bold', cursor: 'pointer' };
 

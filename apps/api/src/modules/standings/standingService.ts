@@ -126,7 +126,6 @@ export async function recomputeContestStandings(contestId: string) {
       if (i > 0) {
         const prev = standingRows[i - 1];
         const curr = standingRows[i];
-        // If everything is perfectly tied, they share the exact same rank
         if (curr.score !== prev.score || curr.penalty !== prev.penalty || curr.individualScore !== prev.individualScore || curr.individualPenalty !== prev.individualPenalty) {
           currentRank = i + 1;
         }
@@ -139,9 +138,16 @@ export async function recomputeContestStandings(contestId: string) {
         where: { participantId: row.participantId },
         create: row,
         update: { 
-          rank: row.rank, solved: row.solved, penalty: row.penalty, score: row.score, 
-          individualScore: row.individualScore, individualSolved: row.individualSolved, 
-          solvedProblemIds: row.solvedProblemIds, lastAcceptedAt: row.lastAcceptedAt 
+          rank: row.rank, 
+          solved: row.solved, 
+          penalty: row.penalty, 
+          score: row.score, 
+          individualScore: row.individualScore, 
+          individualSolved: row.individualSolved, 
+          individualPenalty: row.individualPenalty, // FIXED: Added missing update mapping
+          testcasePenalty: row.testcasePenalty,     // FIXED: Added missing update mapping
+          solvedProblemIds: row.solvedProblemIds, 
+          lastAcceptedAt: row.lastAcceptedAt 
         }
       });
     }

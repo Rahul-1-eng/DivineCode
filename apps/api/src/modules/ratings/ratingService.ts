@@ -18,14 +18,17 @@ export async function processContestRewards(contestId: string) {
 
     if (!contest) return null;
 
-    const participants = contest.participants.filter(p => p.standing && p.user);
+    // FIXED: Now we process EVERY user, even if they have no standing (0 solves)
+    const participants = contest.participants.filter(p => p.user);
     if (participants.length == 0) return null; 
 
     for (const pA of participants) {
-      if (!pA.user || !pA.standing) continue;
+      if (!pA.user) continue;
 
       // 1. Process Coins & Score for everyone (Rated & Unrated)
-      const groupSolves = pA.standing.solved || 0;
+      const groupSolves = pA.standing?.solved || 0;
+      const rank = pA.standing?.rank || participants.length; // Assign bottom rank if no standing
+
       const personalSolves = new Set(
         contest.submissions
           .filter(s => s.participantId === pA.id && s.status === SubmissionStatus.FINISHED && (String(s.verdict).includes('ACCEPT') || String(s.verdict) === 'OK'))
@@ -33,9 +36,9 @@ export async function processContestRewards(contestId: string) {
       ).size;
 
       let rankBonus = 0;
-      if (pA.standing.rank === 1) rankBonus = 150;
-      else if (pA.standing.rank === 2) rankBonus = 100;
-      else if (pA.standing.rank === 3) rankBonus = 50;
+      if (rank === 1) rankBonus = 150;
+      else if (rank === 2) rankBonus = 100;
+      else if (rank === 3) rankBonus = 50;
 
       // Calculate earned coins, allow negative penalty for 0 solves
       let earnedCoins = BASE_PARTICIPATION_COINS + rankBonus + (personalSolves * COINS_PER_PERSONAL_SOLVE) + (groupSolves * COINS_PER_GROUP_SOLVE);
@@ -53,14 +56,16 @@ export async function processContestRewards(contestId: string) {
         let actualWins = 0;
 
         for (const pB of participants) {
-          if (pA.id === pB.id || !pB.user || !pB.standing || !pB.isOfficial) continue;
+          if (pA.id === pB.id || !pB.user || !pB.isOfficial) continue;
           if (pA.teamId && pA.teamId === pB.teamId) continue; // Don't steal Elo from teammates
 
           const ratingB = pB.ratingBefore || pB.user.rating || 1200;
           expectedWins += 1 / (1 + Math.pow(10, (ratingB - oldRating) / 400));
 
-          if (pA.standing.rank! < pB.standing.rank!) actualWins += 1;
-          else if (pA.standing.rank === pB.standing.rank) actualWins += 0.5;
+          const rankB = pB.standing?.rank || participants.length; // Bottom rank fallback
+
+          if (rank < rankB) actualWins += 1;
+          else if (rank === rankB) actualWins += 0.5;
         }
 
         const rawDelta = Math.round(K_FACTOR * (actualWins - expectedWins));
@@ -74,7 +79,7 @@ export async function processContestRewards(contestId: string) {
             oldRating,
             newRating,
             delta: ratingDelta,
-            reason: `Finished Rank #${pA.standing.rank} in ${contest.title}`,
+            reason: `Finished Rank #${rank} in ${contest.title}`,
             contestId: contest.id
           }
         });

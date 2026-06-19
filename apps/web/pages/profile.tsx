@@ -1,5 +1,3 @@
-// apps/web/pages/profile.tsx
-
 import { CSSProperties, useEffect, useState } from 'react';
 import { signOut, useSession } from 'next-auth/react';
 
@@ -13,14 +11,13 @@ function viewerHeaders(session: any) {
   };
 }
 
-// Custom dependency-free SVG Line Chart for the Elo Trajectory
 const EloGraph = ({ history }: { history: any[] }) => {
   if (!history || history.length < 1) {
     return <div style={{ color: '#64748b', padding: 40, textAlign: 'center', background: 'rgba(2,6,23,.5)', borderRadius: 16, border: '1px solid rgba(148,163,184,.1)' }}>No rated history yet. Compete to get your initial rating!</div>;
   }
 
   const points = history.map(h => h.newRating);
-  if (points.length === 1) points.unshift(1200); // Pad initial baseline if only one contest played
+  if (points.length === 1) points.unshift(1200); 
 
   const min = Math.min(...points) - 50;
   const max = Math.max(...points) + 50;
@@ -61,6 +58,11 @@ export default function ProfilePage() {
   const [savingUser, setSavingUser] = useState(false);
   const [savingHandles, setSavingHandles] = useState(false);
 
+  // Password State
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [pwMessage, setPwMessage] = useState({ text: '', type: '' });
+
   useEffect(() => { 
     if (status !== 'authenticated' || !session?.user?.email) return;
 
@@ -91,6 +93,30 @@ export default function ProfilePage() {
     if (res.ok) alert("Username updated successfully!");
     else alert(data.error || "Failed to update username");
   }
+
+  const handlePasswordUpdate = async (e: any) => {
+    e.preventDefault();
+    setPwMessage({ text: 'Updating...', type: 'info' });
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v2/profile/update-password`, {
+        method: 'POST',
+        headers: viewerHeaders(session),
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+      const data = await res.json();
+      
+      if (!res.ok) {
+        setPwMessage({ text: data.error || 'Failed to update', type: 'error' });
+      } else {
+        setPwMessage({ text: 'Password successfully updated!', type: 'success' });
+        setCurrentPassword('');
+        setNewPassword('');
+      }
+    } catch (err) {
+      setPwMessage({ text: 'Network error', type: 'error' });
+    }
+  };
 
   async function unlinkHandle(platform: string, handle: string) {
     if (!confirm(`Are you sure you want to unlink ${handle}?`)) return;
@@ -192,7 +218,6 @@ export default function ProfilePage() {
           <EloGraph history={userData?.ratingHistory || []} />
         </section>
 
-        {/* Identity & External Connections */}
         <div style={grid}>
           <section style={card}>
             <h2 style={{ margin: '0 0 10px 0', fontSize: 20 }}>DivineCode Identity</h2>
@@ -208,6 +233,28 @@ export default function ProfilePage() {
             <button onClick={handleClaimUsername} disabled={savingUser} style={{...primary, marginTop: 12, padding: '10px 20px', fontSize: 14, border: 'none', cursor: 'pointer', width: '100%'}}>
               {savingUser ? 'Updating...' : 'Update Username'}
             </button>
+          </section>
+
+          {/* NEW: SECURITY SETTINGS */}
+          <section style={card}>
+            <h2 style={{ margin: '0 0 10px 0', fontSize: 20 }}>Security Settings</h2>
+            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 16 }}>
+              Update your password here. Leave current password blank if you initially signed up using Google.
+            </p>
+            <form onSubmit={handlePasswordUpdate} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <input type="password" placeholder="Current Password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} style={input} />
+              <input type="password" placeholder="New Password" value={newPassword} onChange={e => setNewPassword(e.target.value)} style={input} required minLength={6} />
+              
+              {pwMessage.text && (
+                <div style={{ color: pwMessage.type === 'error' ? '#f87171' : pwMessage.type === 'success' ? '#4ade80' : '#38bdf8', fontSize: 13, marginTop: 5 }}>
+                  {pwMessage.text}
+                </div>
+              )}
+
+              <button type="submit" style={{...ghost, marginTop: 12, padding: '10px 20px', fontSize: 14, width: '100%', borderColor: '#6366f1', color: '#818cf8'}}>
+                Update Password
+              </button>
+            </form>
           </section>
 
           <section style={card}>
@@ -302,4 +349,3 @@ const card: CSSProperties = { flex: '1 1 300px', minWidth: 0, padding: 'clamp(16
 const input: CSSProperties = { width: '100%', padding: 14, borderRadius: 14, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', outline: 'none', boxSizing: 'border-box' };
 const th: CSSProperties = { padding: '16px 20px', color: '#94a3b8', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 };
 const td: CSSProperties = { padding: '16px 20px', fontSize: 14 };
-const badge: CSSProperties = { padding: '6px 12px', background: 'rgba(34,211,238,.1)', color: '#67e8f9', borderRadius: 12, fontSize: 14, fontWeight: 'bold' };

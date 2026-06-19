@@ -26,6 +26,8 @@ import { submissionRouter } from './submissionRoutes';
 import { profileRouter } from './profileRoutes';
 import { interviewRouter } from './interviewRoutes'; 
 import crypto from 'crypto';
+import { mcqQuestions } from '../data/mcq'; // Added import for Logical Games
+
 const uploadDir = path.join(process.cwd(), 'public', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -192,6 +194,15 @@ export function mountV2Routes(app: Express, io: Server) {
     });
   });
 
+  // 👉 NEW: Logical Games MCQ Dataset Route
+  router.get('/mcqs', (req, res) => {
+    try {
+      res.json(mcqQuestions);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to load logical games dataset." });
+    }
+  });
+
   router.post('/ai/chat', asyncRoute(async (req, res) => {
     const { message, history, image } = req.body;
     const apiKey = process.env.AI_API_KEY;
@@ -221,7 +232,7 @@ export function mountV2Routes(app: Express, io: Server) {
 
       contents.push({ role: 'user', parts: currentParts });
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
       const { data } = await axios.post(url, { contents });
       
       res.json({ reply: data.candidates[0].content.parts[0].text });
@@ -231,7 +242,6 @@ export function mountV2Routes(app: Express, io: Server) {
     }
   }));
 
-  // 👉 FIXED: Added the missing general purpose AI Generation route used by the Playground (judge.tsx)
   router.post('/ai/generate-testcases', asyncRoute(async (req, res) => {
     const { problemDescription } = req.body;
     
@@ -253,42 +263,42 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
 
   router.post('/auth/register', asyncRoute(async (req, res) => {
-  const { username, email, name, password } = req.body;
+    const { username, email, name, password } = req.body;
 
-  if (!username || !email || !password) {
-    return res.status(400).json({ error: 'Username, email and password are required fields.' });
-  }
-
-  const cleanUsername = String(username).trim();
-  const cleanEmail = String(email).trim().toLowerCase();
-
-  const existingUser = await prisma.user.findFirst({
-    where: {
-      OR: [
-        { username: cleanUsername },
-        { email: cleanEmail }
-      ]
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email and password are required fields.' });
     }
-  });
 
-  if (existingUser) {
-    return res.status(400).json({ error: 'Username or email handle already registered.' });
-  }
+    const cleanUsername = String(username).trim();
+    const cleanEmail = String(email).trim().toLowerCase();
 
-  // Generate a basic SHA256 string signature for local testing without large external node modules
-  const hash = crypto.createHash('sha256').update(password).digest('hex');
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: cleanUsername },
+          { email: cleanEmail }
+        ]
+      }
+    });
 
-  const newUser = await prisma.user.create({
-    data: {
-      username: cleanUsername,
-      email: cleanEmail,
-      name: name || cleanUsername,
-      passwordHash: hash
+    if (existingUser) {
+      return res.status(400).json({ error: 'Username or email handle already registered.' });
     }
-  });
 
-  res.status(201).json({ success: true, userId: newUser.id });
-}));
+    const hash = crypto.createHash('sha256').update(password).digest('hex');
+
+    const newUser = await prisma.user.create({
+      data: {
+        username: cleanUsername,
+        email: cleanEmail,
+        name: name || cleanUsername,
+        passwordHash: hash
+      }
+    });
+
+    res.status(201).json({ success: true, userId: newUser.id });
+  }));
+
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contest = await registerForContestV2(req.params.id, {
@@ -664,7 +674,6 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(result);
   }));
 
-  // 👉 FIXED: Fully upgraded to support server-side pagination & searching
   router.get('/ai-dataset', asyncRoute(async (req, res) => {
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));

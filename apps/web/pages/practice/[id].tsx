@@ -81,7 +81,8 @@ export default function ProblemWorkspace() {
       const res = await fetch(`${API_BASE_URL}/api/v2/ai/chat`, {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ message: prompt })
+         // FIXED: Passed history array to satisfy backend validation
+         body: JSON.stringify({ message: prompt, history: [] })
       });
       const data = await res.json();
       setAiExplanation(data.reply);
@@ -102,24 +103,48 @@ export default function ProblemWorkspace() {
   const monacoLanguage = language === 'cpp' ? 'cpp' : language === 'python' ? 'python' : 'c';
 
   const problemDescriptionHtml = problem.descriptionHtml || problem.description || problem.content || '';
+  const hasDescription = problemDescriptionHtml && problemDescriptionHtml.replace(/<[^>]*>/g, '').trim().length > 10;
 
   return (
     <main style={{ display: 'flex', height: '100vh', background: '#070a16', color: '#fff', fontFamily: 'Inter, sans-serif' }}>
       
-      <section style={{ width: '40%', padding: 30, overflowY: 'auto', borderRight: '1px solid #1e293b', background: '#0f172a' }}>
+      <section style={{ width: '40%', padding: 30, overflowY: 'auto', borderRight: '1px solid #1e293b', background: '#0f172a', paddingBottom: '60px' }}>
         <a href="/practice" style={{ color: '#67e8f9', textDecoration: 'none', fontWeight: 900, display: 'inline-block', marginBottom: 16 }}>← Back to Practice</a>
         <h1 style={{ margin: '0 0 8px 0', color: problem.error ? '#ef4444' : '#fff' }}>{problem.title}</h1>
         {!problem.error && <div style={{ color: '#67e8f9', marginBottom: 20 }}>Difficulty: {problem.difficulty || problem.rating || 'Unrated'}</div>}
         
-        {problemDescriptionHtml ? (
+        {/* FIXED: Robust External Link Fallback */}
+        {hasDescription ? (
             <div style={{ lineHeight: 1.7, color: '#cbd5e1', fontSize: '15px' }} dangerouslySetInnerHTML={{__html: problemDescriptionHtml}}></div>
         ) : (
-            problem.originalUrl && (
-               <div style={{ padding: 16, background: '#1e293b', borderRadius: 8, border: '1px solid #334155' }}>
-                  <p style={{ color: '#94a3b8', margin: '0 0 10px 0' }}>This problem is securely hosted on an external platform.</p>
-                  <a href={problem.originalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontWeight: 'bold', textDecoration: 'none' }}>Open Original Problem Statement ↗</a>
+            <div style={{ padding: 30, background: '#1e1b4b', borderRadius: 12, border: '1px solid #6366f1', textAlign: 'center', marginTop: 20 }}>
+               <h3 style={{ color: '#eef2ff', margin: '0 0 10px' }}>Problem Details Hidden</h3>
+               <p style={{ color: '#cbd5e1', marginBottom: 20 }}>Due to platform restrictions, this description cannot be rendered natively.</p>
+               {problem.originalUrl && (
+                  <a href={problem.originalUrl} target="_blank" rel="noreferrer" style={{ background: '#6366f1', color: '#fff', padding: '10px 20px', borderRadius: 8, textDecoration: 'none', fontWeight: 'bold', display: 'inline-block' }}>
+                    View Original Problem ↗
+                  </a>
+               )}
+            </div>
+        )}
+
+        {/* FIXED: Dynamic YouTube Embed */}
+        {!problem.error && (
+          <div style={{ marginTop: 40, padding: 20, background: '#020617', borderRadius: 12, border: '1px solid #1e293b' }}>
+               <h3 style={{ color: '#f87171', margin: '0 0 15px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  ▶️ Video Tutorial
+               </h3>
+               <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 8, background: '#000' }}>
+                   <iframe 
+                     style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} 
+                     src={`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent((problem.title || 'Coding Problem') + ' solution')}`}
+                     title="YouTube Search Results" 
+                     frameBorder="0" 
+                     allowFullScreen
+                   />
                </div>
-            )
+               <p style={{ color: '#64748b', fontSize: 12, marginTop: 10, textAlign: 'center' }}>First search result mapped dynamically.</p>
+          </div>
         )}
 
         {(sampleData.input || sampleData.output) && (
