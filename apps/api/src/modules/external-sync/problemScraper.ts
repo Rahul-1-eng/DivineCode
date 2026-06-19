@@ -9,21 +9,50 @@ export interface ScrapedProblem {
   platform: 'CODEFORCES' | 'LEETCODE' | 'OTHER';
   originalUrl: string;
   requiresRedirect?: boolean;
+  success?: boolean;
+}
+
+// 🚀 NEW: Invisible YouTube Fetcher
+async function fetchYouTubeTutorial(problemTitle: string, platform: string): Promise<string | null> {
+  try {
+    const query = encodeURIComponent(`${platform} ${problemTitle} solution tutorial`);
+    const { data } = await axios.get(`https://www.youtube.com/results?search_query=${query}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    // Extract the very first video ID from the raw YouTube state graph
+    const match = data.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+    if (match && match[1]) {
+      return match[1]; 
+    }
+  } catch (e) {
+    console.error("[YouTube Fetcher] Failed to grab tutorial.", e);
+  }
+  return null;
 }
 
 export async function scrapeProblemFromUrl(url: string) {
+  let result: ScrapedProblem;
+  let platformName = 'OTHER';
+
   try {
     if (url.includes('codeforces.com')) {
-      const cfData = await scrapeCodeforces(url);
-      return { ...cfData, success: true, requiresRedirect: false };
+      platformName = 'Codeforces';
+      result = await scrapeCodeforces(url);
+      result.success = true;
+      result.requiresRedirect = false;
+    } else if (url.includes('leetcode.com')) {
+      platformName = 'LeetCode';
+      result = await scrapeGenericPlatform(url);
+      result.success = true;
+      result.requiresRedirect = false;
+    } else {
+      result = await scrapeGenericPlatform(url);
+      result.success = true;
+      result.requiresRedirect = false;
     }
-
-    const genericData = await scrapeGenericPlatform(url);
-    return { ...genericData, success: true, requiresRedirect: false };
-
   } catch (error) {
     console.error(`[Scraper] Full extraction failed for ${url}, enforcing redirect.`);
-    return { 
+    result = { 
       title: 'External Platform Problem',
       descriptionHtml: `
         <div style="text-align:center; padding: 40px; background: #0f172a; border: 1px solid #334155; border-radius: 8px;">
@@ -32,12 +61,29 @@ export async function scrapeProblemFromUrl(url: string) {
             <a href="${url}" target="_blank" style="display: inline-block; padding: 12px 24px; background: #38bdf8; color: #000; font-weight: bold; border-radius: 6px; text-decoration: none;">View Original Problem</a>
         </div>`,
       testcases: [],
-      platform: 'OTHER' as const,
+      platform: 'OTHER',
       originalUrl: url,
       success: false,
       requiresRedirect: true
     };
   }
+
+  // 🚀 Auto-Fetch and Inject YouTube Tutorial into the HTML
+  const ytVideoId = await fetchYouTubeTutorial(result.title, platformName);
+  if (ytVideoId) {
+    result.descriptionHtml += `
+      <div style="margin-top: 40px; padding: 20px; background: #0f172a; border-radius: 12px; border: 1px solid #1e293b; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+          <h3 style="color: #f87171; margin: 0 0 15px; display: flex; align-items: center; gap: 8px;">
+              ▶️ Auto-Fetched Video Tutorial
+          </h3>
+          <div style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 8px; border: 1px solid #334155; background: #000;">
+              <iframe style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;" src="https://www.youtube.com/embed/${ytVideoId}" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+          </div>
+          <p style="color: #64748b; font-size: 12px; margin-top: 10px; text-align: center;">Fetched dynamically based on the problem title.</p>
+      </div>`;
+  }
+
+  return result;
 }
 
 async function scrapeCodeforces(url: string): Promise<ScrapedProblem> {
@@ -68,18 +114,14 @@ async function scrapeCodeforces(url: string): Promise<ScrapedProblem> {
   }
 }
 
-// Update the scrapeGenericPlatform function inside problemScraper.ts
-
 async function scrapeGenericPlatform(url: string): Promise<ScrapedProblem> {
   try {
     const { data } = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } });
     const $ = cheerio.load(data);
     const title = $('h1').first().text().trim() || $('title').text().trim() || 'External Problem';
     
-    // Less aggressive removal so we don't accidentally delete the problem body
     $('script, style, nav, footer, header').remove();
     
-    // Try to find the most common problem body containers
     let descriptionHtml = $('.problem-description').html() || 
                           $('.question-content').html() || 
                           $('article').html() || 

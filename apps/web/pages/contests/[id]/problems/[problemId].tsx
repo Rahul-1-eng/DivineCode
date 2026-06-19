@@ -686,18 +686,19 @@ export default function ContestProblemWorkspace() {
               </div>
             )}
             {problemDescriptionHtml && problemDescriptionHtml.length > 10 ? (
-  <div 
-    style={{ color: '#eef2ff', lineHeight: '1.7' }} 
-    dangerouslySetInnerHTML={{ __html: problemDescriptionHtml }} 
-  />
-) : (
-  <div style={{ padding: 20, background: '#1e1b4b', borderRadius: 12, border: '1px solid #6366f1' }}>
-    <p style={{ color: '#cbd5e1' }}>Problem description unavailable.</p>
-    {externalUrl && (
-       <a href={externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontWeight: 'bold' }}>View External Problem Link ↗</a>
-    )}
-  </div>
-)}
+              <div 
+                className="problem-statement-html" 
+                style={{ color: '#eef2ff', lineHeight: '1.7', paddingBottom: '60px' }} 
+                dangerouslySetInnerHTML={{ __html: problemDescriptionHtml }} 
+              />
+            ) : (
+              <div style={{ padding: 20, background: '#1e1b4b', borderRadius: 12, border: '1px solid #6366f1' }}>
+                <p style={{ color: '#cbd5e1' }}>Problem description unavailable.</p>
+                {externalUrl && (
+                   <a href={externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontWeight: 'bold' }}>View External Problem Link ↗</a>
+                )}
+              </div>
+            )}
           </section>
           <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
             <Editor height="65%" theme="vs-dark" language={monacoLanguage} value={code} onChange={(val) => setCode(val || '')} />

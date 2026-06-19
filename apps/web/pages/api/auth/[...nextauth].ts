@@ -22,7 +22,6 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
           const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
           
           try {
-            // This calls your backend route to verify the password against the database
             const res = await fetch(`${apiBase}/api/auth/login`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -34,9 +33,14 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
 
             const user = await res.json();
 
-            // If login is successful and the API returns a user object
+            // Return the mapped user object to inject into NextAuth
             if (res.ok && user) {
-              return user; 
+              return {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                handle: user.username // Map internal username to session handle
+              }; 
             }
             return null;
           } catch (error) {
@@ -50,11 +54,10 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
     session: { strategy: 'jwt' },
     callbacks: {
       async signIn({ user, account }) {
-        // Only run this sync block if the user logged in via Google
         if (account?.provider === 'google') {
           try {
             const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-            await fetch(`${apiBase}/api/auth/google`, {
+            const res = await fetch(`${apiBase}/api/auth/google`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -64,6 +67,12 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
                 googleId: account?.providerAccountId
               })
             });
+            
+            const data = await res.json();
+            // Assign the API-generated username to the user object
+            if (data?.username) {
+              (user as any).handle = data.username;
+            }
           } catch (error) {
             console.error('Could not sync Google user with API', error);
           }
@@ -73,7 +82,6 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
       async session({ session, token }) {
         if (session.user) {
           (session.user as any).id = token.sub;
-          // Optionally, pass the handle down to the session if available
           if (token.handle) {
             (session.user as any).handle = token.handle;
           }

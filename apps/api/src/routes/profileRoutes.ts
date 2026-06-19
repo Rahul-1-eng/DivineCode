@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { Platform } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 export const profileRouter = Router();
 
@@ -88,6 +89,41 @@ profileRouter.post('/claim-username', async (req, res) => {
   } catch (err: any) {
     console.error('[Profile] Claim Username Error:', err);
     return res.status(500).json({ error: `Database Error: ${err.message}` });
+  }
+});
+
+// 👉 THE FIX: Secure Password Update Route
+profileRouter.post('/update-password', async (req, res) => {
+  try {
+    const email = req.headers['x-user-email'] as string;
+    const { currentPassword, newPassword } = req.body;
+    
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+    if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // If the user already has a password, they must provide the correct current password
+    if (user.passwordHash) {
+      if (!currentPassword) return res.status(400).json({ error: 'Current password is required.' });
+      const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!isValid) return res.status(400).json({ error: 'Incorrect current password.' });
+    }
+
+    // Generate salt and hash new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: hashedPassword }
+    });
+
+    return res.json({ success: true, message: 'Password updated successfully!' });
+  } catch (err: any) {
+    console.error('[Profile] Update Password Error:', err);
+    return res.status(500).json({ error: 'Internal server error.' });
   }
 });
 

@@ -80,6 +80,8 @@ export function setupDuelSockets(io: Server) {
   }
 
   io.on('connection', (socket: Socket) => {
+    
+    // --- MATCHMAKING EVENTS ---
     socket.on('duel:join', async ({ name }) => {
       if (waitingPlayer && waitingPlayer.socket.id !== socket.id) {
         const p1 = waitingPlayer;
@@ -118,14 +120,14 @@ export function setupDuelSockets(io: Server) {
       if (currentQ.id !== questionId) return;
 
       const player = state.players.find(p => p.id === socket.id);
-      if (!player || player.attempts >= 2) return; // Prevent answering if max attempts reached
+      if (!player || player.attempts >= 2) return;
 
       const isCorrect = currentQ.correctIndex === answerIndex;
 
       if (isCorrect) {
         player.score += 100;
       } else {
-        player.score -= 20; // WRONG ANSWER PENALTY
+        player.score -= 20; 
         player.attempts += 1;
       }
 
@@ -139,13 +141,55 @@ export function setupDuelSockets(io: Server) {
 
       if (isCorrect) {
         state.currentQuestionIndex++;
-        state.players.forEach(p => p.attempts = 0); // Reset attempts for next question
+        state.players.forEach(p => p.attempts = 0); 
         if (state.currentQuestionIndex >= state.questions.length) {
           state.finished = true;
         }
       }
       
       emitState(roomId);
+    });
+
+    // --- REAL-TIME CHAT & IMAGE EVENTS ---
+    socket.on('chat:message', ({ roomId, message }) => {
+      const state = activeRooms.get(roomId);
+      if (!state) return;
+      const player = state.players.find(p => p.id === socket.id);
+      if (!player) return;
+      
+      io.to(roomId).emit('chat:message', {
+        senderId: player.id,
+        senderName: player.name,
+        message,
+        timestamp: new Date().toISOString()
+      });
+    });
+
+    socket.on('chat:image', ({ roomId, imageUrl }) => {
+      const state = activeRooms.get(roomId);
+      if (!state) return;
+      const player = state.players.find(p => p.id === socket.id);
+      if (!player) return;
+
+      io.to(roomId).emit('chat:image', {
+        senderId: player.id,
+        senderName: player.name,
+        imageUrl,
+        timestamp: new Date().toISOString()
+      });
+    });
+
+    // --- WEBRTC VOICE SIGNALING EVENTS ---
+    socket.on('webrtc:offer', ({ roomId, offer }) => {
+      socket.to(roomId).emit('webrtc:offer', { senderId: socket.id, offer });
+    });
+
+    socket.on('webrtc:answer', ({ roomId, answer }) => {
+      socket.to(roomId).emit('webrtc:answer', { senderId: socket.id, answer });
+    });
+
+    socket.on('webrtc:ice-candidate', ({ roomId, candidate }) => {
+      socket.to(roomId).emit('webrtc:ice-candidate', { senderId: socket.id, candidate });
     });
 
     socket.on('disconnect', () => {

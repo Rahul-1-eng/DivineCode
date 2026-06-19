@@ -142,8 +142,6 @@ export async function debugCodeWithAI(userCode: string, problemDescription: stri
     return { hint: "Could not parse AI response", input: "", expectedOutput: "" };
   }
 }
-// Add this at the bottom of aiService.ts
-
 
 type CachedQA = { keywords: string[]; response: string };
 
@@ -180,24 +178,28 @@ export async function askAiChatbot(query: string): Promise<string> {
     const intersections = entry.keywords.filter(keyword => tokens.includes(keyword));
     const matchPercentage = intersections.length / entry.keywords.length;
 
-    if (matchPercentage > maxMatchPercentage && matchPercentage >= 0.4) {
+    // UPDATED: Require strict > 50% match for federated answers
+    if (matchPercentage > 0.5 && matchPercentage > maxMatchPercentage) {
       maxMatchPercentage = matchPercentage;
       bestMatch = entry;
     }
   }
 
-  // If match confidence satisfies parameters, return intercepted response
+  // 1. Give the Federated (Fate) Answer first if match is > 50%
   if (bestMatch) {
     return bestMatch.response;
   }
 
-  // Fallback to active deep model inference
+  // 2. Fallback to clean AI processing
   try {
-    const prompt = `You are an expert engineering assistant for the DivineCode platform. Provide a crisp answer for this query: ${query}`;
+    const prompt = `You are a helpful engineering assistant for the DivineCode platform. Provide a crisp, directly helpful answer for this query without markdown errors or unnecessary code blocks: ${query}`;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
     const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
-    return data.candidates[0].content.parts[0].text;
+    
+    let aiResponse = data.candidates[0].content.parts[0].text;
+    return aiResponse.trim();
   } catch (err: any) {
-    return "My neural pathways are a bit tangled right now, please try asking again.";
+    console.error("AI Fallback Error:", err.response?.data || err.message);
+    return "The system is currently cleaning up internal connections. Please try asking again in a moment.";
   }
 }

@@ -4,6 +4,7 @@ import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
 import { scrapeProblemFromUrl } from '../external-sync/problemScraper';
 import { generateToughTestCases } from '../ai/aiService';
+import { processContestRewards } from '../ratings/ratingService';
 
 export type MemberInput = { username?: string; userId?: string; email?: string; name?: string; displayName?: string; teamName?: string; teamInviteCode?: string; codeforcesHandle?: string; ratingBefore?: number; isOfficial?: boolean; };
 
@@ -500,7 +501,6 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
   } catch (error) { throw error; }
 }
 
-// 👉 FIXED: Single, correct definition of approveParticipant
 export async function approveParticipant(contestId: string, participantId: string, actorId: string) {
   const contest = await prisma.contest.findUnique({ where: { id: contestId }, include: { participants: true } });
   if (!contest) throw new Error('Contest not found');
@@ -510,7 +510,6 @@ export async function approveParticipant(contestId: string, participantId: strin
 
   const isContestOwner = contest.createdById === actorId;
   
-  // Filter team members who are official to find the founder (earliest joinedAt)
   const teamParticipants = contest.participants.filter(p => p.teamId === targetParticipant.teamId && p.isOfficial);
   const firstTeamMember = teamParticipants.sort((a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime())[0];
   const isTeamCreator = firstTeamMember && firstTeamMember.userId === actorId;
@@ -524,7 +523,6 @@ export async function approveParticipant(contestId: string, participantId: strin
   return updated;
 }
 
-// 👉 FIXED: Typescript strict optional parameters
 export async function createTeamForContest(contestId: string, teamName: string, userId: string, codeforcesHandle?: string, isOfficial?: boolean) {
   const officialFlag = isOfficial ?? false;
   try {
@@ -696,4 +694,37 @@ export async function requestToJoinTeam(contestId: string, teamName: string, use
     console.error('[Join Request Error]', err.message);
     throw err;
   }
+}
+
+export async function endContestV2(contestId: string, actorId?: string) {
+  const contest = await prisma.contest.findUnique({ where: { id: contestId } });
+  if (!contest) throw new Error('Contest not found');
+
+  // 1. Lock the contest by ending it
+  await prisma.$transaction(async (tx) => {
+    await tx.contest.update({
+      where: { id: contestId },
+      data: { status: ContestStatus.ENDED }
+    });
+    
+    await tx.auditLog.create({ 
+      data: { 
+        actorId: actorId || null, 
+        contestId, 
+        action: 'CONTEST_END', 
+        entityType: 'Contest', 
+        entityId: contestId, 
+        before: { status: contest.status }, 
+        after: { status: ContestStatus.ENDED } 
+      } 
+    });
+  });
+
+  // 2. Finalize standings
+  await recomputeContestStandings(contestId);
+
+  // 3. Distribute Coins and Ratings globally
+  await processContestRewards(contestId);
+
+  return loadContestForViewer(contestId);
 }

@@ -1,9 +1,11 @@
 import { signIn } from 'next-auth/react';
 import React, { useState, FormEvent } from 'react';
+import { useRouter } from 'next/router';
 
 type AuthMode = 'signin' | 'signup';
 
 export default function SignInPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<AuthMode>('signin');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -29,6 +31,7 @@ export default function SignInPage() {
 
     const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
+    // 1. Process Registration first if in Signup Mode
     if (mode === 'signup') {
       try {
         const res = await fetch(`${apiBase}/api/v2/auth/register`, {
@@ -52,7 +55,7 @@ export default function SignInPage() {
       }
     }
 
-    // Authenticate the session securely
+    // 2. Authenticate the session securely and Redirect
     const res = await signIn('credentials', {
       redirect: false,
       handle: cleanHandle,
@@ -63,7 +66,7 @@ export default function SignInPage() {
     if (res?.error) {
       setError('Invalid credentials combination.');
     } else {
-      window.location.href = '/contests';
+      router.push('/contests'); // Fast client-side routing
     }
   }
 
