@@ -27,7 +27,7 @@ import { profileRouter } from './profileRoutes';
 import { interviewRouter } from './interviewRoutes'; 
 import crypto from 'crypto';
 import { mcqQuestions } from '../data/mcq'; // Added import for Logical Games
-
+import bcrypt from 'bcryptjs';
 const uploadDir = path.join(process.cwd(), 'public', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -285,16 +285,18 @@ export function mountV2Routes(app: Express, io: Server) {
       return res.status(400).json({ error: 'Username or email handle already registered.' });
     }
 
-    const hash = crypto.createHash('sha256').update(password).digest('hex');
+   
+    const salt = await bcrypt.genSalt(10);
+const hashedPassword = await bcrypt.hash(password, salt);
 
-    const newUser = await prisma.user.create({
-      data: {
-        username: cleanUsername,
-        email: cleanEmail,
-        name: name || cleanUsername,
-        passwordHash: hash
-      }
-    });
+const newUser = await prisma.user.create({
+  data: {
+    username: cleanUsername,
+    email: cleanEmail,
+    name: name || cleanUsername,
+    passwordHash: hashedPassword // Store the bcrypt hash
+  }
+});
 
     res.status(201).json({ success: true, userId: newUser.id });
   }));
@@ -455,16 +457,36 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
-  router.post('/contests/:id/finalize', asyncRoute(async (req, res) => {
-    const viewer = await requireContestOwner(req);
-    const before = await prisma.contest.findUnique({ where: { id: req.params.id } });
-    await prisma.contest.update({ where: { id: req.params.id }, data: { status: ContestStatus.ENDED } });
-    await recomputeContestStandings(req.params.id);
-    const rewards = before?.status === ContestStatus.ENDED ? null : await processContestRewards(req.params.id);
-    const contest = await loadContestForViewer(req.params.id);
-    io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id });
-    res.json({ success: true, message: 'Contest finalized.', rewards, contest: sanitizeContestForViewer(contest!, viewer) });
-  }));
+ router.post('/contests/:id/finalize', asyncRoute(async (req, res) => {
+  const viewer = await requireContestOwner(req);
+  
+  // 1. Get contest state
+  const contest = await prisma.contest.findUnique({ where: { id: req.params.id } });
+  if (!contest) throw new Error('Contest not found');
+
+  // 2. Only run if it hasn't been finalized before
+  let rewards = null;
+  if (contest.status !== ContestStatus.ENDED) {
+      await prisma.contest.update({ 
+          where: { id: req.params.id }, 
+          data: { status: ContestStatus.ENDED } 
+      });
+      await recomputeContestStandings(req.params.id);
+      
+      // 3. THIS IS THE CRITICAL CALL
+      rewards = await processContestRewards(req.params.id);
+  }
+
+  const updatedContest = await loadContestForViewer(req.params.id);
+  io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id });
+  
+  res.json({ 
+    success: true, 
+    message: 'Contest finalized.', 
+    rewards, 
+    contest: sanitizeContestForViewer(updatedContest!, viewer) 
+  });
+}));
 
   router.get('/contests/:id/submissions', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req);

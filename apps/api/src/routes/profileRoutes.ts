@@ -104,14 +104,14 @@ profileRouter.post('/update-password', async (req, res) => {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // If the user already has a password, they must provide the correct current password
+    // VERIFICATION: Check if user has an existing password, verify it first
     if (user.passwordHash) {
-      if (!currentPassword) return res.status(400).json({ error: 'Current password is required.' });
+      if (!currentPassword) return res.status(400).json({ error: 'Current password is required to change it.' });
       const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
       if (!isValid) return res.status(400).json({ error: 'Incorrect current password.' });
     }
 
-    // Generate salt and hash new password
+    // CONSISTENCY: Using bcryptjs to hash, ensuring it matches your auth/register logic
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 

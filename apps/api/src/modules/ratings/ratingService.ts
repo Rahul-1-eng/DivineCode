@@ -7,6 +7,8 @@ const COINS_PER_GROUP_SOLVE = 20;
 const BASE_PARTICIPATION_COINS = 10;
 
 export async function processContestRewards(contestId: string) {
+  console.log(`[REWARD ENGINE] Starting reward processing for contest: ${contestId}`);
+
   return prisma.$transaction(async (tx) => {
     const contest = await tx.contest.findUnique({
       where: { id: contestId },
@@ -16,18 +18,25 @@ export async function processContestRewards(contestId: string) {
       }
     });
 
-    if (!contest) return null;
+    if (!contest) {
+      console.error(`[REWARD ENGINE] Contest ${contestId} not found!`);
+      return null;
+    }
 
-    // FIXED: Now we process EVERY user, even if they have no standing (0 solves)
     const participants = contest.participants.filter(p => p.user);
-    if (participants.length == 0) return null; 
+    console.log(`[REWARD ENGINE] Found ${participants.length} participants to process.`);
+    
+    if (participants.length === 0) return null; 
 
     for (const pA of participants) {
-      if (!pA.user) continue;
+      if (!pA.user) {
+        console.warn(`[REWARD ENGINE] Skipping participant ${pA.id}: No user attached.`);
+        continue;
+      }
 
-      // 1. Process Coins & Score for everyone (Rated & Unrated)
+      // 1. Calculate Stats
       const groupSolves = pA.standing?.solved || 0;
-      const rank = pA.standing?.rank || participants.length; // Assign bottom rank if no standing
+      const rank = pA.standing?.rank || participants.length;
 
       const personalSolves = new Set(
         contest.submissions
@@ -35,42 +44,44 @@ export async function processContestRewards(contestId: string) {
           .map(s => s.contestProblemId)
       ).size;
 
+      // 2. Process Coins
       let rankBonus = 0;
       if (rank === 1) rankBonus = 150;
       else if (rank === 2) rankBonus = 100;
       else if (rank === 3) rankBonus = 50;
 
-      // Calculate earned coins, allow negative penalty for 0 solves
       let earnedCoins = BASE_PARTICIPATION_COINS + rankBonus + (personalSolves * COINS_PER_PERSONAL_SOLVE) + (groupSolves * COINS_PER_GROUP_SOLVE);
       if (personalSolves === 0 && groupSolves === 0) {
-        earnedCoins = -15; // Penalty for participating but not solving anything
+        earnedCoins = -15; 
       }
+
+      console.log(`[REWARD ENGINE] User ${pA.user.username}: Rank ${rank}, Solves ${personalSolves}, Coins ${earnedCoins}`);
 
       let oldRating = pA.ratingBefore || pA.user.rating || 1200;
       let newRating = oldRating;
       let ratingDelta = 0;
 
-      // 2. Process Elo Rating ONLY if Rated AND participant is Official
+      // 3. Process Elo Rating
       if (contest.isRated && pA.isOfficial) {
+        console.log(`[REWARD ENGINE] Processing Elo for ${pA.user.username}...`);
         let expectedWins = 0;
         let actualWins = 0;
 
         for (const pB of participants) {
           if (pA.id === pB.id || !pB.user || !pB.isOfficial) continue;
-          if (pA.teamId && pA.teamId === pB.teamId) continue; // Don't steal Elo from teammates
+          if (pA.teamId && pA.teamId === pB.teamId) continue; 
 
           const ratingB = pB.ratingBefore || pB.user.rating || 1200;
           expectedWins += 1 / (1 + Math.pow(10, (ratingB - oldRating) / 400));
-
-          const rankB = pB.standing?.rank || participants.length; // Bottom rank fallback
+          const rankB = pB.standing?.rank || participants.length;
 
           if (rank < rankB) actualWins += 1;
           else if (rank === rankB) actualWins += 0.5;
         }
 
         const rawDelta = Math.round(K_FACTOR * (actualWins - expectedWins));
-        ratingDelta = Math.max(-100, rawDelta); // Cap maximum rating loss at -100
-        newRating = Math.max(100, oldRating + ratingDelta); // Floor rating at 100
+        ratingDelta = Math.max(-100, rawDelta);
+        newRating = Math.max(100, oldRating + ratingDelta);
 
         await tx.ratingHistory.create({
           data: {
@@ -83,9 +94,12 @@ export async function processContestRewards(contestId: string) {
             contestId: contest.id
           }
         });
+        console.log(`[REWARD ENGINE] Updated Elo for ${pA.user.username}: ${oldRating} -> ${newRating}`);
+      } else {
+        console.log(`[REWARD ENGINE] Skipping Elo for ${pA.user.username} (Rated: ${contest.isRated}, Official: ${pA.isOfficial})`);
       }
 
-      // 3. Commit Updates
+      // 4. Commit DB Updates
       await tx.user.update({
         where: { id: pA.userId! },
         data: {
@@ -104,6 +118,7 @@ export async function processContestRewards(contestId: string) {
       });
     }
 
+    console.log(`[REWARD ENGINE] Successfully finished processing rewards.`);
     return { success: true, processedCount: participants.length };
-  }, { timeout: 30000 }); // Added transaction timeout buffer for large contests
+  }, { timeout: 30000 });
 }
