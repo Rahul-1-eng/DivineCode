@@ -1,12 +1,12 @@
 import { signIn } from 'next-auth/react';
-import { useState } from 'react';
+import React, { useState, FormEvent } from 'react';
 
 export default function SignInPage() {
   const [handle, setHandle] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  async function credentialsSignIn(e: React.FormEvent) {
+  async function credentialsSignIn(e: FormEvent) {
     e.preventDefault();
     setError('');
     
@@ -40,7 +40,8 @@ export default function SignInPage() {
           <div style={{ padding: 30, borderRadius: 30, border: '1px solid rgba(148,163,184,.22)', background: 'linear-gradient(180deg,rgba(15,23,42,.9),rgba(15,23,42,.62))', boxShadow: '0 28px 90px rgba(0,0,0,.35)' }}>
             <h2 style={{ fontSize: 30, marginTop: 0 }}>Sign in to DivineCode</h2>
             
-            <button onClick={() => signIn('google', { callbackUrl: '/contests' })} style={{ width: '100%', padding: 14, borderRadius: 16, border: 0, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', fontWeight: 900, cursor: 'pointer', marginBottom: 18 }}>
+            {/* Fixed TS Property Error: Changed border: 0 to border: 'none' */}
+            <button onClick={() => signIn('google', { callbackUrl: '/contests' })} style={{ width: '100%', padding: 14, borderRadius: 16, border: 'none', background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', fontWeight: 900, cursor: 'pointer', marginBottom: 18 }}>
               Continue with Google
             </button>
             
@@ -79,4 +80,4 @@ export default function SignInPage() {
   );
 }
 
-const inputStyle = { width: '100%', padding: 13, margin: '8px 0 16px', border: '1px solid rgba(148,163,184,.25)', borderRadius: 14, background: 'rgba(2,6,23,.55)', color: '#eef2ff', outline: 'none' };
+const inputStyle: React.CSSProperties = { width: '100%', padding: 13, margin: '8px 0 16px', border: '1px solid rgba(148,163,184,.25)', borderRadius: 14, background: 'rgba(2,6,23,.55)', color: '#eef2ff', outline: 'none' };
