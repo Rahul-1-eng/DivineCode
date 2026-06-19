@@ -180,7 +180,7 @@ export default function ProfilePage() {
         
         <nav style={nav}>
           <a href="/" style={brand}>← DivineCode</a>
-          <button onClick={() => signOut()} style={ghost}>Sign out</button>
+          <button onClick={() => signOut({ callbackUrl: '/signin' })} style={ghost}>Sign out</button>
         </nav>
         
         <section style={hero}>
