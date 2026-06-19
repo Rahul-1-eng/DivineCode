@@ -144,36 +144,60 @@ export async function debugCodeWithAI(userCode: string, problemDescription: stri
 }
 // Add this at the bottom of aiService.ts
 
-export async function askAiChatbot(query: string) {
+
+type CachedQA = { keywords: string[]; response: string };
+
+const FAQ_RESOURCES: CachedQA[] = [
+  {
+    keywords: ["submit", "code", "run", "arena", "button"],
+    response: "To evaluate a challenge, implement your structural code block inside the editor context container on the space panel layout workspace, allocate the matching language interpreter extension token via the parameter selection toggle node, and trigger the green 'Submit 🚀' action layout."
+  },
+  {
+    keywords: ["cph", "extension", "localhost", "helper", "port"],
+    response: "The Competitive Programming Helper (CPH) framework relies on a client-side execution interface operating on localhost standard route port 10043. Confirm the browser execution agent is running natively before attempting data block synchronization."
+  },
+  {
+    keywords: ["duel", "arena", "attempts", "penalty", "matchmaking"],
+    response: "The Duel challenge container features head-to-head 1v1 execution structures. Each target matrix question allocates a strict ceiling limit of exactly 2 evaluation attempts. Correct allocations award +100 score metrics, while false processing yields a -20 item offset deduction."
+  },
+  {
+    keywords: ["rating", "score", "coins", "update", "allocation"],
+    response: "Elo parameters, global profile rating structures, and won currency coins are calculated atomically by the server engine when a contest enters ContestStatus.ENDED state. Team parameters utilize the initial historical correct allocation profile timestamp node."
+  }
+];
+
+export async function askAiChatbot(query: string): Promise<string> {
   const apiKey = process.env.AI_API_KEY;
-  if (!apiKey) return "API Key missing. Please configure your environment variables.";
+  if (!apiKey) return "AI Configuration key is missing from server architecture variables environment maps.";
+
+  const tokens = query.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/);
   
-  const lowerQuery = query.toLowerCase();
+  let bestMatch: CachedQA | null = null;
+  let maxMatchPercentage = 0;
 
-  // 1. Instant Cache for FAQs
-  if (lowerQuery.includes("how to submit") || lowerQuery.includes("submit code")) {
-    return "To submit code, write your solution in the editor on the right, select your language, and click the green 'Submit 🚀' button. We'll run it against the hidden system test cases!";
-  }
-  if (lowerQuery.includes("cph") || lowerQuery.includes("competitive programming helper")) {
-    return "CPH (Competitive Programming Helper) is a browser extension that allows you to send test cases directly to VS Code. Make sure the extension is installed and running on port 10043.";
-  }
-  if (lowerQuery.includes("duel") || lowerQuery.includes("matchmaking")) {
-    return "In Duels, you can play 1v1 against other coders. You get 2 chances per question. A correct answer gives +100 points, and a wrong answer deducts 20 points!";
-  }
-  if (lowerQuery.includes("rating") || lowerQuery.includes("score")) {
-    return "Your rating and group scores are updated automatically at the end of the contest. Group scores rely on the first person to solve a problem in your team!";
+  // Calculate strict match intersection density
+  for (const entry of FAQ_RESOURCES) {
+    const intersections = entry.keywords.filter(keyword => tokens.includes(keyword));
+    const matchPercentage = intersections.length / entry.keywords.length;
+
+    if (matchPercentage > maxMatchPercentage && matchPercentage >= 0.4) {
+      maxMatchPercentage = matchPercentage;
+      bestMatch = entry;
+    }
   }
 
-  // 2. Fallback to Gemini 
+  // If match confidence satisfies parameters, return intercepted response
+  if (bestMatch) {
+    return bestMatch.response;
+  }
+
+  // Fallback to active deep model inference
   try {
-    const prompt = `You are a helpful coding assistant for the DivineCode platform. Answer this user query clearly and concisely: ${query}`;
+    const prompt = `You are an expert engineering assistant for the DivineCode platform. Provide a crisp answer for this query: ${query}`;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { 
-      contents: [{ parts: [{ text: prompt }] }],
-    });
+    const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
     return data.candidates[0].content.parts[0].text;
-  } catch (e: any) {
-    console.error("Chatbot API Error:", e.message);
-    return "My neural pathways are a bit tangled right now, please try asking again in a few moments.";
+  } catch (err: any) {
+    return "My neural pathways are a bit tangled right now, please try asking again.";
   }
 }

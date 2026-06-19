@@ -62,7 +62,6 @@ export default function PracticePage() {
     
     const systemPrompt = "You are the DivineCode Practice Guide. Recommend problems, explain concepts, and analyze any uploaded images accurately. Keep answers highly concise, friendly, and use markdown.";
     
-    // 👉 FIXED: Sliced off the first UI greeting to ensure strict alternating User/Model roles
     const payloadHistory = [
       { role: 'user', text: systemPrompt },
       { role: 'model', text: 'Understood. I will help them practice.' },
@@ -141,26 +140,46 @@ export default function PracticePage() {
               ) : filteredProblems.length === 0 ? (
                 <tr><td colSpan={5} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>No problems match your filters in the database.</td></tr>
               ) : (
-                filteredProblems.map((p, idx) => (
-                  <motion.tr 
-                    key={p.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.02 }}
-                    style={{ borderBottom: '1px solid #1e293b', background: idx % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.4)', transition: 'background 0.2s', cursor: 'pointer' }}
-                    onClick={() => window.location.href = `/practice/${p.id}`}
-                    onMouseOver={(e) => e.currentTarget.style.background = 'rgba(30,41,59,0.8)'}
-                    onMouseOut={(e) => e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.4)'}
-                  >
-                    <td style={{ padding: '16px 20px' }}><div style={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid #334155' }} /></td>
-                    <td style={{ padding: '16px 20px', fontWeight: 'bold', color: '#eef2ff' }}><span style={{ color: 'inherit', textDecoration: 'none' }}>{p.title}</span></td>
-                    <td style={{ padding: '16px 20px', color: '#cbd5e1' }}>{p.platform || 'DivineCode'}</td>
-                    <td style={{ padding: '16px 20px', color: getDifficultyColor(p.difficulty), fontWeight: 600 }}>{p.difficulty || 'Unrated'}</td>
-                    <td style={{ padding: '16px 20px' }}>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {(p.tags || []).slice(0, 3).map((tag: string) => (<span key={tag} style={tagStyle}>{tag}</span>))}
-                        {(p.tags?.length > 3) && <span style={tagStyle}>+{p.tags.length - 3}</span>}
-                      </div>
-                    </td>
-                  </motion.tr>
-                ))
+                filteredProblems.map((p, idx) => {
+                  const hasDescription = p.descriptionHtml && p.descriptionHtml.replace(/<[^>]*>/g, '').trim().length > 15;
+                  
+                  return (
+                    <motion.tr 
+                      key={p.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.02 }}
+                      style={{ borderBottom: '1px solid #1e293b', background: idx % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.4)', transition: 'background 0.2s', cursor: 'pointer' }}
+                      onClick={() => window.location.href = `/practice/${p.id}`}
+                      onMouseOver={(e) => e.currentTarget.style.background = 'rgba(30,41,59,0.8)'}
+                      onMouseOut={(e) => e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.4)'}
+                    >
+                      <td style={{ padding: '16px 20px', verticalAlign: 'top' }}><div style={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid #334155', marginTop: 4 }} /></td>
+                      <td style={{ padding: '16px 20px', verticalAlign: 'top' }}>
+                        <div style={{ fontWeight: 'bold', color: '#eef2ff', marginBottom: 8 }}>{p.title}</div>
+                        <div style={{ color: '#94a3b8', fontSize: 13, lineHeight: 1.5 }}>
+                          {hasDescription ? (
+                            <div dangerouslySetInnerHTML={{ __html: p.descriptionHtml.substring(0, 120) + '...' }} />
+                          ) : (
+                            <div style={{ background: 'rgba(239,68,68,0.06)', padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.2)', fontSize: 13, color: '#f87171', display: 'inline-block' }}>
+                              <span>Problem text hidden. </span>
+                              {p.originalUrl && (
+                                <a href={p.originalUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: '#38bdf8', fontWeight: 'bold', marginLeft: 6, textDecoration: 'underline' }}>
+                                  Open External Platform ↗
+                                </a>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ padding: '16px 20px', color: '#cbd5e1', verticalAlign: 'top' }}>{p.platform || 'DivineCode'}</td>
+                      <td style={{ padding: '16px 20px', color: getDifficultyColor(p.difficulty), fontWeight: 600, verticalAlign: 'top' }}>{p.difficulty || 'Unrated'}</td>
+                      <td style={{ padding: '16px 20px', verticalAlign: 'top' }}>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {(p.tags || []).slice(0, 3).map((tag: string) => (<span key={tag} style={tagStyle}>{tag}</span>))}
+                          {(p.tags?.length > 3) && <span style={tagStyle}>+{p.tags.length - 3}</span>}
+                        </div>
+                      </td>
+                    </motion.tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -235,7 +254,7 @@ const chatHeader: CSSProperties = { background: '#1e293b', padding: '12px 16px',
 const avatarImg: CSSProperties = { width: 30, height: 30, background: '#020617', borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 18 };
 const closeBtn: CSSProperties = { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 24, cursor: 'pointer' };
 const chatBody: CSSProperties = { flex: 1, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 };
-const chatBubble: CSSProperties = { maxWidth: '85%', padding: '10px 14px', borderRadius: 12, fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap' };
+const chatBubble: CSSProperties = { maxWidth: '85%', padding: '10px 14px', borderRadius: 12, fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' };
 const chatFooter: CSSProperties = { padding: 12, background: '#1e293b', borderTop: '1px solid #334155', display: 'flex', gap: 8, alignItems: 'center' };
 const chatInputStyle: CSSProperties = { flex: 1, background: '#020617', border: '1px solid #334155', color: '#fff', borderRadius: 8, padding: '8px 12px', outline: 'none' };
 const sendBtn: CSSProperties = { background: '#38bdf8', color: '#000', border: 'none', width: 40, height: 36, borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };

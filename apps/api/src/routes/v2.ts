@@ -25,7 +25,7 @@ import express from 'express';
 import { submissionRouter } from './submissionRoutes';
 import { profileRouter } from './profileRoutes';
 import { interviewRouter } from './interviewRoutes'; 
-
+import crypto from 'crypto';
 const uploadDir = path.join(process.cwd(), 'public', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -252,6 +252,43 @@ export function mountV2Routes(app: Express, io: Server) {
     }
   }));
 
+  router.post('/auth/register', asyncRoute(async (req, res) => {
+  const { username, email, name, password } = req.body;
+
+  if (!username || !email || !password) {
+    return res.status(400).json({ error: 'Username, email and password are required fields.' });
+  }
+
+  const cleanUsername = String(username).trim();
+  const cleanEmail = String(email).trim().toLowerCase();
+
+  const existingUser = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { username: cleanUsername },
+        { email: cleanEmail }
+      ]
+    }
+  });
+
+  if (existingUser) {
+    return res.status(400).json({ error: 'Username or email handle already registered.' });
+  }
+
+  // Generate a basic SHA256 string signature for local testing without large external node modules
+  const hash = crypto.createHash('sha256').update(password).digest('hex');
+
+  const newUser = await prisma.user.create({
+    data: {
+      username: cleanUsername,
+      email: cleanEmail,
+      name: name || cleanUsername,
+      passwordHash: hash
+    }
+  });
+
+  res.status(201).json({ success: true, userId: newUser.id });
+}));
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contest = await registerForContestV2(req.params.id, {
