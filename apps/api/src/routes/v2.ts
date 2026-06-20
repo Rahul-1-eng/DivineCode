@@ -392,8 +392,11 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
-  router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
-    const viewer = await resolvedViewerFromRequest(req);
+router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
+    // FIX: Set createIfMissing=true to ensure the user is resolved in the DB 
+    // even if they haven't "synced" their profile recently.
+    const viewer = await resolvedViewerFromRequest(req, true);
+    
     if (!viewer.userId) throw new Error("Unauthorized to unregister. User ID missing.");
     const contestId = req.params.id;
     
@@ -472,9 +475,14 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(contests.map(c => sanitizeContestForViewer(c, viewerFromRequest(req))));
   });
 
-  router.post('/contests', asyncRoute(async (req, res) => {
-    const contest = await createContestV2(req.body);
-    res.status(201).json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
+router.post('/contests', asyncRoute(async (req, res) => {
+    // FIX: Must resolve the ownerId from the authenticated user
+    const viewer = await resolvedViewerFromRequest(req, true);
+    if (!viewer.userId) throw new Error("Unauthorized: Must be logged in to create a mashup.");
+
+    const payload = { ...req.body, ownerId: viewer.userId };
+    const contest = await createContestV2(payload);
+    res.status(201).json(sanitizeContestForViewer(contest, viewer));
   }));
 
   router.put('/contests/:id', asyncRoute(async (req, res) => {
