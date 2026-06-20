@@ -22,8 +22,8 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
           const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
           
           try {
-            // Updated to explicitly hit the /v2 router where the new login endpoint is mounted
-            const res = await fetch(`${apiBase}/api/v2/auth/login`, {
+            // UPDATED: Now pointing to the endpoint established in index.ts
+            const res = await fetch(`${apiBase}/api/auth/login`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -35,7 +35,7 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
             const user = await res.json();
 
             // Return the mapped user object to inject into NextAuth
-            if (res.ok && user) {
+            if (res.ok && user && !user.error) {
               return {
                 id: user.id,
                 name: user.name,
@@ -43,6 +43,7 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
                 handle: user.username // Map internal username to session handle
               }; 
             }
+            console.warn("API rejected login:", user);
             return null;
           } catch (error) {
             console.error('Credentials auth failed:', error);
@@ -70,7 +71,6 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
             });
             
             const data = await res.json();
-            // Assign the API-generated username to the user object
             if (data?.username) {
               (user as any).handle = data.username;
             }
