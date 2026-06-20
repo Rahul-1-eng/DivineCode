@@ -4,7 +4,9 @@ import http from 'http';
 import path from 'path';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { connectDB } from './db';
+import { prisma } from './prisma/client';
 import { mountV2Routes } from './routes/v2';
 import { startQueueWorkers } from './workers/index';
 import { setupDuelSockets } from './modules/duel/duelSocketService';
@@ -84,6 +86,54 @@ app.get('/', (_req, res) => res.json({ status: 'ok', app: 'DivineCode API V2' })
 app.post('/api/auth/google', async (req, res) => { 
   try { const user = await upsertGoogleUser(req.body); res.json({ ok: true, user }); } 
   catch (e) { res.status(400).json({ ok: false, error: 'Auth failed' }); } 
+});
+
+// 👉 FIX: This endpoint was missing entirely. NextAuth's credentials
+// provider (apps/web/pages/api/auth/[...nextauth].ts) has always been
+// calling POST /api/auth/login — it 404'd every time, so authorize()
+// always returned null and the UI always said "Invalid credentials,"
+// regardless of what was typed.
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { handle, password } = req.body;
+    if (!handle || !password) {
+      return res.status(400).json({ error: 'Username and password are required.' });
+    }
+
+    const cleanHandle = String(handle).trim();
+    const cleanPassword = String(password).trim();
+
+    // Allow sign-in by username (handle) or email, case-insensitively,
+    // matching how the rest of the codebase already treats handles.
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: { equals: cleanHandle, mode: 'insensitive' } },
+          { email: cleanHandle.toLowerCase() }
+        ]
+      }
+    });
+
+    // No passwordHash means this account only ever signed in with Google.
+    if (!user || !user.passwordHash) {
+      return res.status(401).json({ error: 'Invalid username or password.' });
+    }
+
+    const isValid = await bcrypt.compare(cleanPassword, user.passwordHash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid username or password.' });
+    }
+
+    return res.json({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      username: user.username
+    });
+  } catch (err) {
+    console.error('[Auth] Login error:', err);
+    return res.status(500).json({ error: 'Internal server error during login.' });
+  }
 });
 
 // --- STARTUP ---
