@@ -28,6 +28,7 @@ import { interviewRouter } from './interviewRoutes';
 import crypto from 'crypto';
 import { mcqQuestions } from '../data/mcq'; // Added import for Logical Games
 import bcrypt from 'bcryptjs';
+
 const uploadDir = path.join(process.cwd(), 'public', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -285,20 +286,56 @@ export function mountV2Routes(app: Express, io: Server) {
       return res.status(400).json({ error: 'Username or email handle already registered.' });
     }
 
-   
     const salt = await bcrypt.genSalt(10);
-const hashedPassword = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
-const newUser = await prisma.user.create({
-  data: {
-    username: cleanUsername,
-    email: cleanEmail,
-    name: name || cleanUsername,
-    passwordHash: hashedPassword // Store the bcrypt hash
-  }
-});
+    const newUser = await prisma.user.create({
+      data: {
+        username: cleanUsername,
+        email: cleanEmail,
+        name: name || cleanUsername,
+        passwordHash: hashedPassword // Store the bcrypt hash
+      }
+    });
 
     res.status(201).json({ success: true, userId: newUser.id });
+  }));
+
+  router.post('/auth/login', asyncRoute(async (req, res) => {
+    const { handle, password } = req.body;
+
+    if (!handle || !password) {
+      return res.status(400).json({ error: 'Handle and password are required.' });
+    }
+
+    const cleanHandle = String(handle).trim();
+
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: cleanHandle },
+          { email: cleanHandle.toLowerCase() }
+        ]
+      }
+    });
+
+    if (!existingUser || !existingUser.passwordHash) {
+      return res.status(401).json({ error: 'Invalid credentials.' });
+    }
+
+    const isValid = await bcrypt.compare(password, existingUser.passwordHash);
+
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid credentials.' });
+    }
+
+    res.status(200).json({
+      id: existingUser.id,
+      username: existingUser.username,
+      email: existingUser.email,
+      name: existingUser.name,
+      avatarUrl: existingUser.avatarUrl
+    });
   }));
 
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {

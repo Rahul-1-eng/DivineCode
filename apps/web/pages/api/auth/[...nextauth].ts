@@ -22,7 +22,8 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
           const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
           
           try {
-            const res = await fetch(`${apiBase}/api/auth/login`, {
+            // Updated to explicitly hit the /v2 router where the new login endpoint is mounted
+            const res = await fetch(`${apiBase}/api/v2/auth/login`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
