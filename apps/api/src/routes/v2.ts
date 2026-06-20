@@ -26,7 +26,7 @@ import { submissionRouter } from './submissionRoutes';
 import { profileRouter } from './profileRoutes';
 import { interviewRouter } from './interviewRoutes'; 
 import crypto from 'crypto';
-import { mcqQuestions } from '../data/mcq'; // Added import for Logical Games
+import { mcqQuestions } from '../data/mcq'; 
 import bcrypt from 'bcryptjs';
 
 const uploadDir = path.join(process.cwd(), 'public', 'uploads');
@@ -195,7 +195,6 @@ export function mountV2Routes(app: Express, io: Server) {
     });
   });
 
-  // 👉 NEW: Logical Games MCQ Dataset Route
   router.get('/mcqs', (req, res) => {
     try {
       res.json(mcqQuestions);
@@ -233,13 +232,16 @@ export function mountV2Routes(app: Express, io: Server) {
 
       contents.push({ role: 'user', parts: currentParts });
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      // 👉 FIX: Model updated
+      const modelName = process.env.AI_MODEL || 'gemini-3.5-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
       const { data } = await axios.post(url, { contents });
       
       res.json({ reply: data.candidates[0].content.parts[0].text });
     } catch (e: any) {
       console.error('[AI Chat] Error:', e.response?.data || e.message);
-      res.json({ reply: "My neural pathways are a bit tangled right now. Please try asking again!" });
+      // 👉 FIX: Honest error reporting
+      res.json({ reply: "AI Service Error: Failed to generate a response. The model may be rate-limited or unavailable." });
     }
   }));
 
@@ -497,11 +499,9 @@ export function mountV2Routes(app: Express, io: Server) {
  router.post('/contests/:id/finalize', asyncRoute(async (req, res) => {
   const viewer = await requireContestOwner(req);
   
-  // 1. Get contest state
   const contest = await prisma.contest.findUnique({ where: { id: req.params.id } });
   if (!contest) throw new Error('Contest not found');
 
-  // 2. Only run if it hasn't been finalized before
   let rewards = null;
   if (contest.status !== ContestStatus.ENDED) {
       await prisma.contest.update({ 
@@ -509,8 +509,6 @@ export function mountV2Routes(app: Express, io: Server) {
           data: { status: ContestStatus.ENDED } 
       });
       await recomputeContestStandings(req.params.id);
-      
-      // 3. THIS IS THE CRITICAL CALL
       rewards = await processContestRewards(req.params.id);
   }
 

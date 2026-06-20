@@ -11,12 +11,10 @@ import { mountV2Routes } from './routes/v2';
 import { startQueueWorkers } from './workers/index';
 import { setupDuelSockets } from './modules/duel/duelSocketService';
 import { setupContestSockets } from './modules/contests/contestSocketService';
-// Mongo Cleanup: Stripped loadContestDocuments and loadSubmissionDocuments
 import { upsertGoogleUser } from './storage';
 
 const app = express();
 
-// 🛡️ THE ABSOLUTE CORS INTERCEPTOR 🛡️
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
@@ -26,7 +24,6 @@ app.use((req, res, next) => {
   }
   
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  // Explicitly allow the Authorization header
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-user-email, x-user-name, x-worker-secret, x-user-id');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   
@@ -38,16 +35,13 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '10mb' }));
 
-// 🛡️ SECURITY FIX: JWT VERIFICATION MIDDLEWARE 🛡️
-// Intercepts the Bearer token minted by Next.js and securely decodes it
 app.use((req: any, res, next) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
     try {
-      // Must match the NEXTAUTH_SECRET on the frontend
       const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET || '');
-      req.user = decoded; // Attach verified payload { id, email, name }
+      req.user = decoded; 
     } catch (err) {
       console.warn('Invalid or expired API token rejected.');
     }
@@ -57,7 +51,6 @@ app.use((req: any, res, next) => {
 
 const server = http.createServer(app);
 
-// Open WebSocket CORS
 const io = new Server(server, { 
   cors: { 
     origin: "*", 
@@ -66,33 +59,23 @@ const io = new Server(server, {
   } 
 });
 
-// Mongo Cleanup: Removed the Maps, arrays, and restoreFromMongo() function entirely.
-
 // --- MODULE INITIALIZATION ---
 startQueueWorkers(io);
 setupDuelSockets(io);
-setupContestSockets(io);
+// 👉 FIX: Commented out to prevent duplicate socket execution since v2.ts handles team/voice routing
+// setupContestSockets(io); 
 
 // --- ROUTES ---
 mountV2Routes(app, io);
 
-// Serve Static Uploads
 app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
-
-// Health Check
 app.get('/', (_req, res) => res.json({ status: 'ok', app: 'DivineCode API V2' }));
 
-// Auth
 app.post('/api/auth/google', async (req, res) => { 
   try { const user = await upsertGoogleUser(req.body); res.json({ ok: true, user }); } 
   catch (e) { res.status(400).json({ ok: false, error: 'Auth failed' }); } 
 });
 
-// 👉 FIX: This endpoint was missing entirely. NextAuth's credentials
-// provider (apps/web/pages/api/auth/[...nextauth].ts) has always been
-// calling POST /api/auth/login — it 404'd every time, so authorize()
-// always returned null and the UI always said "Invalid credentials,"
-// regardless of what was typed.
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { handle, password } = req.body;
@@ -103,8 +86,6 @@ app.post('/api/auth/login', async (req, res) => {
     const cleanHandle = String(handle).trim();
     const cleanPassword = String(password).trim();
 
-    // Allow sign-in by username (handle) or email, case-insensitively,
-    // matching how the rest of the codebase already treats handles.
     const user = await prisma.user.findFirst({
       where: {
         OR: [
@@ -114,7 +95,6 @@ app.post('/api/auth/login', async (req, res) => {
       }
     });
 
-    // No passwordHash means this account only ever signed in with Google.
     if (!user || !user.passwordHash) {
       return res.status(401).json({ error: 'Invalid username or password.' });
     }
