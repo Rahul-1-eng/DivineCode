@@ -47,7 +47,7 @@ export async function scrapeProblemFromUrl(url: string) {
     };
   }
 
-  // 👉 FIX: The unreliable auto-YouTube fetcher has been permanently removed.
+  // The unreliable auto-YouTube fetcher has been completely removed.
   // This prevents random ad videos or unrelated tutorials from polluting the problem description.
 
   return result;

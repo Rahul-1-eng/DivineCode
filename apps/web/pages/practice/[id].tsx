@@ -39,6 +39,15 @@ export default function ProblemWorkspace() {
       .catch(err => setProblem({ error: true, title: 'Error', description: 'Failed to load.' }));
   }, [id, session]);
 
+  // NEW: Defense in depth redirect
+  useEffect(() => {
+    if (!problem || problem.error) return;
+    const hasRealDescription = problem.descriptionHtml && problem.descriptionHtml.replace(/<[^>]*>/g, '').trim().length > 15;
+    if (!hasRealDescription && problem.originalUrl) {
+      window.location.replace(problem.originalUrl);
+    }
+  }, [problem]);
+
   const sampleData = useMemo(() => {
     if (!problem || !problem.testcases) return { input: '', output: '' };
     try {

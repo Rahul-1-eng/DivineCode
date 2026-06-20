@@ -20,79 +20,6 @@ const SUGGESTED_QUESTIONS = [
   "How do I use the live team voice chat?"
 ];
 
-// 👉 NEW: Standalone Client-Side Sliding Puzzle Engine
-function SlidingPuzzleGame() {
-  const [tiles, setTiles] = useState<number[]>([]);
-  const [moves, setMoves] = useState(0);
-  const [won, setWon] = useState(false);
-
-  useEffect(() => { resetGame(); }, []);
-
-  function resetGame() {
-    let initial = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0];
-    for (let i = initial.length - 2; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [initial[i], initial[j]] = [initial[j], initial[i]];
-    }
-    setTiles(initial);
-    setMoves(0);
-    setWon(false);
-  }
-
-  function handleTileClick(index: number) {
-    if (won) return;
-    const emptyIndex = tiles.indexOf(0);
-    const validMoves = [index - 1, index + 1, index - 4, index + 4];
-
-    if (index % 4 === 0 && emptyIndex === index - 1) return;
-    if ((index + 1) % 4 === 0 && emptyIndex === index + 1) return;
-
-    if (validMoves.includes(emptyIndex)) {
-      const nextTiles = [...tiles];
-      [nextTiles[index], nextTiles[emptyIndex]] = [nextTiles[emptyIndex], nextTiles[index]];
-      setTiles(nextTiles);
-      setMoves(m => m + 1);
-
-      const isWin = nextTiles.slice(0, 15).every((val, i) => val === i + 1);
-      if (isWin) setWon(true);
-    }
-  }
-
-  return (
-    <div style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(15,23,42,0.6))', border: '1px solid rgba(148,163,184,.22)', padding: 30, borderRadius: 24, width: '100%', maxWidth: 400, boxShadow: '0 28px 90px rgba(0,0,0,.3)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h3 style={{ margin: 0, color: '#67e8f9', fontSize: 20, display: 'flex', alignItems: 'center', gap: 10 }}>🧠 Cognitive Arena</h3>
-        <span style={{ fontSize: 14, color: '#94a3b8', background: 'rgba(2,6,23,.5)', padding: '6px 12px', borderRadius: 8 }}>Moves: <b style={{ color: '#fff' }}>{moves}</b></span>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, background: '#020617', padding: 10, borderRadius: 16 }}>
-        {tiles.map((tile, idx) => (
-          <button 
-            key={idx} 
-            onClick={() => handleTileClick(idx)} 
-            style={{ 
-              width: '100%', aspectRatio: '1', borderRadius: 10, border: 'none', 
-              background: tile === 0 ? 'transparent' : 'linear-gradient(135deg, #1e293b, #0f172a)', 
-              borderBottom: tile === 0 ? 'none' : '3px solid #334155', 
-              color: '#fff', fontSize: 20, fontWeight: 'bold', cursor: tile === 0 ? 'default' : 'pointer', 
-              transition: 'all 0.1s ease',
-              boxShadow: tile === 0 ? 'none' : '0 4px 6px rgba(0,0,0,0.3)'
-            }}
-          >
-            {tile !== 0 ? tile : ''}
-          </button>
-        ))}
-      </div>
-
-      {won && <p style={{ color: '#4ade80', textAlign: 'center', fontWeight: 'bold', margin: '16px 0 0', fontSize: 18 }}>🎉 Perfect Solve!</p>}
-      
-      <button onClick={resetGame} style={{ marginTop: 20, width: '100%', padding: '12px', background: '#334155', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 'bold', cursor: 'pointer', transition: 'background 0.2s' }} onMouseOver={e => e.currentTarget.style.background = '#475569'} onMouseOut={e => e.currentTarget.style.background = '#334155'}>
-        Reset Board Layout
-      </button>
-    </div>
-  );
-}
-
 export default function Home() {
   const { data: session, status } = useSession();
   const [profile, setProfile] = useState<any>(null);
@@ -217,11 +144,6 @@ export default function Home() {
             <p style={{ margin: 0, color: '#a8b3c7', lineHeight: 1.55 }}>{f.text}</p>
           </motion.div>
         ))}
-      </motion.section>
-
-      {/* 👉 NEW: Cognitive Arena / Sliding Puzzle Game positioned at the bottom of the home screen */}
-      <motion.section initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.8 }} style={{ maxWidth: 1180, margin: '60px auto 40px', display: 'flex', justifyContent: 'center' }}>
-        <SlidingPuzzleGame />
       </motion.section>
 
       <div style={{ position: 'fixed', bottom: 30, right: 30, zIndex: 50, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>

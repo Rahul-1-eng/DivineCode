@@ -10,10 +10,82 @@ const SUGGESTED_QUESTIONS = [
   "What are the most common array manipulation patterns?"
 ];
 
+// 👉 NEW: Sliding Puzzle Game Migrated to Practice Tab
+function SlidingPuzzleGame() {
+  const [tiles, setTiles] = useState<number[]>([]);
+  const [moves, setMoves] = useState(0);
+  const [won, setWon] = useState(false);
+
+  useEffect(() => { resetGame(); }, []);
+
+  function resetGame() {
+    let initial = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0];
+    for (let i = initial.length - 2; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [initial[i], initial[j]] = [initial[j], initial[i]];
+    }
+    setTiles(initial);
+    setMoves(0);
+    setWon(false);
+  }
+
+  function handleTileClick(index: number) {
+    if (won) return;
+    const emptyIndex = tiles.indexOf(0);
+    const validMoves = [index - 1, index + 1, index - 4, index + 4];
+
+    if (index % 4 === 0 && emptyIndex === index - 1) return;
+    if ((index + 1) % 4 === 0 && emptyIndex === index + 1) return;
+
+    if (validMoves.includes(emptyIndex)) {
+      const nextTiles = [...tiles];
+      [nextTiles[index], nextTiles[emptyIndex]] = [nextTiles[emptyIndex], nextTiles[index]];
+      setTiles(nextTiles);
+      setMoves(m => m + 1);
+
+      const isWin = nextTiles.slice(0, 15).every((val, i) => val === i + 1);
+      if (isWin) setWon(true);
+    }
+  }
+
+  return (
+    <div style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(15,23,42,0.6))', border: '1px solid rgba(148,163,184,.22)', padding: 30, borderRadius: 24, width: '100%', maxWidth: 450, margin: '0 auto', boxShadow: '0 28px 90px rgba(0,0,0,.3)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h3 style={{ margin: 0, color: '#67e8f9', fontSize: 20, display: 'flex', alignItems: 'center', gap: 10 }}>🧠 Cognitive Arena</h3>
+        <span style={{ fontSize: 14, color: '#94a3b8', background: 'rgba(2,6,23,.5)', padding: '6px 12px', borderRadius: 8 }}>Moves: <b style={{ color: '#fff' }}>{moves}</b></span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, background: '#020617', padding: 10, borderRadius: 16 }}>
+        {tiles.map((tile, idx) => (
+          <button 
+            key={idx} 
+            onClick={() => handleTileClick(idx)} 
+            style={{ 
+              width: '100%', aspectRatio: '1', borderRadius: 10, border: 'none', 
+              background: tile === 0 ? 'transparent' : 'linear-gradient(135deg, #1e293b, #0f172a)', 
+              borderBottom: tile === 0 ? 'none' : '3px solid #334155', 
+              color: '#fff', fontSize: 20, fontWeight: 'bold', cursor: tile === 0 ? 'default' : 'pointer', 
+              transition: 'all 0.1s ease',
+              boxShadow: tile === 0 ? 'none' : '0 4px 6px rgba(0,0,0,0.3)'
+            }}
+          >
+            {tile !== 0 ? tile : ''}
+          </button>
+        ))}
+      </div>
+
+      {won && <p style={{ color: '#4ade80', textAlign: 'center', fontWeight: 'bold', margin: '16px 0 0', fontSize: 18 }}>🎉 Perfect Solve!</p>}
+      
+      <button onClick={resetGame} style={{ marginTop: 20, width: '100%', padding: '12px', background: '#334155', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 'bold', cursor: 'pointer', transition: 'background 0.2s' }} onMouseOver={e => e.currentTarget.style.background = '#475569'} onMouseOut={e => e.currentTarget.style.background = '#334155'}>
+        Reset Board Layout
+      </button>
+    </div>
+  );
+}
+
 export default function PracticePage() {
   const { data: session } = useSession(); 
   const [problems, setProblems] = useState<any[]>([]);
-  const [mcqData, setMcqData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Tab State
@@ -23,12 +95,6 @@ export default function PracticePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [difficultyFilter, setDifficultyFilter] = useState('All');
   const [platformFilter, setPlatformFilter] = useState('All');
-
-  // Logical Games State
-  const [stopwatchTime, setStopwatchTime] = useState(0);
-  const [isStopwatchRunning, setIsStopwatchRunning] = useState(false);
-  const [logicalAnswers, setLogicalAnswers] = useState<Record<number, number>>({});
-  const [logicalScore, setLogicalScore] = useState<number | null>(null);
 
   // Chatbot State
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -44,58 +110,16 @@ export default function PracticePage() {
   useEffect(() => {
     const headers = { 'x-user-email': session?.user?.email || '' };
     
-    Promise.allSettled([
-      fetch(`${API_BASE_URL}/api/v2/ai-dataset`, { headers }).then(r => r.json()),
-      fetch(`${API_BASE_URL}/api/v2/mcqs`, { headers }).then(r => r.json())
-    ])
-    .then(([dsaRes, mcqRes]) => { 
-      if (dsaRes.status === 'fulfilled') {
-        setProblems(Array.isArray(dsaRes.value.problems) ? dsaRes.value.problems : []); 
-      }
-      if (mcqRes.status === 'fulfilled') {
-        setMcqData(Array.isArray(mcqRes.value) ? mcqRes.value : []);
-      }
-      setLoading(false); 
-    })
-    .catch(() => { setLoading(false); });
+    fetch(`${API_BASE_URL}/api/v2/ai-dataset`, { headers })
+      .then(r => r.json())
+      .then(dsaRes => { 
+        setProblems(Array.isArray(dsaRes.problems) ? dsaRes.problems : []); 
+        setLoading(false); 
+      })
+      .catch(() => { setLoading(false); });
   }, [session]); 
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages, isAiTyping]);
-
-  // Stopwatch Logic
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isStopwatchRunning) {
-      interval = setInterval(() => setStopwatchTime(prev => prev + 1), 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isStopwatchRunning]);
-
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const s = (seconds % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
-
-  // Dynamically uses backend dataset
-  const dailyLogicalGames = useMemo(() => {
-    const logicalPool = mcqData.filter(q => q.type === 'logical');
-    if (logicalPool.length === 0) return [];
-    
-    const dayOfYear = Math.floor(Date.now() / 86400000);
-    const startIndex = dayOfYear % Math.max(1, logicalPool.length - 2);
-    
-    return logicalPool.slice(startIndex, startIndex + 3);
-  }, [mcqData]);
-
-  const submitLogicalGames = () => {
-    let currentScore = 0;
-    dailyLogicalGames.forEach(q => {
-      if (logicalAnswers[q.id] === q.correctIndex) currentScore++;
-    });
-    setLogicalScore(currentScore);
-    setIsStopwatchRunning(false);
-  };
 
   const getDifficultyColor = (rating: number | string | null) => {
     if (!rating) return '#94a3b8'; 
@@ -191,96 +215,19 @@ export default function PracticePage() {
         </div>
 
         {activeTab === 'logical' && (
-          <div style={{ background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30, flexWrap: 'wrap', gap: 20 }}>
-              <div>
-                <h2 style={{ margin: '0 0 5px', color: '#eef2ff' }}>Daily Logic Arena</h2>
-                <p style={{ margin: 0, color: '#94a3b8' }}>Train your deductive reasoning. Problems reset every 24 hours.</p>
-              </div>
-              
-              <div style={{ display: 'flex', alignItems: 'center', gap: 15, background: '#020617', padding: '10px 20px', borderRadius: 12, border: '1px solid #334155' }}>
-                <span style={{ fontSize: 28, fontWeight: 'bold', color: '#38bdf8', fontFamily: 'monospace', width: 90 }}>
-                  {formatTime(stopwatchTime)}
-                </span>
-                <button 
-                  onClick={() => setIsStopwatchRunning(!isStopwatchRunning)} 
-                  style={{ background: isStopwatchRunning ? '#ef4444' : '#10b981', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}
-                >
-                  {isStopwatchRunning ? '⏸ Pause' : '▶ Start'}
-                </button>
-                <button 
-                  onClick={() => { setStopwatchTime(0); setLogicalScore(null); setLogicalAnswers({}); setIsStopwatchRunning(false); }}
-                  style={{ background: '#1e293b', color: '#cbd5e1', border: 'none', padding: '8px 16px', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}
-                >
-                  🔄 Reset
-                </button>
-              </div>
-            </div>
-
-            {loading ? (
-              <p style={{ color: '#64748b', textAlign: 'center', padding: 40 }}>Initializing puzzle engine...</p>
-            ) : dailyLogicalGames.length === 0 ? (
-              <p style={{ color: '#f87171', textAlign: 'center', padding: 40 }}>Could not fetch today's puzzles from the server.</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
-                {dailyLogicalGames.map((q, idx) => (
-                  <div key={q.id} style={{ background: '#1e293b', padding: 20, borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 15 }}>
-                      <strong style={{ color: '#38bdf8' }}>Puzzle {idx + 1}</strong>
-                      <span style={{ background: 'rgba(56,189,248,0.1)', color: '#7dd3fc', padding: '2px 8px', borderRadius: 6, fontSize: 12 }}>{q.concept}</span>
-                    </div>
-                    <p style={{ fontSize: 16, lineHeight: 1.6, marginBottom: 20 }}>{q.question}</p>
-                    
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                      {q.options.map((opt: string, optIdx: number) => {
-                        const isSelected = logicalAnswers[q.id] === optIdx;
-                        const showCorrect = logicalScore !== null && q.correctIndex === optIdx;
-                        const showWrong = logicalScore !== null && isSelected && q.correctIndex !== optIdx;
-
-                        return (
-                          <button 
-                            key={optIdx} 
-                            disabled={logicalScore !== null}
-                            onClick={() => {
-                              setLogicalAnswers(prev => ({ ...prev, [q.id]: optIdx }));
-                              if (!isStopwatchRunning && stopwatchTime === 0) setIsStopwatchRunning(true);
-                            }}
-                            style={{
-                              padding: '12px 16px', borderRadius: 8, textAlign: 'left', cursor: logicalScore !== null ? 'default' : 'pointer', transition: '0.2s',
-                              background: showCorrect ? 'rgba(74,222,128,0.2)' : showWrong ? 'rgba(248,113,113,0.2)' : isSelected ? 'rgba(56,189,248,0.2)' : '#0f172a',
-                              border: `1px solid ${showCorrect ? '#4ade80' : showWrong ? '#f87171' : isSelected ? '#38bdf8' : '#334155'}`,
-                              color: showCorrect ? '#4ade80' : showWrong ? '#f87171' : '#eef2ff'
-                            }}
-                          >
-                            {String.fromCharCode(65 + optIdx)}. {opt}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-
-                {logicalScore === null ? (
-                  <button onClick={submitLogicalGames} style={{ background: '#38bdf8', color: '#000', padding: 16, borderRadius: 12, border: 'none', fontSize: 18, fontWeight: 'bold', cursor: 'pointer', marginTop: 10 }}>
-                    Submit Answers & Stop Clock
-                  </button>
-                ) : (
-                  <div style={{ background: 'linear-gradient(135deg, rgba(74,222,128,0.2), rgba(56,189,248,0.2))', padding: 25, borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', textAlign: 'center' }}>
-                    <h3 style={{ margin: '0 0 10px', fontSize: 24 }}>Session Complete!</h3>
-                    <p style={{ margin: 0, fontSize: 18, color: '#cbd5e1' }}>
-                      You scored <strong style={{ color: '#4ade80' }}>{logicalScore} / {dailyLogicalGames.length}</strong> in <strong style={{ color: '#38bdf8' }}>{formatTime(stopwatchTime)}</strong>.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
+          <div style={{ background: '#0f172a', padding: 40, borderRadius: 16, border: '1px solid #1e293b', minHeight: 400, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <h2 style={{ margin: '0 0 10px', color: '#eef2ff' }}>The 15-Puzzle Simulator</h2>
+            <p style={{ margin: '0 0 30px', color: '#94a3b8', textAlign: 'center', maxWidth: 600 }}>
+              Improve your spatial reasoning and algorithmic thinking. Arrange the tiles in ascending order from 1 to 15, leaving the bottom-right corner empty.
+            </p>
+            <SlidingPuzzleGame />
           </div>
         )}
 
         {activeTab === 'coding' && (
           <>
             <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-              <input placeholder="Search 5000+ questions or topics..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ ...filterInput, flex: 1, minWidth: 250 }} />
+              <input placeholder="Search problems or topics..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ ...filterInput, flex: 1, minWidth: 250 }} />
               <select value={difficultyFilter} onChange={(e) => setDifficultyFilter(e.target.value)} style={filterInput}><option value="All">All Difficulties</option><option value="Easy">Easy</option><option value="Medium">Medium</option><option value="Hard">Hard</option></select>
               <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={filterInput}><option value="All">All Platforms</option><option value="Codeforces">Codeforces</option><option value="LeetCode">LeetCode</option><option value="AtCoder">AtCoder</option><option value="CodeChef">CodeChef</option></select>
             </div>
@@ -294,7 +241,7 @@ export default function PracticePage() {
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={5} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}><motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ display: 'inline-block', width: 30, height: 30, border: '3px solid rgba(103,232,249,0.2)', borderTopColor: '#67e8f9', borderRadius: '50%' }} /><p style={{ marginTop: 15 }}>Loading 5000+ Questions...</p></td></tr>
+                    <tr><td colSpan={5} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}><motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ display: 'inline-block', width: 30, height: 30, border: '3px solid rgba(103,232,249,0.2)', borderTopColor: '#67e8f9', borderRadius: '50%' }} /><p style={{ marginTop: 15 }}>Loading Questions...</p></td></tr>
                   ) : filteredProblems.length === 0 ? (
                     <tr><td colSpan={5} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>No problems match your filters in the database.</td></tr>
                   ) : (
@@ -305,7 +252,13 @@ export default function PracticePage() {
                         <motion.tr 
                           key={p.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.02 }}
                           style={{ borderBottom: '1px solid #1e293b', background: idx % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.4)', transition: 'background 0.2s', cursor: 'pointer' }}
-                          onClick={() => window.location.href = `/practice/${p.id}`}
+                          onClick={() => {
+                            if (!hasDescription && p.originalUrl) {
+                              window.open(p.originalUrl, '_blank', 'noopener,noreferrer');
+                            } else {
+                              window.location.href = `/practice/${p.id}`;
+                            }
+                          }}
                           onMouseOver={(e) => e.currentTarget.style.background = 'rgba(30,41,59,0.8)'}
                           onMouseOut={(e) => e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.4)'}
                         >
@@ -316,11 +269,11 @@ export default function PracticePage() {
                               {hasDescription ? (
                                 <div dangerouslySetInnerHTML={{ __html: p.descriptionHtml.substring(0, 120) + '...' }} />
                               ) : (
-                                <div style={{ background: 'rgba(239,68,68,0.06)', padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.2)', fontSize: 13, color: '#f87171', display: 'inline-block' }}>
-                                  <span>Problem text hidden. </span>
+                                <div style={{ background: 'rgba(56,189,248,0.06)', padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(56,189,248,0.2)', fontSize: 13, color: '#7dd3fc', display: 'inline-block' }}>
+                                  <span>Solve this directly on {p.platform || 'the original platform'}. </span>
                                   {p.originalUrl && (
                                     <a href={p.originalUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: '#38bdf8', fontWeight: 'bold', marginLeft: 6, textDecoration: 'underline' }}>
-                                      Open External Platform ↗
+                                      Open ↗
                                     </a>
                                   )}
                                 </div>

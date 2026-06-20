@@ -122,7 +122,14 @@ export function setupDuelSockets(io: Server) {
       const player = state.players.find(p => p.id === socket.id);
       if (!player || player.attempts >= 2) return;
 
-      const isCorrect = currentQ.correctIndex === answerIndex;
+      // 👉 FIX: Evaluating against the correctIndices array from the updated Prisma Schema
+      let isCorrect = false;
+      if (currentQ.correctIndices && Array.isArray(currentQ.correctIndices)) {
+        isCorrect = currentQ.correctIndices.includes(answerIndex);
+      } else if (currentQ.correctIndex !== undefined) {
+        // Fallback just in case old data formats exist
+        isCorrect = currentQ.correctIndex === answerIndex;
+      }
 
       if (isCorrect) {
         player.score += 100;
