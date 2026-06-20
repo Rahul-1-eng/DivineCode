@@ -20,9 +20,11 @@ export default function AddQuestionPage() {
     fetch(`${API_BASE_URL}/api/v2/interview/tracks`)
       .then(r => r.json())
       .then(data => {
-        if (Array.isArray(data)) {
-          setTracks(data);
-          if (data.length > 0) setTrackId(data[0].id);
+        // Handle the nested structure from our new backend route
+        const trackList = data.tracks || data;
+        if (Array.isArray(trackList)) {
+          setTracks(trackList);
+          if (trackList.length > 0) setTrackId(trackList[0].id);
         }
       })
       .catch(console.error);
@@ -40,7 +42,8 @@ export default function AddQuestionPage() {
 
     setIsSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v2/interview/submit-question`, {
+      // 👉 FIX: Pointing to the correct /questions endpoint
+      const res = await fetch(`${API_BASE_URL}/api/v2/interview/questions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -51,8 +54,11 @@ export default function AddQuestionPage() {
           title,
           prompt,
           options,
-          correctIndex,
-          expectedAnswer
+          // 👉 FIX: The backend expects an array called correctIndices
+          correctIndices: [correctIndex], 
+          difficulty: 'Medium', // Defaulting to medium for user submissions
+          tags: [],
+          sourceCompany: ''
         })
       });
 

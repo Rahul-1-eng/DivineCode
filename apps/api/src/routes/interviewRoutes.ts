@@ -15,7 +15,7 @@ interviewRouter.get('/tracks', async (req, res) => {
   }
 });
 
-// GET questions for a specific track
+// GET questions for a specific track (ONLY APPROVED)
 interviewRouter.get('/tracks/:slug/questions', async (req, res) => {
   try {
     const track = await prisma.interviewTrack.findUnique({
@@ -24,15 +24,44 @@ interviewRouter.get('/tracks/:slug/questions', async (req, res) => {
 
     if (!track) return res.status(404).json({ error: 'Track not found' });
 
-    // Only fetch approved questions
+    // Only fetch approved questions for public users
     const questions = await prisma.interviewQuestion.findMany({
       where: { trackId: track.id, isApproved: true },
-      orderBy: { createdAt: 'desc' } // Or random order if you prefer
+      orderBy: { createdAt: 'desc' }
     });
 
     res.json({ success: true, questions });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to fetch questions' });
+  }
+});
+
+// 👉 NEW ADMIN ROUTE: GET all pending questions
+interviewRouter.get('/pending', async (req, res) => {
+  try {
+    const pendingQuestions = await prisma.interviewQuestion.findMany({
+      where: { isApproved: false },
+      include: { track: true }, // Include track info so admins know where it belongs
+      orderBy: { createdAt: 'asc' }
+    });
+
+    res.json({ success: true, questions: pendingQuestions });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch pending questions' });
+  }
+});
+
+// 👉 NEW ADMIN ROUTE: Approve a pending question
+interviewRouter.patch('/questions/:id/approve', async (req, res) => {
+  try {
+    const updatedQuestion = await prisma.interviewQuestion.update({
+      where: { id: req.params.id },
+      data: { isApproved: true }
+    });
+
+    res.json({ success: true, message: 'Question approved successfully', question: updatedQuestion });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to approve question' });
   }
 });
 
@@ -52,7 +81,7 @@ interviewRouter.get('/questions/:id', async (req, res) => {
   }
 });
 
-// 👉 NEW: POST endpoint for users to contribute questions
+// POST endpoint for users to contribute questions
 interviewRouter.post('/questions', async (req, res) => {
   try {
     const { trackId, title, prompt, options, correctIndices, difficulty, tags, sourceCompany } = req.body;
