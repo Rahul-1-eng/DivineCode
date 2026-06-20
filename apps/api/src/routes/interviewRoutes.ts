@@ -1,117 +1,106 @@
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
-import { interviewMcqs } from '../interviewMcqs';
 
 export const interviewRouter = Router();
 
-// 1. Fetch Tracks (Auto-seeds a default track if database is empty)
+// GET all tracks
 interviewRouter.get('/tracks', async (req, res) => {
   try {
-    let tracks = await prisma.interviewTrack.findMany({
+    const tracks = await prisma.interviewTrack.findMany({
       orderBy: { order: 'asc' }
     });
-
-    // Auto-seed fallback
-    if (tracks.length === 0) {
-      const defaultTrack = await prisma.interviewTrack.create({
-        data: { slug: 'core-cs', title: 'Core Computer Science', type: 'DSA', order: 1 }
-      });
-      tracks = [defaultTrack];
-    }
-
-    return res.json(tracks);
+    res.json({ success: true, tracks });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to fetch tracks' });
   }
 });
 
-// 2. Fetch Approved Questions (Auto-seeds from your interviewMcqs.ts file if empty!)
-interviewRouter.get('/questions', async (req, res) => {
+// GET questions for a specific track
+interviewRouter.get('/tracks/:slug/questions', async (req, res) => {
   try {
-    const { trackId } = req.query;
-    
-    let questions = await prisma.interviewQuestion.findMany({
-      where: { 
-        isApproved: true,
-        ...(trackId && trackId !== 'All' ? { trackId: String(trackId) } : {})
-      },
+    const track = await prisma.interviewTrack.findUnique({
+      where: { slug: req.params.slug }
+    });
+
+    if (!track) return res.status(404).json({ error: 'Track not found' });
+
+    // Only fetch approved questions
+    const questions = await prisma.interviewQuestion.findMany({
+      where: { trackId: track.id, isApproved: true },
+      orderBy: { createdAt: 'desc' } // Or random order if you prefer
+    });
+
+    res.json({ success: true, questions });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch questions' });
+  }
+});
+
+// GET a specific question by ID
+interviewRouter.get('/questions/:id', async (req, res) => {
+  try {
+    const question = await prisma.interviewQuestion.findUnique({
+      where: { id: req.params.id },
       include: { track: true }
     });
 
-    // AUTO-SEED LOGIC: If DB is empty, pull from interviewMcqs.ts and save them!
-    if (questions.length === 0 && (!trackId || trackId === 'All')) {
-      let defaultTrack = await prisma.interviewTrack.findFirst();
-      if (!defaultTrack) {
-        defaultTrack = await prisma.interviewTrack.create({ 
-          data: { slug: 'core-cs', title: 'Core Computer Science', type: 'DSA', order: 1 } 
-        });
-      }
+    if (!question) return res.status(404).json({ error: 'Question not found' });
 
-      // Map the static file into the database schema
-      const seedData = interviewMcqs.map(q => ({
-        trackId: defaultTrack!.id,
-        title: `${q.topic} Concept`,
-        prompt: q.question,
-        options: q.options,
-        correctIndices: [q.correctIndex],
-        isMultiple: false,
-        difficulty: q.rating >= 1500 ? 'Hard' : q.rating >= 1200 ? 'Medium' : 'Easy',
-        expectedAnswer: q.explanation,
-        isApproved: true
-      }));
-
-      await prisma.interviewQuestion.createMany({ data: seedData });
-      
-      // Re-fetch now that they are seeded
-      questions = await prisma.interviewQuestion.findMany({
-        where: { isApproved: true },
-        include: { track: true }
-      });
-    }
-
-    // Map correctIndices to the old correctIndex format for backward compatibility with the frontend
-    const mappedQuestions = questions.map(q => ({
-      ...q,
-      correctIndex: q.correctIndices && q.correctIndices.length > 0 ? q.correctIndices[0] : 0
-    }));
-
-    return res.json(mappedQuestions);
+    res.json({ success: true, question });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to fetch question' });
   }
 });
 
-// 3. User Submits a New Question (Goes to Pending)
-interviewRouter.post('/submit-question', async (req, res) => {
+// 👉 NEW: POST endpoint for users to contribute questions
+interviewRouter.post('/questions', async (req, res) => {
   try {
-    const email = req.headers['x-user-email'] as string;
-    const { trackId, title, prompt, options, correctIndex, expectedAnswer } = req.body;
+    const { trackId, title, prompt, options, correctIndices, difficulty, tags, sourceCompany } = req.body;
 
-    let isApproved = false;
-    
-    if (email) {
-      const user = await prisma.user.findUnique({ where: { email } });
-      if (user && (user.role === 'ADMIN' || user.role === 'PROBLEM_SETTER')) {
-        isApproved = true;
-      }
-
-      const question = await prisma.interviewQuestion.create({
-        data: {
-          trackId,
-          title,
-          prompt,
-          options,
-          correctIndices: [correctIndex],
-          expectedAnswer,
-          isApproved,
-          submittedById: user?.id
-        }
-      });
-      return res.json({ success: true, message: isApproved ? 'Question added directly!' : 'Question submitted for review!', question });
+    // Basic validation
+    if (!trackId || !title || !prompt || !options || !correctIndices) {
+      return res.status(400).json({ error: 'Missing required fields (trackId, title, prompt, options, correctIndices).' });
     }
 
-    return res.status(401).json({ error: 'Unauthorized to submit questions.' });
+    if (!Array.isArray(options) || options.length < 2) {
+      return res.status(400).json({ error: 'At least two options are required.' });
+    }
+
+    if (!Array.isArray(correctIndices) || correctIndices.length === 0) {
+      return res.status(400).json({ error: 'At least one correct index must be provided.' });
+    }
+
+    // Verify the track exists
+    const trackExists = await prisma.interviewTrack.findUnique({ where: { id: trackId } });
+    if (!trackExists) {
+      return res.status(400).json({ error: 'Invalid track ID provided.' });
+    }
+
+    // Create the question in a pending state
+    const newQuestion = await prisma.interviewQuestion.create({
+      data: {
+        trackId,
+        title,
+        prompt,
+        options,
+        correctIndices,
+        isMultiple: correctIndices.length > 1,
+        difficulty: difficulty || 'Medium',
+        tags: tags || [],
+        sourceCompany: sourceCompany || null,
+        // MUST BE FALSE so users don't instantly publish garbage to the live bank
+        isApproved: false 
+      }
+    });
+
+    res.status(201).json({ 
+      success: true, 
+      message: 'Question submitted successfully for moderator review.',
+      question: newQuestion 
+    });
+
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    console.error("[Interview Submit Error]", err);
+    res.status(500).json({ error: 'Failed to submit question.' });
   }
 });
