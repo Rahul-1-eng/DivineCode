@@ -80,9 +80,11 @@ interviewRouter.get('/questions/:id', async (req, res) => {
 });
 
 // POST endpoint for users to contribute questions
+// POST endpoint for users to contribute questions
 interviewRouter.post('/questions', async (req, res) => {
   try {
-    const { trackId, title, prompt, options, correctIndices, difficulty, tags, sourceCompany } = req.body;
+    // 👉 FIX: Added expectedAnswer to the destructured body
+    const { trackId, title, prompt, options, correctIndices, difficulty, tags, sourceCompany, expectedAnswer } = req.body;
 
     // Basic validation
     if (!trackId || !title || !prompt || !options || !correctIndices) {
@@ -102,6 +104,7 @@ interviewRouter.post('/questions', async (req, res) => {
       return res.status(400).json({ error: 'Invalid track ID provided.' });
     }
 
+    // Create the question in a pending state
     const newQuestion = await prisma.interviewQuestion.create({
       data: {
         trackId,
@@ -113,6 +116,8 @@ interviewRouter.post('/questions', async (req, res) => {
         difficulty: difficulty || 'Medium',
         tags: tags || [],
         sourceCompany: sourceCompany || null,
+        // 👉 FIX: Make sure the expectedAnswer is saved to the database
+        expectedAnswer: expectedAnswer || null,
         isApproved: false 
       }
     });

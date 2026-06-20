@@ -56,6 +56,7 @@ export default function AddQuestionPage() {
           options,
           // 👉 FIX: The backend expects an array called correctIndices
           correctIndices: [correctIndex], 
+          expectedAnswer,
           difficulty: 'Medium', // Defaulting to medium for user submissions
           tags: [],
           sourceCompany: ''
