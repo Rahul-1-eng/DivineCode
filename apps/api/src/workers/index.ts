@@ -3,8 +3,12 @@ import { Server } from 'socket.io';
 import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncService';
 import { judgeQueuedSubmission } from '../modules/judge/judge0Service';
 import { processContestRewards } from '../modules/ratings/ratingService';
+import { recomputeContestStandings } from '../modules/standings/standingService';
 import { CodeforcesContestSyncJob, JudgeSubmissionJob, ContestRewardsJob, QUEUE_NAMES } from '../queues/jobTypes';
 import { getSharedRedisConnection } from '../queues/redis';
+import { startCronJobs } from '../queues/queues';
+import { prisma } from '../prisma/client';
+import { ContestStatus } from '@prisma/client';
 
 type WorkerBundle = {
   judgeWorker: Worker<JudgeSubmissionJob>;
@@ -23,7 +27,6 @@ async function handleJudgeJob(job: Job<JudgeSubmissionJob>) {
   const result = await judgeQueuedSubmission(job.data.submissionId);
   const io = activeIoInstance;
 
-  // 👉 UPDATED: Emitting securely to the V2 `contest:{id}` prefixed room
   if (io && result.submission.contestId && result.standings) {
     io.to(`contest:${result.submission.contestId}`).emit('standings:update', {
       contestId: result.submission.contestId,
@@ -46,7 +49,6 @@ async function handleCodeforcesSyncJob(job: Job<CodeforcesContestSyncJob>) {
   const result = await syncCodeforcesContest(job.data.contestId);
   const io = activeIoInstance;
 
-  // 👉 UPDATED: Utilizing the standard `standings:update` hook your React UI is already listening for
   if (io && result.standings) {
     io.to(`contest:${job.data.contestId}`).emit('standings:update', {
       contestId: job.data.contestId,
@@ -63,9 +65,6 @@ async function handleCodeforcesSyncJob(job: Job<CodeforcesContestSyncJob>) {
 
 async function handleRewardsJob(job: Job<ContestRewardsJob>) {
   const result = await processContestRewards(job.data.contestId);
-  
-  // Optional: You could emit a global "Rewards Processed" event here if you want users to get confetti on their screen!
-  
   return result;
 }
 
@@ -102,6 +101,25 @@ export function startQueueWorkers(io?: Server) {
   judgeWorker.on('failed', (job, err) => console.error(`Judge failed: ${job?.id}`, err));
   externalSyncWorker.on('failed', (job, err) => console.error(`Sync failed: ${job?.id}`, err));
   rewardsWorker.on('failed', (job, err) => console.error(`Rewards failed: ${job?.id}`, err));
+
+  // 👉 FIX 1.6: Start Cron Jobs & Auto-Finalize Worker
+  startCronJobs();
+  new Worker('auto-finalize', async (job) => {
+    if (job.name === 'check-expired-contests') {
+      const expiredContests = await prisma.contest.findMany({
+        where: { status: ContestStatus.RUNNING, endTime: { lte: new Date() } }
+      });
+      for (const contest of expiredContests) {
+        await prisma.contest.update({ where: { id: contest.id }, data: { status: ContestStatus.ENDED } });
+        await recomputeContestStandings(contest.id);
+        await processContestRewards(contest.id);
+        if (activeIoInstance) {
+          activeIoInstance.to(`contest:${contest.id}`).emit('standings:update', { contestId: contest.id });
+        }
+        console.log(`[Cron] Auto-finalized contest ${contest.id}`);
+      }
+    }
+  }, { connection: sharedConnection });
 
   startedWorkers = { judgeWorker, externalSyncWorker, rewardsWorker };
   console.log('BullMQ workers initialized successfully.');

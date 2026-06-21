@@ -8,7 +8,7 @@ export const profileRouter = Router();
 profileRouter.get('/me', async (req, res) => {
   try {
     const viewer = await resolvedViewerFromRequest(req, true);
-const email = viewer.email;
+    const email = viewer.email;
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
     let user = await prisma.user.findUnique({
@@ -16,7 +16,8 @@ const email = viewer.email;
       include: { 
         externalHandles: true,
         ratingHistory: { orderBy: { createdAt: 'asc' }, include: { contest: { select: { title: true } } } },
-        submissions: { select: { verdict: true } },
+        // 👉 ADDED createdAt to power the Activity Heatmap
+        submissions: { select: { verdict: true, createdAt: true } },
         contestParticipants: {
           where: { standing: { isNot: null } },
           include: { contest: { select: { id: true, title: true, startTime: true, isRated: true } }, standing: true },
@@ -47,12 +48,12 @@ const email = viewer.email;
   }
 });
 
-// 👉 THE FIX: Absolute Bulletproof UPSERT logic. It will never fail to find the user.
+// Absolute Bulletproof UPSERT logic
 profileRouter.post('/claim-username', async (req, res) => {
   try {
     const viewer = await resolvedViewerFromRequest(req, true);
-const email = viewer.email;
-    const name = req.headers['x-user-name'] as string;
+    const email = viewer.email;
+    const name = viewer.name; 
     const { username } = req.body;
     
     if (!email) return res.status(401).json({ error: 'Unauthorized: No email provided.' });
@@ -62,7 +63,6 @@ const email = viewer.email;
 
     const targetUsername = username.trim();
 
-    // 1. Force find or create the user instantly. 
     let currentUser = await prisma.user.findUnique({ where: { email } });
     
     if (!currentUser) {
@@ -75,13 +75,11 @@ const email = viewer.email;
       });
     }
 
-    // 2. Check if the target username is taken by SOMEONE ELSE
     const existingUser = await prisma.user.findUnique({ where: { username: targetUsername } });
     if (existingUser && existingUser.id !== currentUser.id) {
       return res.status(400).json({ error: `The username "${targetUsername}" is already taken.` });
     }
 
-    // 3. Update the username
     const updatedUser = await prisma.user.update({
       where: { id: currentUser.id },
       data: { username: targetUsername }
@@ -94,11 +92,10 @@ const email = viewer.email;
   }
 });
 
-// 👉 THE FIX: Secure Password Update Route
 profileRouter.post('/update-password', async (req, res) => {
   try {
     const viewer = await resolvedViewerFromRequest(req, true);
-const email = viewer.email;
+    const email = viewer.email;
     const { currentPassword, newPassword } = req.body;
     
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
@@ -107,14 +104,12 @@ const email = viewer.email;
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // VERIFICATION: Check if user has an existing password, verify it first
     if (user.passwordHash) {
       if (!currentPassword) return res.status(400).json({ error: 'Current password is required to change it.' });
       const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
       if (!isValid) return res.status(400).json({ error: 'Incorrect current password.' });
     }
 
-    // CONSISTENCY: Using bcryptjs to hash, ensuring it matches your auth/register logic
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
@@ -133,7 +128,7 @@ const email = viewer.email;
 profileRouter.post('/save-handles', async (req, res) => {
   try {
     const viewer = await resolvedViewerFromRequest(req, true);
-const email = viewer.email;
+    const email = viewer.email;
     const { codeforcesHandle, leetcodeHandle } = req.body;
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -170,7 +165,7 @@ const email = viewer.email;
 profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
   try {
     const viewer = await resolvedViewerFromRequest(req, true);
-const email = viewer.email;
+    const email = viewer.email;
     const { platform, handle } = req.params;
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -180,4 +175,60 @@ const email = viewer.email;
     });
     return res.json({ success: true });
   } catch (err: any) { return res.status(500).json({ error: err.message }); }
+});
+
+// Endpoint to fetch a PUBLIC profile by username
+profileRouter.get('/u/:username', async (req, res) => {
+  try {
+    const { username } = req.params;
+    
+    const user = await prisma.user.findFirst({
+      where: { username: { equals: username, mode: 'insensitive' } },
+      include: { 
+        externalHandles: true,
+        // 👉 ADDED createdAt to power the Activity Heatmap
+        submissions: { select: { verdict: true, createdAt: true } },
+        contestParticipants: {
+          where: { standing: { isNot: null } },
+          include: { 
+            contest: { select: { id: true, title: true, startTime: true, isRated: true } }, 
+            standing: true 
+          },
+          orderBy: { joinedAt: 'desc' }
+        }
+      }
+    });
+    
+    if (!user) return res.status(404).json({ error: 'Coder not found in the DivineCode database.' });
+
+    const totalAttempts = user.submissions.length;
+    const totalAccepted = user.submissions.filter(s => s.verdict === 'ACCEPTED' || String(s.verdict) === 'OK').length;
+    const accuracy = totalAttempts > 0 ? Math.round((totalAccepted / totalAttempts) * 100) : 0;
+
+    const matchHistory = user.contestParticipants.map(p => {
+      const rBefore = p.ratingBefore ?? user.rating;
+      const rAfter = p.ratingAfter ?? user.rating;
+      return {
+        contestId: p.contest.id, 
+        contestName: p.contest.title, 
+        date: p.contest.startTime,
+        isRated: p.contest.isRated, 
+        rank: p.standing?.rank || '-', 
+        score: p.standing?.score || 0,
+        solved: p.standing?.solved || 0, 
+        ratingDelta: rAfter - rBefore, 
+        ratingAfter: rAfter
+      };
+    });
+
+    const { passwordHash, email, ...safeProfile } = user as any;
+
+    return res.json({ 
+      ...safeProfile, 
+      stats: { totalAttempts, totalAccepted, accuracy }, 
+      matchHistory 
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
 });

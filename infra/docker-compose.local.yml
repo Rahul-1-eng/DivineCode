@@ -31,5 +31,49 @@ services:
       timeout: 5s
       retries: 5
 
+  # --- JUDGE0 SYSTEM (Replaces Wandbox) ---
+  judge0-server:
+    image: judge0/judge0:1.13.1
+    container_name: divinecode-judge0-server
+    volumes:
+      - judge0_cg:/sys/fs/cgroup:ro
+    ports:
+      - "2358:2358"
+    privileged: true
+    environment:
+      - REDIS_HOST=divinecode-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - POSTGRES_HOST=divinecode-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=divinecode
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - AUTH_AUTHENTICATED_READS=false
+    depends_on:
+      - redis
+      - postgres
+
+  judge0-worker:
+    image: judge0/judge0:1.13.1
+    container_name: divinecode-judge0-worker
+    command: ["./scripts/workers"]
+    volumes:
+      - judge0_cg:/sys/fs/cgroup:ro
+    privileged: true
+    environment:
+      - REDIS_HOST=divinecode-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - POSTGRES_HOST=divinecode-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=divinecode
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    depends_on:
+      - redis
+      - postgres
+
 volumes:
   divinecode_postgres:
+  judge0_cg:

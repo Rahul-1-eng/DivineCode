@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { executeSubmission } from '../modules/judge/judge0Service';
-import { recomputeContestStandings } from '../modules/standings/standingService';
 import { getContestSubmissions } from '../modules/contests/submissionService';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 export const submissionRouter = Router();
@@ -11,8 +10,10 @@ submissionRouter.get('/contest/:contestId', async (req, res) => {
   try {
     const { contestId } = req.params;
     const viewer = await resolvedViewerFromRequest(req, true);
-const email = viewer.email;
-    const userId = req.headers['x-user-id'] as string;
+    const email = viewer.email;
+    
+    // FIX 1.2: Do not read from x-user-id header. Use the verified viewer object.
+    const userId = viewer.userId; 
 
     const submissions = await getContestSubmissions({
       contestId,
@@ -26,12 +27,11 @@ const email = viewer.email;
 });
 
 // Endpoint for LeetCode style "Run Code" (Runs against only sample test cases)
-// Endpoint for LeetCode style "Run Code" (Runs against only sample test cases)
 submissionRouter.post('/run-samples', async (req, res) => {
   const { problemId, code, language } = req.body;
 
   try {
-    // 1. First, try fetching from the relational Testcase table (for standard contest problems)
+    // 1. First, try fetching from the relational Testcase table
     let samples = await prisma.testcase.findMany({
       where: { problemId, isPublic: true }
     });
@@ -42,7 +42,6 @@ submissionRouter.post('/run-samples', async (req, res) => {
         where: { id: problemId }
       });
 
-      // 👉 FIXED: Extract inputs and outputs from the nested JSON array column safely
       if (aiProblem && aiProblem.testcases) {
         try {
           const parsedCases = typeof aiProblem.testcases === 'string'
@@ -50,7 +49,6 @@ submissionRouter.post('/run-samples', async (req, res) => {
             : (aiProblem.testcases as any);
 
           if (Array.isArray(parsedCases) && parsedCases.length > 0) {
-            // Map the parsed JSON objects into structured sample objects matching the Testcase layout
             samples = parsedCases.map((tc: any, idx: number) => ({
               id: `ai-sample-${idx}`,
               problemId,
@@ -91,7 +89,7 @@ submissionRouter.post('/:id/report', async (req, res) => {
     const { id } = req.params;
     const { reason } = req.body;
     const viewer = await resolvedViewerFromRequest(req, true);
-const email = viewer.email;
+    const email = viewer.email;
 
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -115,32 +113,6 @@ const email = viewer.email;
     }
 
     return res.json({ success: true, report });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// Endpoint for Owner to Manually Override Points
-submissionRouter.post('/:id/override', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { manualPoints } = req.body;
-    
-    const submission = await prisma.submission.update({
-      where: { id },
-      data: { manualPoints: manualPoints !== null ? Number(manualPoints) : null }
-    });
-
-    if (submission.contestId) {
-      await recomputeContestStandings(submission.contestId);
-      
-      const io = req.app.get('io');
-      if (io) {
-        io.to(`contest:${submission.contestId}`).emit('standings:update');
-      }
-    }
-
-    return res.json({ success: true, submission });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }

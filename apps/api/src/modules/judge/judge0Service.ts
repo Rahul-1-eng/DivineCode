@@ -101,7 +101,6 @@ async function finalizeVerdict(submissionId: string, verdict: Verdict) {
     const teamId = submission.teamId;
     const problemId = submission.contestProblemId;
 
-    // Use specific problem points, fallback to problem rating, fallback to 100
     const pointsToAward = submission.contestProblem?.points || submission.problem?.rating || 100;
 
     if (teamId && problemId) {
@@ -114,7 +113,7 @@ async function finalizeVerdict(submissionId: string, verdict: Verdict) {
           where: { id: teamId }, 
           data: { score: { increment: pointsToAward } } 
         });
-      } catch (err) {} // Ignore if already solved
+      } catch (err) {} 
     }
 
     await prisma.contestStanding.updateMany({ 
@@ -133,18 +132,15 @@ export async function judgeQueuedSubmission(submissionId: string) {
   if (!submission) throw new Error('Submission not found');
   
   // ==========================================
-  // STRICT MCQ GRADING LOGIC
+  // STRICT MCQ GRADING LOGIC (FIXED)
   // ==========================================
   if (submission.language === 'mcq') {
     let correctIndices: number[] = [];
     
-    // Check if it's stored relationally
     if (submission.contestProblem?.interviewQuestionId) {
         const mcq = await prisma.interviewQuestion.findUnique({ where: { id: submission.contestProblem.interviewQuestionId } });
         correctIndices = mcq?.correctIndices || [];
-    } 
-    // Check if it's stored dynamically in JSON
-    else if (submission.contestProblem?.mcqData) {
+    } else if (submission.contestProblem?.mcqData) {
         const data = typeof submission.contestProblem.mcqData === 'string' ? JSON.parse(submission.contestProblem.mcqData) : submission.contestProblem.mcqData;
         correctIndices = data.correctIndices || [];
     }
@@ -153,18 +149,16 @@ export async function judgeQueuedSubmission(submissionId: string) {
     try {
       let submitted: any;
       try {
-        // Try parsing as JSON array first [0, 2]
         submitted = JSON.parse(submission.code);
       } catch (e) {
-        // Fallback: if it's a single number string, wrap it in array
         const num = parseInt(submission.code, 10);
         submitted = !isNaN(num) ? [num] : [];
       }
       
       if (Array.isArray(submitted) && Array.isArray(correctIndices) && correctIndices.length > 0) {
-        // For multiple choice: check if selected indices match correct indices
-        const sortedSubmitted = [...submitted].sort((a, b) => a - b);
-        const sortedCorrect = [...correctIndices].sort((a, b) => a - b);
+        // Safe integer casting
+        const sortedSubmitted = [...submitted].map(Number).sort((a, b) => a - b);
+        const sortedCorrect = [...correctIndices].map(Number).sort((a, b) => a - b);
         isCorrect = JSON.stringify(sortedSubmitted) === JSON.stringify(sortedCorrect);
       } else {
         isCorrect = false;
@@ -182,9 +176,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
     return { submission: judged, standings };
   }
 
-  // ==========================================
-  // EXTERNAL URL FALLBACK (Skipped)
-  // ==========================================
   if (submission.contestProblem?.requiresRedirect) {
     const judged = await prisma.submission.update({
       where: { id: submission.id },
@@ -193,12 +184,8 @@ export async function judgeQueuedSubmission(submissionId: string) {
     return { submission: judged, standings: null };
   }
 
-  // ==========================================
-  // TEST CASE GATHERING & DYNAMIC AI LOGIC
-  // ==========================================
   let testcases: any[] = submission.problem?.testcases || [];
   
-  // Fallback to ContestProblem custom JSON data if relational mapping failed
   if (testcases.length === 0 && submission.contestProblem?.customTestCases) {
      try {
          testcases = typeof submission.contestProblem.customTestCases === 'string' ? JSON.parse(submission.contestProblem.customTestCases) : submission.contestProblem.customTestCases;
@@ -216,7 +203,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
     }
   }
 
-  // If absolutely NO test cases exist (empty custom problem), execute and verify it runs without crashing
   if (testcases.length === 0) {
     const res = await submitToWandbox({ sourceCode: submission.code, language: submission.language, stdin: "1\n" });
     const verdict = res.status === 'ACCEPTED' ? Verdict.ACCEPTED : Verdict.RUNTIME_ERROR;

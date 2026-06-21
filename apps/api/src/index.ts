@@ -10,17 +10,23 @@ import { prisma } from './prisma/client';
 import { mountV2Routes } from './routes/v2';
 import { startQueueWorkers } from './workers/index';
 import { setupDuelSockets } from './modules/duel/duelSocketService';
-import { setupContestSockets } from './modules/contests/contestSocketService';
 import { upsertGoogleUser } from './storage';
 
 const app = express();
 
+const allowedOrigins = [
+  process.env.CLIENT_ORIGIN || 'http://localhost:3000',
+  'https://your-production-domain.com' // Replace with your actual domain later
+];
+
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin) {
+  
+  // FIX 1.4: Only reflect allowed origins, not a wildcard with credentials
+  if (origin && allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigins[0]);
   }
   
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
@@ -43,9 +49,7 @@ app.use((req: any, res, next) => {
       const decoded: any = jwt.verify(token, process.env.NEXTAUTH_SECRET || '');
       req.user = decoded; 
       
-      // 👉 THE MISSING BRIDGE:
-      // Manually set the headers so your existing API routes 
-      // can still "see" who is logged in.
+      // 👉 THE MISSING BRIDGE
       if (decoded.email) req.headers['x-user-email'] = decoded.email;
       if (decoded.name) req.headers['x-user-name'] = decoded.name;
       
@@ -59,7 +63,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, { 
   cors: { 
-    origin: "*", 
+    origin: allowedOrigins, 
     methods: ['GET', 'POST'], 
     credentials: true 
   } 
@@ -68,8 +72,6 @@ const io = new Server(server, {
 // --- MODULE INITIALIZATION ---
 startQueueWorkers(io);
 setupDuelSockets(io);
-// 👉 FIX: Commented out to prevent duplicate socket execution since v2.ts handles team/voice routing
-// setupContestSockets(io); 
 
 // --- ROUTES ---
 mountV2Routes(app, io);

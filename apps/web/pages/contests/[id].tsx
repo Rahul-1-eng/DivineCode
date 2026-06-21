@@ -81,6 +81,7 @@ export default function ContestRoomPage() {
   const [overridePoints, setOverridePoints] = useState<number | ''>('');
   
   const [isRegistering, setIsRegistering] = useState(false);
+  const [startingVirtual, setStartingVirtual] = useState(false); // 👉 NEW: Virtual Contest State
   const [regMode, setRegMode] = useState<'SOLO' | 'TEAM_NEW' | 'TEAM_REQUEST' | 'TEAM_INVITE'>('SOLO');
   const [regHandle, setRegHandle] = useState('');
   const [regTeamName, setRegTeamName] = useState('');
@@ -254,6 +255,36 @@ export default function ContestRoomPage() {
       }
     } catch (err) { toast.error('Network error.'); } finally { setSyncing(false); }
   }
+
+  // 👉 NEW: Start Virtual Contest Logic
+  const handleStartVirtualContest = async () => {
+    if (!session?.user) {
+      toast.error("Please log in to practice virtually.");
+      return;
+    }
+
+    if (confirm("This will start a timed, solo replica of this contest. Ready?")) {
+      setStartingVirtual(true);
+      try {
+        const res = await fetch(`${API_V2_BASE_URL}/contests/${contest.id}/virtual`, {
+          method: 'POST',
+          headers: viewerHeaders(apiToken)
+        });
+        const data = await res.json();
+
+        if (res.ok && data.virtualContestId) {
+          // Redirect them straight into their new personal arena
+          router.push(`/contests/${data.virtualContestId}`);
+        } else {
+          toast.error(data.error || "Failed to start virtual contest.");
+          setStartingVirtual(false);
+        }
+      } catch (err) {
+        toast.error("Network error.");
+        setStartingVirtual(false);
+      }
+    }
+  };
 
   async function loadContest() {
     if (!id) return;
@@ -731,6 +762,29 @@ export default function ContestRoomPage() {
             <span>{displayStatus === 'ENDED' || isFinal ? 'standings' : isScheduledLockScreen ? 'to start' : 'remaining'}</span>
           </div>
         </div>
+
+        {/* 👉 NEW: Start Virtual Contest Button (Visible to everyone if contest is ENDED) */}
+        {displayStatus === 'ENDED' && !isActuallyOwnerMode && (
+          <div style={{ marginBottom: 18, textAlign: 'right' }}>
+            <button 
+              onClick={handleStartVirtualContest} 
+              disabled={startingVirtual}
+              style={{ 
+                background: 'linear-gradient(135deg, #a855f7, #6366f1)', 
+                color: '#fff', 
+                border: 'none', 
+                padding: '12px 24px', 
+                borderRadius: '8px', 
+                fontWeight: 'bold', 
+                cursor: 'pointer',
+                boxShadow: '0 4px 15px rgba(99, 102, 241, 0.4)',
+                opacity: startingVirtual ? 0.7 : 1
+              }}
+            >
+              {startingVirtual ? 'Provisioning Arena...' : '▶ Start Virtual Contest'}
+            </button>
+          </div>
+        )}
 
         {isFinal && viewerMember && (
           <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ ...panel, marginBottom: 18, background: 'linear-gradient(145deg, #0f172a, #1e1b4b)', border: '1px solid #6366f1' }}>

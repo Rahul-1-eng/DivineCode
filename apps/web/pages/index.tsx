@@ -2,6 +2,10 @@ import { useEffect, useState, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/router';
+import dynamic from 'next/dynamic';
+
+// Dynamically import the 3D background so it doesn't break Server-Side Rendering
+const AnimatedBackground = dynamic(() => import('../components/AnimatedBackground'), { ssr: false });
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -34,7 +38,14 @@ export default function Home() {
     { role: 'ai', text: 'Hello! I am the DivineCode Assistant. Do you need help navigating the platform, or would you like to jump into a practice session?' }
   ]);
 
-  const navLinks = [['Practice', '/practice'], ['Duel', '/duel'], ['Contest', '/contests'], ['Interview', '/interview'], ['Group', '/contests/create']];
+  // Added Leaderboard to the navigation links
+  const navLinks = [
+    ['Practice', '/practice'], 
+    ['Duel', '/duel'], 
+    ['Contests', '/contests'], 
+    ['Leaderboard', '/leaderboard'], 
+    ['Group', '/contests/create']
+  ];
 
   useEffect(() => {
     if (session?.user?.email) {
@@ -93,45 +104,10 @@ export default function Home() {
 
   return (
     <>
-      {/* 👉 NEW: Kimi-style Animated Background Styles */}
+      {/* 3D Animated Background */}
+      <AnimatedBackground />
+
       <style>{`
-        @keyframes float1 {
-          0% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(30px, -50px) scale(1.1); }
-          66% { transform: translate(-20px, 20px) scale(0.9); }
-          100% { transform: translate(0, 0) scale(1); }
-        }
-        @keyframes float2 {
-          0% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(-30px, 50px) scale(1.15); }
-          66% { transform: translate(20px, -20px) scale(0.85); }
-          100% { transform: translate(0, 0) scale(1); }
-        }
-        .animated-bg {
-          position: fixed;
-          top: 0; left: 0; right: 0; bottom: 0;
-          z-index: -1;
-          background: #020617;
-          overflow: hidden;
-        }
-        .orb-1 {
-          position: absolute;
-          top: -10%; left: -10%;
-          width: 50vw; height: 50vw;
-          background: radial-gradient(circle, rgba(56, 189, 248, 0.15) 0%, transparent 70%);
-          border-radius: 50%;
-          animation: float1 15s ease-in-out infinite;
-          filter: blur(60px);
-        }
-        .orb-2 {
-          position: absolute;
-          bottom: -20%; right: -10%;
-          width: 60vw; height: 60vw;
-          background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);
-          border-radius: 50%;
-          animation: float2 20s ease-in-out infinite;
-          filter: blur(80px);
-        }
         .glass-card {
           background: rgba(15, 23, 42, 0.6) !important;
           backdrop-filter: blur(12px) !important;
@@ -143,13 +119,8 @@ export default function Home() {
         .skeleton-pulse { animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
       `}</style>
 
-      {/* Animated Orbs */}
-      <div className="animated-bg">
-        <div className="orb-1"></div>
-        <div className="orb-2"></div>
-      </div>
-
-      <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }} style={{ minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'transparent', position: 'relative' }}>
+      {/* Main layout wrapper, sitting above the absolute background */}
+      <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }} style={{ minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'transparent', position: 'relative', zIndex: 1 }}>
         
         <motion.nav initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} style={{ maxWidth: 1180, margin: '0 auto 42px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
           <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'white', textDecoration: 'none', fontWeight: 900, fontSize: 22 }}>
@@ -216,10 +187,10 @@ export default function Home() {
                 
                 <div style={{ flex: 1, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {chatHistory.map((msg, i) => (
-                     <div key={i} style={{ alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', background: msg.role === 'user' ? '#38bdf8' : 'rgba(30,41,59,0.7)', color: msg.role === 'user' ? '#000' : '#e2e8f0', maxWidth: '85%', padding: '10px 14px', borderRadius: 12, fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', border: '1px solid rgba(255,255,255,0.05)' }}>
-                       {msg.text}
-                       {msg.image && <img src={msg.image} alt="Uploaded" style={{ width: '100%', borderRadius: 8, marginTop: 10 }} />}
-                     </div>
+                      <div key={i} style={{ alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', background: msg.role === 'user' ? '#38bdf8' : 'rgba(30,41,59,0.7)', color: msg.role === 'user' ? '#000' : '#e2e8f0', maxWidth: '85%', padding: '10px 14px', borderRadius: 12, fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', border: '1px solid rgba(255,255,255,0.05)' }}>
+                        {msg.text}
+                        {msg.image && <img src={msg.image} alt="Uploaded" style={{ width: '100%', borderRadius: 8, marginTop: 10 }} />}
+                      </div>
                   ))}
                   
                   {chatHistory.length === 1 && !isAiTyping && (
@@ -265,7 +236,6 @@ export default function Home() {
         </div>
       </motion.main>
 
-      {/* 👉 NEW: Elegant Structured Footer */}
       <footer style={{ background: 'rgba(2, 6, 23, 0.6)', borderTop: '1px solid rgba(255, 255, 255, 0.05)', padding: '60px 20px', marginTop: '40px', backdropFilter: 'blur(10px)', position: 'relative', zIndex: 10 }}>
         <div style={{ maxWidth: 1180, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 40 }}>
           

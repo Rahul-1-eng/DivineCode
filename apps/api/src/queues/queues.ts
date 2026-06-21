@@ -5,6 +5,7 @@ import { getSharedRedisConnection } from './redis';
 let judgeQueue: Queue<JudgeSubmissionJob> | null = null;
 let externalSyncQueue: Queue<CodeforcesContestSyncJob> | null = null;
 let rewardsQueue: Queue | null = null;
+let autoFinalizeQueue: Queue | null = null; // 👉 FIX 1.6: Added Auto-Finalize Queue
 
 export function getJudgeQueue() {
   if (!judgeQueue) {
@@ -12,10 +13,7 @@ export function getJudgeQueue() {
       connection: getSharedRedisConnection(),
       defaultJobOptions: {
         attempts: 2,
-        backoff: {
-          type: 'exponential',
-          delay: 3000
-        },
+        backoff: { type: 'exponential', delay: 3000 },
         removeOnComplete: 1000,
         removeOnFail: 5000
       }
@@ -30,10 +28,7 @@ export function getExternalSyncQueue() {
       connection: getSharedRedisConnection(),
       defaultJobOptions: {
         attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 5000
-        },
+        backoff: { type: 'exponential', delay: 5000 },
         removeOnComplete: 1000,
         removeOnFail: 5000
       }
@@ -42,12 +37,10 @@ export function getExternalSyncQueue() {
   return externalSyncQueue;
 }
 
-// 🛠️ FIX: Lazy-load the rewards queue using the shared connection to stop Upstash leak
-
 export function getRewardsQueue() {
   if (!rewardsQueue) {
     rewardsQueue = new Queue(QUEUE_NAMES.contestRewards, {
-      connection: getSharedRedisConnection(), // Use shared connection
+      connection: getSharedRedisConnection(),
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
@@ -58,20 +51,33 @@ export function getRewardsQueue() {
   return rewardsQueue;
 }
 
+// 👉 FIX 1.6: Initialize the Cron Queue
+export function getAutoFinalizeQueue() {
+  if (!autoFinalizeQueue) {
+    autoFinalizeQueue = new Queue('auto-finalize', {
+      connection: getSharedRedisConnection(),
+      defaultJobOptions: { removeOnComplete: true }
+    });
+  }
+  return autoFinalizeQueue;
+}
+
+// 👉 FIX 1.6: Schedule the repeatable job to run every 1 minute
+export async function startCronJobs() {
+  const queue = getAutoFinalizeQueue();
+  await queue.add('check-expired-contests', {}, {
+    repeat: { pattern: '* * * * *' }, // Every minute
+    jobId: 'cron-check-expired-contests' // Enforces uniqueness
+  });
+  console.log('⏱️ Auto-finalize cron job scheduled.');
+}
+
 export async function enqueueJudgeSubmission(submissionId: string) {
   const job = await getJudgeQueue().add('judge-submission', { submissionId }, { jobId: `judge:${submissionId}` });
-  return {
-    id: String(job.id),
-    name: job.name,
-    queue: QUEUE_NAMES.judge
-  };
+  return { id: String(job.id), name: job.name, queue: QUEUE_NAMES.judge };
 }
 
 export async function enqueueCodeforcesContestSync(contestId: string) {
   const job = await getExternalSyncQueue().add('sync-codeforces-contest', { contestId });
-  return {
-    id: String(job.id),
-    name: job.name,
-    queue: QUEUE_NAMES.externalSync
-  };
+  return { id: String(job.id), name: job.name, queue: QUEUE_NAMES.externalSync };
 }

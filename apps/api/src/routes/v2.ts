@@ -28,6 +28,10 @@ import { interviewRouter } from './interviewRoutes';
 import crypto from 'crypto';
 import { mcqQuestions } from '../data/mcq'; 
 import bcrypt from 'bcryptjs';
+import { searchRouter } from './searchRoutes';
+import { leaderboardRouter } from '../routes/leaderboardRoutes';
+import { adminRouter } from '../routes/adminRoutes';
+import { notificationRouter } from './notificationRoutes';
 
 const PLATFORM_OWNER_EMAIL = (process.env.PLATFORM_OWNER_EMAIL || '').trim().toLowerCase();
 
@@ -242,7 +246,6 @@ export function mountV2Routes(app: Express, io: Server) {
 
       contents.push({ role: 'user', parts: currentParts });
 
-      // 👉 FIX: Model updated
       const modelName = process.env.AI_MODEL || 'gemini-3.5-flash';
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
       const { data } = await axios.post(url, { contents });
@@ -250,7 +253,6 @@ export function mountV2Routes(app: Express, io: Server) {
       res.json({ reply: data.candidates[0].content.parts[0].text });
     } catch (e: any) {
       console.error('[AI Chat] Error:', e.response?.data || e.message);
-      // 👉 FIX: Honest error reporting
       res.json({ reply: "AI Service Error: Failed to generate a response. The model may be rate-limited or unavailable." });
     }
   }));
@@ -306,7 +308,7 @@ export function mountV2Routes(app: Express, io: Server) {
         username: cleanUsername,
         email: cleanEmail,
         name: name || cleanUsername,
-        passwordHash: hashedPassword // Store the bcrypt hash
+        passwordHash: hashedPassword
       }
     });
 
@@ -349,7 +351,76 @@ export function mountV2Routes(app: Express, io: Server) {
       avatarUrl: existingUser.avatarUrl
     });
   }));
+router.post('/auth/forgot-password', asyncRoute(async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required.' });
 
+    const cleanEmail = String(email).trim().toLowerCase();
+    const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
+
+    if (!user) {
+      // Security: Return 200 anyway to prevent malicious users from guessing which emails exist
+      return res.json({ success: true, message: 'If that account exists, a reset link has been generated.' });
+    }
+
+    // Generate a secure 32-byte random token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    
+    // Hash it before saving to the DB so even if the DB is compromised, the live tokens are safe
+    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+    const expires = new Date(Date.now() + 3600000); // Expires in 1 hour
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { resetPasswordToken: hashedToken, resetPasswordExpires: expires }
+    });
+
+    const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
+    const resetLink = `${clientOrigin}/reset-password?token=${resetToken}`;
+    
+    // TODO: In production, send this via Resend, AWS SES, or SendGrid
+    console.log(`\n========================================`);
+    console.log(`🔑 PASSWORD RESET LINK FOR ${user.email}`);
+    console.log(resetLink);
+    console.log(`========================================\n`);
+
+    res.json({ success: true, message: 'If that account exists, a reset link has been generated.', devLink: resetLink });
+  }));
+
+  router.post('/auth/reset-password', asyncRoute(async (req, res) => {
+    const { token, newPassword } = req.body;
+    
+    if (!token || !newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'Invalid token or password is too short (min 6 characters).' });
+    }
+
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await prisma.user.findFirst({
+      where: {
+        resetPasswordToken: hashedToken,
+        resetPasswordExpires: { gt: new Date() } // Must not be expired
+      }
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: 'This reset token is invalid or has expired.' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(newPassword, salt);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        resetPasswordToken: null, // Consume the token so it can't be reused
+        resetPasswordExpires: null
+      }
+    });
+
+    res.json({ success: true, message: 'Your password has been reset successfully. You can now log in.' });
+  }));
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contest = await registerForContestV2(req.params.id, {
@@ -402,11 +473,8 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
-router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
-    // FIX: Set createIfMissing=true to ensure the user is resolved in the DB 
-    // even if they haven't "synced" their profile recently.
+  router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req, true);
-    
     if (!viewer.userId) throw new Error("Unauthorized to unregister. User ID missing.");
     const contestId = req.params.id;
     
@@ -421,6 +489,77 @@ router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
     
     const updatedContest = await loadContestForViewer(contestId);
     res.json(sanitizeContestForViewer(updatedContest!, viewer));
+  }));
+
+  // 👉 NEW: Virtual Contest Clone Endpoint
+// 👉 NEW: Virtual Contest Clone Endpoint
+ 
+// 👉 NEW: Virtual Contest Clone Endpoint
+  router.post('/contests/:id/virtual', asyncRoute(async (req, res) => {
+    const { id } = req.params;
+    const viewer = await resolvedViewerFromRequest(req, true);
+    
+    if (!viewer.userId) {
+      throw new Error('You must be logged in to start a virtual contest.');
+    }
+
+    const original = await prisma.contest.findUnique({
+      where: { id },
+      include: { problems: true }
+    });
+
+    if (!original) throw new Error('Contest not found');
+    if (original.status !== 'ENDED') {
+      throw new Error('You can only run a virtual match on a contest that has already ended.');
+    }
+
+    const virtualContest = await prisma.contest.create({
+      data: {
+        title: `[Virtual] ${original.title}`,
+        // 👉 THE FIX: Generate a random 6-character invite code for the solo arena
+        inviteCode: Math.random().toString(36).substring(2, 8).toUpperCase(), 
+        type: 'SOLO',
+        status: 'RUNNING',
+        startTime: new Date(),
+        endTime: new Date(Date.now() + (original.durationMinutes * 60000)),
+        durationMinutes: original.durationMinutes,
+        isRated: false, 
+        createdBy: { connect: { id: viewer.userId } }, 
+        allowTeamSubmissionView: false,
+        hideProblemMetaDuringContest: true,
+        
+        problems: {
+          create: original.problems.map(p => ({
+            problemId: p.problemId,
+            interviewQuestionId: p.interviewQuestionId,
+            titleSnapshot: p.titleSnapshot,
+            platform: p.platform,
+            externalId: p.externalId,
+            externalUrl: p.externalUrl,
+            index: p.index,
+            label: p.label,
+            points: p.points,
+            isMCQ: p.isMCQ,
+            mcqData: p.mcqData ? JSON.parse(JSON.stringify(p.mcqData)) : undefined,
+            mcqTimeLimitSeconds: p.mcqTimeLimitSeconds,
+            customDescription: p.customDescription,
+            customTestCases: p.customTestCases ? JSON.parse(JSON.stringify(p.customTestCases)) : undefined,
+            order: p.order
+          }))
+        },
+        
+        participants: {
+          create: {
+            userId: viewer.userId,
+            displayName: viewer.name || 'Virtual Coder',
+            role: 'PARTICIPANT',
+            isOfficial: false 
+          }
+        }
+      }
+    });
+
+    res.json({ success: true, virtualContestId: virtualContest.id });
   }));
 
   router.post('/upload-image', upload.single('image'), asyncRoute(async (req, res) => {
@@ -485,12 +624,11 @@ router.post('/contests/:id/unregister', asyncRoute(async (req, res) => {
     res.json(contests.map(c => sanitizeContestForViewer(c, viewerFromRequest(req))));
   });
 
-router.post('/contests', asyncRoute(async (req, res) => {
-    // FIX: Must resolve the ownerId from the authenticated user
+  router.post('/contests', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req, true);
     if (!viewer.userId) throw new Error("Unauthorized: Must be logged in to create a mashup.");
 
-    const payload = { ...req.body,ownerUserId: viewer.userId };
+    const payload = { ...req.body, ownerUserId: viewer.userId };
     const contest = await createContestV2(payload);
     res.status(201).json(sanitizeContestForViewer(contest, viewer));
   }));
@@ -514,32 +652,32 @@ router.post('/contests', asyncRoute(async (req, res) => {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
- router.post('/contests/:id/finalize', asyncRoute(async (req, res) => {
-  const viewer = await requireContestOwner(req);
-  
-  const contest = await prisma.contest.findUnique({ where: { id: req.params.id } });
-  if (!contest) throw new Error('Contest not found');
+  router.post('/contests/:id/finalize', asyncRoute(async (req, res) => {
+    const viewer = await requireContestOwner(req);
+    
+    const contest = await prisma.contest.findUnique({ where: { id: req.params.id } });
+    if (!contest) throw new Error('Contest not found');
 
-  let rewards = null;
-  if (contest.status !== ContestStatus.ENDED) {
-      await prisma.contest.update({ 
-          where: { id: req.params.id }, 
-          data: { status: ContestStatus.ENDED } 
-      });
-      await recomputeContestStandings(req.params.id);
-      rewards = await processContestRewards(req.params.id);
-  }
+    let rewards = null;
+    if (contest.status !== ContestStatus.ENDED) {
+        await prisma.contest.update({ 
+            where: { id: req.params.id }, 
+            data: { status: ContestStatus.ENDED } 
+        });
+        await recomputeContestStandings(req.params.id);
+        rewards = await processContestRewards(req.params.id);
+    }
 
-  const updatedContest = await loadContestForViewer(req.params.id);
-  io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id });
-  
-  res.json({ 
-    success: true, 
-    message: 'Contest finalized.', 
-    rewards, 
-    contest: sanitizeContestForViewer(updatedContest!, viewer) 
-  });
-}));
+    const updatedContest = await loadContestForViewer(req.params.id);
+    io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id });
+    
+    res.json({ 
+      success: true, 
+      message: 'Contest finalized.', 
+      rewards, 
+      contest: sanitizeContestForViewer(updatedContest!, viewer) 
+    });
+  }));
 
   router.get('/contests/:id/submissions', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req);
@@ -894,8 +1032,11 @@ router.post('/contests', asyncRoute(async (req, res) => {
     res.status(statusFromError(error)).json({ ok: false, error: error.message || 'Unexpected V2 API error' });
   });
   
+  app.use('/api/v2/notifications', notificationRouter);
+  app.use('/api/v2/admin', adminRouter);
+  app.use('/api/v2/leaderboard', leaderboardRouter);
   app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
-  
+  app.use('/api/v2/search', searchRouter);
   app.use('/api/v2', router);
   app.use('/api/v2/submissions', submissionRouter); 
   app.use('/api/v2/interview', interviewRouter);

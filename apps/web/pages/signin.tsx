@@ -102,16 +102,33 @@ export default function SignInPage() {
                   <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Rahul Kumar" style={inputStyle} />
                   
                   <label style={labelStyle}>Email Address *</label>
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="rahul@iitp.ac.in" style={inputStyle} required />
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="coder@example.com" style={inputStyle} required />
                 </>
               )}
 
               <label style={labelStyle}>DivineCode Username (Handle) *</label>
-              <input value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="RKS_Rider" style={inputStyle} required />
+              <input value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="Coder_123" style={inputStyle} required />
               
               <label style={labelStyle}>Password *</label>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" style={inputStyle} required />
               
+              {/* 👉 NEW: Forgot Password Link */}
+              {mode === 'signin' && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-10px', marginBottom: '16px' }}>
+                  <a 
+                    href="/forgot-password" 
+                    style={{ 
+                      color: '#38bdf8', 
+                      fontSize: '12px', 
+                      textDecoration: 'none', 
+                      fontWeight: 'bold' 
+                    }}
+                  >
+                    Forgot password?
+                  </a>
+                </div>
+              )}
+
               {error && <p style={{ color: '#ef4444', fontSize: 14, marginTop: -8, marginBottom: 12 }}>{error}</p>}
               
               <button type="submit" disabled={loading} style={{ width: '100%', padding: 14, borderRadius: 16, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', fontWeight: 800, cursor: 'pointer', opacity: loading ? 0.6 : 1 }}>

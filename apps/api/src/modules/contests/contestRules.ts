@@ -53,7 +53,7 @@ export async function resolveViewerUserId(viewer: any, createIfMissing = false) 
 }
 
 export async function resolvedViewerFromRequest(req: any, createIfMissing = false) {
-  const viewer = viewerFromRequest(req); // Assuming viewerFromRequest is already in this file
+  const viewer = viewerFromRequest(req); 
   const resolvedUserId = await resolveViewerUserId(viewer, createIfMissing);
   return { ...viewer, userId: resolvedUserId || viewer.userId };
 }
@@ -120,7 +120,9 @@ function sanitizeProblem(problem: any, showMeta: boolean) {
     platform: problem.platform || 'DIVINECODE',
     externalId: problem.externalId,
     externalUrl: problem.externalUrl,
-    url: problem.externalUrl,    requiresRedirect: Boolean(problem.requiresRedirect || problem.externalUrl),    isLocked: Boolean(problem.isLocked),
+    url: problem.externalUrl,    
+    requiresRedirect: Boolean(problem.requiresRedirect || problem.externalUrl),    
+    isLocked: Boolean(problem.isLocked),
     isMCQ: Boolean(problem.isMCQ || problem.interviewQuestionId),
     interviewQuestionId: problem.interviewQuestionId || null,
     mcqTimeLimitSeconds: problem.mcqTimeLimitSeconds || 0,
@@ -159,17 +161,17 @@ function sanitizeProblem(problem: any, showMeta: boolean) {
     problem: problemData
   };
 
-  // CRITICAL: Include interviewQuestion for MCQ problems
   if (problem.interviewQuestion) {
     (result as any).interviewQuestion = {
       id: problem.interviewQuestion.id,
       title: problem.interviewQuestion.title,
       prompt: problem.interviewQuestion.prompt,
       options: problem.interviewQuestion.options || [],
+      // FIX 1.1: Guard correct indices AND expected answer behind showMeta flag
       correctIndices: showMeta ? (problem.interviewQuestion.correctIndices || []) : undefined,
+      expectedAnswer: showMeta ? problem.interviewQuestion.expectedAnswer : undefined,
       isMultiple: Boolean(problem.interviewQuestion.isMultiple),
-      difficulty: problem.interviewQuestion.difficulty,
-      expectedAnswer: problem.interviewQuestion.expectedAnswer
+      difficulty: problem.interviewQuestion.difficulty
     };
   }
 
