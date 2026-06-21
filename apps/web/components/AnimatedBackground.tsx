@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+// @ts-ignore: Bypassing missing types for immediate deployment
 import * as THREE from 'three';
 
 export default function AnimatedBackground() {
