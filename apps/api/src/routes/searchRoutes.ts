@@ -11,7 +11,7 @@ searchRouter.get('/', async (req, res) => {
     }
 
     // Run all 3 queries concurrently for maximum speed
-    const [users, contests, problems] = await Promise.all([
+    const [users, contests, problemsRaw] = await Promise.all([
       prisma.user.findMany({
         where: {
           OR: [
@@ -29,10 +29,17 @@ searchRouter.get('/', async (req, res) => {
       }),
       prisma.problem.findMany({
         where: { title: { contains: q, mode: 'insensitive' } },
-        select: { id: true, title: true, difficultyLabel: true, rating: true },
+        // 👉 FIX: Select only fields guaranteed to exist in Prisma schema
+        select: { id: true, title: true, difficulty: true },
         take: 5
       })
     ]);
+
+    // 👉 FIX: Map the raw difficulty to 'difficultyLabel' so the frontend component doesn't break
+    const problems = problemsRaw.map((p: any) => ({
+      ...p,
+      difficultyLabel: p.difficulty || 'Unrated'
+    }));
 
     return res.json({ users, contests, problems });
   } catch (err: any) {
