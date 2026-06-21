@@ -40,8 +40,13 @@ app.use((req: any, res, next) => {
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
     try {
-      const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET || '');
+      const decoded: any = jwt.verify(token, process.env.NEXTAUTH_SECRET || '');
       req.user = decoded; 
+      
+      // 👉 CRITICAL FIX: Put the email back into the headers so Profile/Interview routes work!
+      if (decoded.email) req.headers['x-user-email'] = decoded.email;
+      if (decoded.name) req.headers['x-user-name'] = decoded.name;
+      
     } catch (err) {
       console.warn('Invalid or expired API token rejected.');
     }
