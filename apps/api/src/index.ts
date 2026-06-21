@@ -43,7 +43,9 @@ app.use((req: any, res, next) => {
       const decoded: any = jwt.verify(token, process.env.NEXTAUTH_SECRET || '');
       req.user = decoded; 
       
-      // 👉 CRITICAL FIX: Put the email back into the headers so Profile/Interview routes work!
+      // 👉 THE MISSING BRIDGE:
+      // Manually set the headers so your existing API routes 
+      // can still "see" who is logged in.
       if (decoded.email) req.headers['x-user-email'] = decoded.email;
       if (decoded.name) req.headers['x-user-name'] = decoded.name;
       
@@ -53,7 +55,6 @@ app.use((req: any, res, next) => {
   }
   next();
 });
-
 const server = http.createServer(app);
 
 const io = new Server(server, { 

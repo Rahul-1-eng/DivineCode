@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
+
 function getDynamicStatus(contest: any) {
   const start = new Date(contest.startTime).getTime();
   const end = start + (contest.durationMinutes * 60000);
@@ -13,15 +14,34 @@ function getDynamicStatus(contest: any) {
   if (now >= start) return 'RUNNING';
   return 'SCHEDULED';
 }
+
 export default function ContestsList() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [contests, setContests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // 👉 SECURE AUTH PATTERN
+  const [apiToken, setApiToken] = useState<string>('');
 
   useEffect(() => {
+    if (session?.user) {
+      fetch('/api/auth/api-token')
+        .then(res => res.json())
+        .then(data => { if (data.token) setApiToken(data.token); })
+        .catch(console.error);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    // If there is a session, wait for the token before fetching
+    if (session && !apiToken) return;
+
     fetch(`${API_V2_BASE_URL}/contests`, {
-      headers: { 'x-user-email': session?.user?.email || '' }
+      headers: { 
+        'x-user-email': session?.user?.email || '',
+        ...(apiToken ? { 'Authorization': `Bearer ${apiToken}` } : {})
+      }
     })
       .then(res => res.json())
       .then(data => {
@@ -32,9 +52,8 @@ export default function ContestsList() {
         console.error(err);
         setLoading(false);
       });
-  }, [session]);
+  }, [session, apiToken]);
 
-// Use your getDynamicStatus helper to categorize dynamically
   const running = contests.filter(c => getDynamicStatus(c) === 'RUNNING');
   const scheduled = contests.filter(c => getDynamicStatus(c) === 'SCHEDULED');
   const ended = contests.filter(c => getDynamicStatus(c) === 'ENDED');
@@ -47,24 +66,17 @@ export default function ContestsList() {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
         <h3 style={{ margin: 0, color: '#eef2ff', fontSize: 20 }}>{contest.title}</h3>
-        {/* Replace your badge conditional logic with this dynamic checker */}
-{getDynamicStatus(contest) === 'RUNNING' && <span style={badgeLive}>🔴 Live</span>}
-{getDynamicStatus(contest) === 'SCHEDULED' && <span style={badgeScheduled}>⏳ Scheduled</span>}
-{getDynamicStatus(contest) === 'ENDED' && <span style={badgeEnded}>✅ Ended</span>}
+        {getDynamicStatus(contest) === 'RUNNING' && <span style={badgeLive}>🔴 Live</span>}
+        {getDynamicStatus(contest) === 'SCHEDULED' && <span style={badgeScheduled}>⏳ Scheduled</span>}
+        {getDynamicStatus(contest) === 'ENDED' && <span style={badgeEnded}>✅ Ended</span>}
       </div>
       <p style={{ color: '#94a3b8', fontSize: 14, margin: '0 0 16px 0', minHeight: 40 }}>
         {contest.description || 'No description provided.'}
       </p>
       <div style={{ display: 'flex', gap: 16, color: '#cbd5e1', fontSize: 13 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          ⏱️ {contest.durationMinutes} mins
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          👥 {contest.membersCount || 0} Players
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          📝 {contest.problemsCount || 0} Problems
-        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>⏱️ {contest.durationMinutes} mins</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>👥 {contest.membersCount || 0} Players</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>📝 {contest.problemsCount || 0} Problems</span>
       </div>
     </motion.div>
   );

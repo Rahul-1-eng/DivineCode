@@ -2,12 +2,13 @@ import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { Platform } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-
+import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 export const profileRouter = Router();
 
 profileRouter.get('/me', async (req, res) => {
   try {
-    const email = req.headers['x-user-email'] as string;
+    const viewer = await resolvedViewerFromRequest(req, true);
+const email = viewer.email;
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
     let user = await prisma.user.findUnique({
@@ -49,7 +50,8 @@ profileRouter.get('/me', async (req, res) => {
 // 👉 THE FIX: Absolute Bulletproof UPSERT logic. It will never fail to find the user.
 profileRouter.post('/claim-username', async (req, res) => {
   try {
-    const email = req.headers['x-user-email'] as string;
+    const viewer = await resolvedViewerFromRequest(req, true);
+const email = viewer.email;
     const name = req.headers['x-user-name'] as string;
     const { username } = req.body;
     
@@ -95,7 +97,8 @@ profileRouter.post('/claim-username', async (req, res) => {
 // 👉 THE FIX: Secure Password Update Route
 profileRouter.post('/update-password', async (req, res) => {
   try {
-    const email = req.headers['x-user-email'] as string;
+    const viewer = await resolvedViewerFromRequest(req, true);
+const email = viewer.email;
     const { currentPassword, newPassword } = req.body;
     
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
@@ -129,7 +132,8 @@ profileRouter.post('/update-password', async (req, res) => {
 
 profileRouter.post('/save-handles', async (req, res) => {
   try {
-    const email = req.headers['x-user-email'] as string;
+    const viewer = await resolvedViewerFromRequest(req, true);
+const email = viewer.email;
     const { codeforcesHandle, leetcodeHandle } = req.body;
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -165,7 +169,8 @@ profileRouter.post('/save-handles', async (req, res) => {
 
 profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
   try {
-    const email = req.headers['x-user-email'] as string;
+    const viewer = await resolvedViewerFromRequest(req, true);
+const email = viewer.email;
     const { platform, handle } = req.params;
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ error: 'User not found' });

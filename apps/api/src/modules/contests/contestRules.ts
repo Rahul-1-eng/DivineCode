@@ -1,3 +1,5 @@
+import { prisma } from '../../prisma/client';
+
 export type ViewerContext = {
   userId?: string;
   email?: string;
@@ -25,7 +27,36 @@ export function viewerFromRequest(req: any): ViewerContext {
     name: undefined
   };
 }
+export async function resolveViewerUserId(viewer: any, createIfMissing = false) {
+  if (viewer.userId) {
+    const byId = await prisma.user.findUnique({ where: { id: viewer.userId } });
+    if (byId) return byId.id;
+  }
 
+  const email = viewer.email?.trim().toLowerCase();
+  if (!email) return undefined;
+
+  const byEmail = await prisma.user.findUnique({ where: { email } });
+  if (byEmail) return byEmail.id;
+  if (!createIfMissing) return undefined;
+
+  const usernameSeed = viewer.name || email.split('@')[0] || 'user';
+  return (await prisma.user.upsert({
+    where: { email },
+    update: { name: viewer.name || undefined },
+    create: {
+      email,
+      name: viewer.name || email.split('@')[0],
+      username: `${usernameSeed}_${Math.random().toString(36).slice(2, 8)}`
+    }
+  })).id;
+}
+
+export async function resolvedViewerFromRequest(req: any, createIfMissing = false) {
+  const viewer = viewerFromRequest(req); // Assuming viewerFromRequest is already in this file
+  const resolvedUserId = await resolveViewerUserId(viewer, createIfMissing);
+  return { ...viewer, userId: resolvedUserId || viewer.userId };
+}
 export function contestEndTime(contest: any) {
   if (!contest || !contest.startTime) return new Date();
   return new Date(new Date(contest.startTime).getTime() + (contest.durationMinutes || 0) * 60000);
@@ -135,7 +166,7 @@ function sanitizeProblem(problem: any, showMeta: boolean) {
       title: problem.interviewQuestion.title,
       prompt: problem.interviewQuestion.prompt,
       options: problem.interviewQuestion.options || [],
-      correctIndices: problem.interviewQuestion.correctIndices || [],
+      correctIndices: showMeta ? (problem.interviewQuestion.correctIndices || []) : undefined,
       isMultiple: Boolean(problem.interviewQuestion.isMultiple),
       difficulty: problem.interviewQuestion.difficulty,
       expectedAnswer: problem.interviewQuestion.expectedAnswer

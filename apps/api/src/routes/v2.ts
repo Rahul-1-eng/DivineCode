@@ -490,7 +490,7 @@ router.post('/contests', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req, true);
     if (!viewer.userId) throw new Error("Unauthorized: Must be logged in to create a mashup.");
 
-    const payload = { ...req.body, ownerId: viewer.userId };
+    const payload = { ...req.body,ownerUserId: viewer.userId };
     const contest = await createContestV2(payload);
     res.status(201).json(sanitizeContestForViewer(contest, viewer));
   }));

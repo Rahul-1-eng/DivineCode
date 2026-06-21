@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
-
+import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 export const interviewRouter = Router();
 
 // GET all tracks
@@ -18,7 +18,8 @@ interviewRouter.get('/tracks', async (req, res) => {
 // GET user progress
 interviewRouter.get('/progress', async (req, res) => {
   try {
-    const email = String(req.headers['x-user-email'] || '').trim().toLowerCase();
+const viewer = await resolvedViewerFromRequest(req, true);
+const email = viewer.email;
     if (!email) return res.json([]); // Return empty array if guest
     
     const user = await prisma.user.findUnique({ where: { email } });
@@ -36,7 +37,8 @@ interviewRouter.get('/progress', async (req, res) => {
 // POST update progress (Mark as REVIEWING, MASTERED, etc)
 interviewRouter.post('/progress/:questionId', async (req, res) => {
   try {
-    const email = String(req.headers['x-user-email'] || '').trim().toLowerCase();
+const viewer = await resolvedViewerFromRequest(req, true);
+const email = viewer.email;
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
     const user = await prisma.user.findUnique({ where: { email } });
@@ -86,7 +88,8 @@ interviewRouter.get('/questions', async (req, res) => {
 // ADMIN ROUTE: GET all pending questions
 interviewRouter.get('/pending', async (req, res) => {
   try {
-    const email = String(req.headers['x-user-email'] || '').trim().toLowerCase();
+const viewer = await resolvedViewerFromRequest(req, true);
+const email = viewer.email;
     const user = await prisma.user.findUnique({ where: { email } });
     
     if (!user || user.role !== 'ADMIN') {
@@ -114,7 +117,8 @@ interviewRouter.get('/pending', async (req, res) => {
 // ADMIN ROUTE: Approve a pending question
 interviewRouter.patch('/questions/:id/approve', async (req, res) => {
   try {
-    const email = String(req.headers['x-user-email'] || '').trim().toLowerCase();
+const viewer = await resolvedViewerFromRequest(req, true);
+const email = viewer.email;
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
     const requester = await prisma.user.findUnique({ where: { email } });

@@ -5,10 +5,22 @@ import toast, { Toaster } from 'react-hot-toast';
 
 const API_V2 = process.env.NEXT_PUBLIC_API_BASE_URL + '/api/v2';
 
+// 👉 SECURE AUTH PATTERN
+function viewerHeaders(token: string, email: string) {
+  return {
+    'Content-Type': 'application/json',
+    'x-user-email': email,
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+}
+
 export default function GlobalNavigationAndMashupCreator() {
   const router = useRouter();
   const { data: session } = useSession();
   
+  // 👉 SECURE AUTH PATTERN
+  const [apiToken, setApiToken] = useState<string>('');
+
   const [navTab, setNavTab] = useState<'mashup' | 'duel' | 'interview'>('mashup');
 
   const [contestMode, setContestMode] = useState<'SOLO' | 'GROUP'>('GROUP');
@@ -18,14 +30,14 @@ export default function GlobalNavigationAndMashupCreator() {
   const [startTimeStr, setStartTimeStr] = useState('');
   
   const [urlProblem, setUrlProblem] = useState('');
-  const [generateAiTests, setGenerateAiTests] = useState(true); // <--- AI TEST CHECKBOX STATE
+  const [generateAiTests, setGenerateAiTests] = useState(true); 
   
   const [imageBase64, setImageBase64] = useState<string>('');
   
   const [customTitle, setCustomTitle] = useState('');
   const [customDesc, setCustomDesc] = useState('');
   const [customCases, setCustomCases] = useState([{ input: '', expectedOutput: '', isPublic: true }]);
-  const [customTimeLimit, setCustomTimeLimit] = useState<number>(0); // <--- CUSTOM TIME LIMIT
+  const [customTimeLimit, setCustomTimeLimit] = useState<number>(0); 
   
   const [mcqPrompt, setMcqPrompt] = useState('');
   const [mcqOptions, setMcqOptions] = useState(['', '']);
@@ -38,8 +50,20 @@ export default function GlobalNavigationAndMashupCreator() {
   const [isCreating, setIsCreating] = useState(false);
   const [loadingContext, setLoadingContext] = useState('');
 
+  // 👉 SECURE AUTH PATTERN: Fetch the API token on mount
   useEffect(() => {
-    fetch(`${API_V2}/ai-dataset`)
+    if (session?.user) {
+      fetch('/api/auth/api-token')
+        .then(res => res.json())
+        .then(data => { if (data.token) setApiToken(data.token); })
+        .catch(console.error);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    if (session && !apiToken) return;
+
+    fetch(`${API_V2}/ai-dataset`, { headers: viewerHeaders(apiToken, session?.user?.email || '') })
       .then(r => r.json())
       .then(d => {
          if (d.problems && d.problems.length > 0) {
@@ -52,7 +76,7 @@ export default function GlobalNavigationAndMashupCreator() {
          }
       })
       .catch(() => {});
-  }, []);
+  }, [session, apiToken]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -80,7 +104,7 @@ export default function GlobalNavigationAndMashupCreator() {
       payload.url = finalUrl;
       payload.title = finalUrl.split('/').pop() || 'External Problem';
       payload.displayTitle = payload.title;
-      payload.generateAiTests = generateAiTests; // Include Checkbox value
+      payload.generateAiTests = generateAiTests; 
       
     } else if (activeTab === 'CUSTOM') {
       if (!customTitle) return toast.error('Enter custom title');
@@ -94,8 +118,8 @@ export default function GlobalNavigationAndMashupCreator() {
           description: customDesc,
           imageUrl: imageBase64 || null,
           testcases: validCases,
-          time: customTimeLimit, // Include Timer
-          generateAiTests: generateAiTests // Include Checkbox value
+          time: customTimeLimit, 
+          generateAiTests: generateAiTests 
       };
       payload.displayTitle = customTitle;
     } else if (activeTab === 'MCQ') {
@@ -168,10 +192,12 @@ export default function GlobalNavigationAndMashupCreator() {
     setIsCreating(true);
     setLoadingContext('Creating contest shell...');
 
+    const headers = viewerHeaders(apiToken, session.user.email);
+
     try {
       const res = await fetch(`${API_V2}/contests`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-email': session.user.email },
+        headers,
         body: JSON.stringify({ 
           title, 
           durationMinutes: duration, 
@@ -199,7 +225,7 @@ export default function GlobalNavigationAndMashupCreator() {
         try {
           const mRes = await fetch(`${API_V2}/contests/${contest.id}/problems/mashup`, {
             method: 'POST', 
-            headers: { 'Content-Type': 'application/json', 'x-user-email': session.user.email }, 
+            headers, 
             body: JSON.stringify(compiledProblems[i])
           });
 

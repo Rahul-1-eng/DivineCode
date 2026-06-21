@@ -3,14 +3,15 @@ import { prisma } from '../prisma/client';
 import { executeSubmission } from '../modules/judge/judge0Service';
 import { recomputeContestStandings } from '../modules/standings/standingService';
 import { getContestSubmissions } from '../modules/contests/submissionService';
-
+import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 export const submissionRouter = Router();
 
 // Endpoint to fetch submissions securely based on privacy rules
 submissionRouter.get('/contest/:contestId', async (req, res) => {
   try {
     const { contestId } = req.params;
-    const email = req.headers['x-user-email'] as string;
+    const viewer = await resolvedViewerFromRequest(req, true);
+const email = viewer.email;
     const userId = req.headers['x-user-id'] as string;
 
     const submissions = await getContestSubmissions({
@@ -89,7 +90,8 @@ submissionRouter.post('/:id/report', async (req, res) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
-    const email = req.headers['x-user-email'] as string;
+    const viewer = await resolvedViewerFromRequest(req, true);
+const email = viewer.email;
 
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
