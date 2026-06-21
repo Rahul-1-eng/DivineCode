@@ -8,11 +8,22 @@ const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || API_BASE_URL;
 
 type DuelMode = 'menu' | 'custom_menu' | 'random_waiting' | 'custom_host_waiting' | 'playing';
 
+// 👉 SECURE AUTH PATTERN
+function viewerHeaders(token: string) {
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+}
+
 export default function DuelPage() {
   const router = useRouter();
   const { data: session } = useSession();
   const socketRef = useRef<Socket | null>(null);
   
+  // 👉 SECURE AUTH PATTERN: State to hold the API token
+  const [apiToken, setApiToken] = useState<string>('');
+
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState('Connect and enter the arena.');
   const [duelMode, setDuelMode] = useState<DuelMode>('menu');
@@ -37,14 +48,27 @@ export default function DuelPage() {
   const [myAttempts, setMyAttempts] = useState(0);
   const [lockedOptions, setLockedOptions] = useState<number[]>([]);
 
+  // 👉 SECURE AUTH PATTERN: Fetch the API token on mount
+  useEffect(() => {
+    if (session?.user) {
+      fetch('/api/auth/api-token')
+        .then(res => res.json())
+        .then(data => { if (data.token) setApiToken(data.token); })
+        .catch(console.error);
+    }
+  }, [session]);
+
   useEffect(() => {
     if (router.query.mode === 'custom') setDuelMode('custom_menu');
     
-    fetch(`${API_BASE_URL}/api/v2/interview/questions`)
+    // 👉 Wait until token is fetched (if there's a session) before loading questions
+    if (session && !apiToken) return;
+
+    fetch(`${API_BASE_URL}/api/v2/interview/questions`, { headers: viewerHeaders(apiToken) })
       .then(res => res.json())
       .then(data => { if (Array.isArray(data)) setAvailableQuestions(data); })
       .catch(console.error);
-  }, [router.query]);
+  }, [router.query, session, apiToken]);
 
   useEffect(() => {
     const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
@@ -81,7 +105,6 @@ export default function DuelPage() {
       setFinished(state.finished); 
       
       setQuestion((prevQ: any) => {
-        // Only reset the timer and options if the question actually changed!
         if (prevQ?.id !== state.question?.id) {
           setTime(20); 
           setMyAttempts(0);
@@ -95,7 +118,6 @@ export default function DuelPage() {
     });
     
     socket.on('duel:feedback', (data) => {
-      // Track local attempts to lock buttons if we got it wrong
       if (data.playerId === socketRef.current?.id && !data.correct) {
         setMyAttempts(2 - (data.attemptsLeft || 0));
       }
@@ -107,7 +129,7 @@ export default function DuelPage() {
 
   function answer(index: number) { 
     if (!socketRef.current || !roomId || !question || myAttempts >= 2 || lockedOptions.includes(index)) return; 
-    setLockedOptions(prev => [...prev, index]); // Lock this specific button so they can't spam it
+    setLockedOptions(prev => [...prev, index]); 
     socketRef.current.emit('duel:answer', { roomId, questionId: question.id, answerIndex: index }); 
   }
 
@@ -321,7 +343,6 @@ export default function DuelPage() {
                       opacity: isDisabled ? 0.6 : 1,
                       cursor: isDisabled ? 'not-allowed' : 'pointer',
                       background: isLocked ? 'rgba(239, 68, 68, 0.15)' : optionBtn.background,
-                      // Fully fix TS error by directly overriding the entire 'border' property instead of 'borderColor'
                       border: isLocked ? '1px solid #ef4444' : optionBtn.border
                     }}
                   >
@@ -357,13 +378,9 @@ const vsBadge: CSSProperties = { width: 64, height: 64, borderRadius: 999, displ
 const controlsContainer: CSSProperties = { marginTop: 20 };
 const configCard: CSSProperties = { padding: 20, borderRadius: 20, background: 'rgba(15,23,42,.6)', border: '1px solid rgba(148,163,184,.2)' };
 const selectInput: CSSProperties = { flex: 1, padding: 12, borderRadius: 12, border: '1px solid rgba(148,163,184,.2)', background: 'rgba(2,6,23,.8)', color: '#fff', fontSize: 14, outline: 'none' };
-
-// Fixed type mapping error: Changed `border: 0` to `border: 'none'`
 const joinBtn: CSSProperties = { width: '100%', padding: 16, borderRadius: 18, border: 'none', background: 'linear-gradient(135deg,#f97316,#22d3ee)', color: '#020617', fontWeight: 950, cursor: 'pointer', fontSize: 18, transition: 'transform 0.1s' };
 const ghostBtn: CSSProperties = { border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', fontWeight: 900, borderRadius: 18, cursor: 'pointer', padding: 16, transition: 'background 0.2s' };
 const codeInput: CSSProperties = { flex: 1, padding: '16px 20px', borderRadius: 18, border: '1px solid rgba(148,163,184,.3)', background: 'rgba(2,6,23,.7)', color: '#fff', fontSize: 18, letterSpacing: 2, fontWeight: 'bold', outline: 'none' };
-
-// Fixed type mapping error: Changed `border: 0` to `border: 'none'`
 const backBtn: CSSProperties = { background: 'transparent', border: 'none', color: '#94a3b8', fontWeight: 'bold', cursor: 'pointer', marginTop: 10, padding: 10 };
 const feedbackBox: CSSProperties = { marginTop: 16, padding: 15, borderRadius: 18, background: 'rgba(34,211,238,.1)', border: '1px solid rgba(34,211,238,.24)', textAlign: 'center', fontWeight: 'bold' };
 const questionCard: CSSProperties = { marginTop: 24, padding: 'clamp(16px, 4vw, 26px)', borderRadius: 28, background: 'rgba(2,6,23,.62)', border: '1px solid rgba(148,163,184,.2)', boxSizing: 'border-box' };

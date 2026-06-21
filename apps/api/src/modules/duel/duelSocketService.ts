@@ -39,6 +39,7 @@ export function setupDuelSockets(io: Server) {
     });
   };
 
+ // Replace just the initializeMatch function in duelSocketService.ts
   async function initializeMatch(p1: Player, p2: Player, customQuestionIds?: string[]) {
     const roomId = `duel_${Date.now()}`;
     p1.socket.join(roomId);
@@ -59,6 +60,14 @@ export function setupDuelSockets(io: Server) {
 
       if (selectedQuestions.length === 0) throw new Error("No questions available");
 
+      // 👉 FIX: Map correctIndex from the array safely
+      selectedQuestions = selectedQuestions.map((q: any) => ({
+        ...q,
+        correctIndex: Array.isArray(q.correctIndices) && q.correctIndices.length > 0
+          ? q.correctIndices[0]
+          : (q.correctIndex ?? 0)
+      }));
+
       const state: DuelState = {
         roomId,
         players: [p1, p2],
@@ -78,7 +87,6 @@ export function setupDuelSockets(io: Server) {
       p2.socket.emit('duel:waiting', { message: 'Matchmaking failed. Try again.' });
     }
   }
-
   io.on('connection', (socket: Socket) => {
     
     // --- MATCHMAKING EVENTS ---

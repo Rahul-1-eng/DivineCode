@@ -1,4 +1,3 @@
-
 export type ViewerContext = {
   userId?: string;
   email?: string;
@@ -10,8 +9,8 @@ function normalize(value: unknown) {
 }
 
 export function viewerFromRequest(req: any): ViewerContext {
-  // 🛡️ SECURITY FIX: Strip plaintext spoofable headers. 
-  // Trust only the JWT payload validated by the Express auth middleware.
+  // 🔒 HARDENED: Only trust cryptographically verified JWT payloads.
+  // The spoofable x-user-email / x-user-name headers have been completely removed.
   if (req.user) {
     return {
       userId: String(req.user.id || '').trim() || undefined,
@@ -20,13 +19,13 @@ export function viewerFromRequest(req: any): ViewerContext {
     };
   }
 
-  // If no valid JWT is present, treat as unauthenticated guest.
   return {
     userId: undefined,
     email: undefined,
     name: undefined
   };
 }
+
 export function contestEndTime(contest: any) {
   if (!contest || !contest.startTime) return new Date();
   return new Date(new Date(contest.startTime).getTime() + (contest.durationMinutes || 0) * 60000);

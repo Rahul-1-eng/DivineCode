@@ -3,11 +3,11 @@ import { signOut, useSession } from 'next-auth/react';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
-function viewerHeaders(session: any) {
+// 👉 SECURE AUTH PATTERN: Accept the raw JWT instead of the session object
+function viewerHeaders(token: string) {
   return {
     'Content-Type': 'application/json',
-    'x-user-email': session?.user?.email || '',
-    'x-user-name': session?.user?.name || ''
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
   };
 }
 
@@ -51,6 +51,9 @@ export default function ProfilePage() {
   const [userData, setUserData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
+  // 👉 SECURE AUTH PATTERN: State to hold the API token
+  const [apiToken, setApiToken] = useState<string>('');
+
   const [divineCodeUsername, setDivineCodeUsername] = useState('');
   const [cfHandle, setCfHandle] = useState('');
   const [lcHandle, setLcHandle] = useState('');
@@ -63,10 +66,21 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState('');
   const [pwMessage, setPwMessage] = useState({ text: '', type: '' });
 
-  useEffect(() => { 
-    if (status !== 'authenticated' || !session?.user?.email) return;
+  // 👉 SECURE AUTH PATTERN: Fetch the API token on mount
+  useEffect(() => {
+    if (session?.user) {
+      fetch('/api/auth/api-token')
+        .then(res => res.json())
+        .then(data => { if (data.token) setApiToken(data.token); })
+        .catch(console.error);
+    }
+  }, [session]);
 
-    fetch(`${API_BASE_URL}/api/v2/profile/me`, { headers: viewerHeaders(session) })
+  useEffect(() => { 
+    // 👉 SECURE AUTH PATTERN: Wait until the token is fully loaded before fetching data
+    if (status !== 'authenticated' || !session?.user?.email || !apiToken) return;
+
+    fetch(`${API_BASE_URL}/api/v2/profile/me`, { headers: viewerHeaders(apiToken) })
       .then(r => r.json())
       .then(data => {
         setUserData(data);
@@ -78,14 +92,14 @@ export default function ProfilePage() {
         if (lc) setLcHandle(lc.handle);
         setLoading(false);
       });
-  }, [status, session]);
+  }, [status, session, apiToken]);
 
   async function handleClaimUsername() {
     if (!divineCodeUsername.trim()) return alert("Username cannot be empty");
     setSavingUser(true);
     const res = await fetch(`${API_BASE_URL}/api/v2/profile/claim-username`, {
       method: 'POST',
-      headers: viewerHeaders(session),
+      headers: viewerHeaders(apiToken),
       body: JSON.stringify({ username: divineCodeUsername })
     });
     const data = await res.json();
@@ -101,7 +115,7 @@ export default function ProfilePage() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/v2/profile/update-password`, {
         method: 'POST',
-        headers: viewerHeaders(session),
+        headers: viewerHeaders(apiToken),
         body: JSON.stringify({ currentPassword, newPassword })
       });
       const data = await res.json();
@@ -122,7 +136,7 @@ export default function ProfilePage() {
     if (!confirm(`Are you sure you want to unlink ${handle}?`)) return;
     const res = await fetch(`${API_BASE_URL}/api/v2/profile/handles/${platform}/${handle}`, {
       method: 'DELETE',
-      headers: { 'x-user-email': session?.user?.email || '' }
+      headers: viewerHeaders(apiToken)
     });
     if (res.ok) {
       alert('Handle unlinked!');
@@ -136,7 +150,7 @@ export default function ProfilePage() {
     setSavingHandles(true);
     const res = await fetch(`${API_BASE_URL}/api/v2/profile/save-handles`, {
       method: 'POST',
-      headers: viewerHeaders(session),
+      headers: viewerHeaders(apiToken),
       body: JSON.stringify({ codeforcesHandle: cfHandle, leetcodeHandle: lcHandle })
     });
     const data = await res.json();

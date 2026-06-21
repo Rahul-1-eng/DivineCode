@@ -29,6 +29,14 @@ import crypto from 'crypto';
 import { mcqQuestions } from '../data/mcq'; 
 import bcrypt from 'bcryptjs';
 
+const PLATFORM_OWNER_EMAIL = (process.env.PLATFORM_OWNER_EMAIL || '').trim().toLowerCase();
+
+async function ensurePlatformOwnerRole(user: { id: string; email: string; role?: string }) {
+  if (!PLATFORM_OWNER_EMAIL) return;
+  if (user.email.toLowerCase() !== PLATFORM_OWNER_EMAIL) return;
+  if (user.role === 'ADMIN') return;
+  await prisma.user.update({ where: { id: user.id }, data: { role: 'ADMIN' } });
+}
 const uploadDir = path.join(process.cwd(), 'public', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -68,14 +76,15 @@ function slugify(value: string) {
 async function resolveViewerUserId(viewer: ReturnType<typeof viewerFromRequest>, createIfMissing = false) {
   if (viewer.userId) {
     const byId = await prisma.user.findUnique({ where: { id: viewer.userId } });
-    if (byId) return byId.id;
+    if (byId) { await ensurePlatformOwnerRole(byId); return byId.id; }
   }
 
   const email = viewer.email?.trim().toLowerCase();
   if (!email) return undefined;
 
   const byEmail = await prisma.user.findUnique({ where: { email } });
-  if (byEmail || !createIfMissing) return byEmail?.id;
+  if (byEmail) { await ensurePlatformOwnerRole(byEmail); return byEmail.id; }
+  if (!createIfMissing) return undefined;
 
   const usernameSeed = slugify(viewer.name || email.split('@')[0] || 'user');
   const created = await prisma.user.upsert({
@@ -87,6 +96,7 @@ async function resolveViewerUserId(viewer: ReturnType<typeof viewerFromRequest>,
       username: `${usernameSeed}_${Math.random().toString(36).slice(2, 8)}`
     }
   });
+  await ensurePlatformOwnerRole(created);
   return created.id;
 }
 

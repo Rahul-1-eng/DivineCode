@@ -46,16 +46,12 @@ export function PostContestAiRecommendations({ contestId, contestStatus }: { con
   );
 }
 
-function viewerQuery(session: any) {
-  const query = new URLSearchParams();
-  if (session?.user?.email) query.set('viewerEmail', session.user.email);
-  if (session?.user?.name) query.set('viewerName', session.user.name);
-  const value = query.toString();
-  return value ? `?${value}` : '';
-}
-
-function viewerHeaders(session: any) {
-  return { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '', 'x-user-name': session?.user?.name || '' };
+// 👉 SECURE AUTH PATTERN: Pass the raw token instead of the NextAuth session
+function viewerHeaders(token: string) {
+  return { 
+    'Content-Type': 'application/json', 
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
 }
 
 export default function ContestRoomPage() {
@@ -64,6 +60,9 @@ export default function ContestRoomPage() {
   const isFinal = router.pathname.includes('/final');
   const { data: session, status } = useSession();
   
+  // 👉 SECURE AUTH PATTERN: Store the API token retrieved from our own Next.js backend
+  const [apiToken, setApiToken] = useState<string>('');
+
   const [contest, setContest] = useState<any>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [selectedMember, setSelectedMember] = useState<any>(null);
@@ -142,6 +141,18 @@ export default function ContestRoomPage() {
     return parts.join(' : ');
   }
 
+  // 👉 SECURE AUTH PATTERN: Fetch the API token natively
+  useEffect(() => {
+    if (session?.user) {
+      fetch('/api/auth/api-token')
+        .then(res => res.json())
+        .then(data => {
+          if (data.token) setApiToken(data.token);
+        })
+        .catch(console.error);
+    }
+  }, [session]);
+
   useEffect(() => { const ticker = setInterval(() => setNowTick(Date.now()), 1000); return () => clearInterval(ticker); }, []);
 
   const { mcqCount, codingCount } = useMemo(() => {
@@ -185,7 +196,7 @@ export default function ContestRoomPage() {
       else payload.teamName = regTeamName.trim();
     }
 
-    const res = await fetch(endpoint, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify(payload) });
+    const res = await fetch(endpoint, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify(payload) });
     const data = await res.json();
     setIsRegistering(false); setSyncing(false);
 
@@ -206,7 +217,7 @@ export default function ContestRoomPage() {
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/participants/${participantId}/approve`, {
         method: 'POST',
-        headers: viewerHeaders(session)
+        headers: viewerHeaders(apiToken)
       });
       if (res.ok) {
         toast.success('Player approved!');
@@ -228,7 +239,7 @@ export default function ContestRoomPage() {
     try {
       const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/unregister`, { 
         method: 'POST', 
-        headers: viewerHeaders(session) 
+        headers: viewerHeaders(apiToken) 
       });
       
       if (res.ok) {
@@ -246,7 +257,7 @@ export default function ContestRoomPage() {
 
   async function loadContest() {
     if (!id) return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}${viewerQuery(session)}`, { headers: viewerHeaders(session) });
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}`, { headers: viewerHeaders(apiToken) });
     const data = await res.json();
     if (!res.ok) { setError(data.error || 'Contest not found'); return; }
     
@@ -262,7 +273,7 @@ export default function ContestRoomPage() {
 
   async function loadSubmissions() {
     if (!id) return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions${viewerQuery(session)}`, { headers: viewerHeaders(session) });
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, { headers: viewerHeaders(apiToken) });
     const data = await res.json();
     setSubmissions(Array.isArray(data) ? data : []);
   }
@@ -271,7 +282,7 @@ export default function ContestRoomPage() {
     if (!id || syncingRef.current || isFinal) return;
     syncingRef.current = true;
     if (!silent) { setLoadingText('Syncing Submissions...'); setSyncing(true); }
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/sync/codeforces`, { method: 'POST', headers: viewerHeaders(session) });
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/sync/codeforces`, { method: 'POST', headers: viewerHeaders(apiToken) });
     const data = await res.json();
     syncingRef.current = false; setSyncing(false);
     if (!res.ok) { if (!silent) toast.error(data.error || 'Sync failed'); return; }
@@ -282,7 +293,7 @@ export default function ContestRoomPage() {
 
   async function extendTime(minutes: number) {
     if (!id || !session) return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/extend`, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify({ minutes }) });
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/extend`, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify({ minutes }) });
     const data = await res.json();
     if (!res.ok) return toast.error(data.error || 'Could not extend');
     toast.success(`Time extended by ${minutes} minutes.`);
@@ -291,7 +302,7 @@ export default function ContestRoomPage() {
 
   async function deleteContest() {
     if (!id || !session || !confirm('Delete this live mashup and its submissions?')) return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}`, { method: 'DELETE', headers: viewerHeaders(session) });
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}`, { method: 'DELETE', headers: viewerHeaders(apiToken) });
     const data = await res.json();
     if (!res.ok) return toast.error(data.error || 'Could not delete contest');
     toast.success('Contest deleted successfully.');
@@ -310,7 +321,7 @@ export default function ContestRoomPage() {
     try {
       setLoadingText('Fetching Problem Data...'); setSyncing(true);
       const p = await lookupProblem(newProblemPlatform, newProblemCode);
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems`, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify(p) });
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems`, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify(p) });
       const data = await res.json();
       setSyncing(false);
       if (!res.ok) return toast.error(data.error || 'Could not add problem');
@@ -323,7 +334,7 @@ export default function ContestRoomPage() {
     if (!masterSolution) return;
     setGeneratingTcFor(problemId);
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/problems/${problemId}/generate-ai-testcases`, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify({ masterSolution }) });
+      const res = await fetch(`${API_V2_BASE_URL}/problems/${problemId}/generate-ai-testcases`, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify({ masterSolution }) });
       const data = await res.json();
       if (res.ok) toast.success(`Successfully generated ${data.generatedCount} new system test cases!`);
       else toast.error(data.error || 'Failed to generate test cases.');
@@ -335,7 +346,7 @@ export default function ContestRoomPage() {
     if (!id || !session) return;
     setIsRecommending(true); setLoadingText('Curating Recommendations...'); setSyncing(true);
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/recommend-problems`, { method: 'POST', headers: viewerHeaders(session) });
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/recommend-problems`, { method: 'POST', headers: viewerHeaders(apiToken) });
       const data = await res.json();
       if (res.ok) toast.success(`AI Recommended: ${data.recommendations.map((r: any) => r.name || r.title).join(', ')}`);
       else toast.error(data.error || 'Failed to fetch AI recommendations');
@@ -345,7 +356,7 @@ export default function ContestRoomPage() {
 
   async function removeProblem(problemId: string) {
     if (!id || !session || !confirm('Remove this problem from the live contest?')) return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, { method: 'DELETE', headers: viewerHeaders(session) });
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, { method: 'DELETE', headers: viewerHeaders(apiToken) });
     const data = await res.json();
     if (!res.ok) return toast.error(data.error || 'Could not remove problem');
     toast.success('Problem removed.'); setContest(data);
@@ -358,7 +369,7 @@ export default function ContestRoomPage() {
     try {
       setLoadingText('Replacing Problem...'); setSyncing(true);
       const p = await lookupProblem('Codeforces', code);
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, { method: 'PUT', headers: viewerHeaders(session), body: JSON.stringify(p) });
+      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, { method: 'PUT', headers: viewerHeaders(apiToken), body: JSON.stringify(p) });
       const data = await res.json();
       setSyncing(false);
       if (!res.ok) return toast.error(data.error || 'Could not replace problem');
@@ -368,7 +379,7 @@ export default function ContestRoomPage() {
 
   async function submitReport() {
     if (!selectedSubmission || !reportReason.trim()) return;
-    const res = await fetch(`${API_BASE_URL}/api/submissions/${selectedSubmission.id}/report`, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify({ reason: reportReason }) });
+    const res = await fetch(`${API_BASE_URL}/api/submissions/${selectedSubmission.id}/report`, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify({ reason: reportReason }) });
     if (res.ok) { toast.success('Report submitted successfully to the contest owner.'); setReportReason(''); } 
     else { const data = await res.json(); toast.error(data.error || 'Failed to report submission'); }
   }
@@ -376,7 +387,7 @@ export default function ContestRoomPage() {
   async function finalizeContest() {
     if (!id || !session || !confirm('End this contest immediately and calculate final ratings/coins? This cannot be undone.')) return;
     setLoadingText('Calculating Final Ratings & Coins...'); setSyncing(true); 
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/finalize`, { method: 'POST', headers: viewerHeaders(session) });
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/finalize`, { method: 'POST', headers: viewerHeaders(apiToken) });
     const data = await res.json();
     setSyncing(false);
     if (!res.ok) return toast.error(data.error || 'Could not finalize contest');
@@ -385,7 +396,7 @@ export default function ContestRoomPage() {
 
   async function submitOverride() {
     if (!selectedSubmission || overridePoints === '') return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions/${selectedSubmission.id}/override`, { method: 'POST', headers: viewerHeaders(session), body: JSON.stringify({ manualPoints: Number(overridePoints) }) });
+    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions/${selectedSubmission.id}/override`, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify({ manualPoints: Number(overridePoints) }) });
     if (res.ok) {
       toast.success('Points overridden successfully. Standings will recalculate instantly.');
       setSelectedSubmission(null); await loadSubmissions(); await loadContest(); 
@@ -427,7 +438,13 @@ export default function ContestRoomPage() {
     }
   };
 
-  useEffect(() => { loadContest(); loadSubmissions(); }, [id, session?.user?.email, session?.user?.name]);
+  // 👉 SECURE AUTH PATTERN: Only load once the token is actually resolved
+  useEffect(() => {
+    if (status === 'loading') return;
+    if (session && !apiToken) return; // Wait for the token fetch to finish
+    loadContest(); 
+    loadSubmissions(); 
+  }, [id, session, apiToken, status]);
   
   useEffect(() => {
     if (!id || !session || isFinal || !contest) return;
@@ -531,7 +548,6 @@ export default function ContestRoomPage() {
     }));
   }, [contest, memberById]);
 
-  // 👉 FIXED: Team Standings Logic. Do NOT sum up team scores across individual members! Use the true backend calculation.
   const teamStandings = useMemo(() => {
     const grouped: Record<string, any> = {};
     (contest?.standings || []).forEach((standing: any) => {
@@ -539,7 +555,6 @@ export default function ContestRoomPage() {
       const team = member.teamName || member.team || 'Individuals';
       
       if (!grouped[team]) {
-        // Initialize the top-level team row using the backend's team score
         grouped[team] = { 
             team, 
             solved: standing.solved || 0, 
@@ -549,7 +564,6 @@ export default function ContestRoomPage() {
         };
       }
       
-      // Push the individual member's contribution as a nested sub-row
       grouped[team].players.push({ 
           ...standing, 
           codeforcesHandle: member.codeforcesHandle || member.externalHandle?.handle, 

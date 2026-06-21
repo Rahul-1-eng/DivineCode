@@ -9,10 +9,57 @@ interviewRouter.get('/tracks', async (req, res) => {
     const tracks = await prisma.interviewTrack.findMany({
       orderBy: { order: 'asc' }
     });
-    // FIXED: Frontend expects a raw array, not an object
     res.json(tracks); 
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to fetch tracks' });
+  }
+});
+
+// GET user progress
+interviewRouter.get('/progress', async (req, res) => {
+  try {
+    const email = String(req.headers['x-user-email'] || '').trim().toLowerCase();
+    if (!email) return res.json([]); // Return empty array if guest
+    
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.json([]);
+
+    const progress = await prisma.interviewProgress.findMany({
+      where: { userId: user.id }
+    });
+    res.json(progress);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch progress' });
+  }
+});
+
+// POST update progress (Mark as REVIEWING, MASTERED, etc)
+interviewRouter.post('/progress/:questionId', async (req, res) => {
+  try {
+    const email = String(req.headers['x-user-email'] || '').trim().toLowerCase();
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const { status } = req.body; 
+
+    const progress = await prisma.interviewProgress.upsert({
+      where: {
+        userId_questionId: { userId: user.id, questionId: req.params.questionId }
+      },
+      update: { status, lastReviewedAt: new Date() },
+      create: {
+        userId: user.id,
+        questionId: req.params.questionId,
+        status,
+        lastReviewedAt: new Date()
+      }
+    });
+
+    res.json({ success: true, progress });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to update progress' });
   }
 });
 
@@ -25,13 +72,11 @@ interviewRouter.get('/questions', async (req, res) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    // FIXED: Map correctIndices to correctIndex for frontend compatibility
     const mappedQuestions = questions.map(q => ({
       ...q,
       correctIndex: q.correctIndices && q.correctIndices.length > 0 ? q.correctIndices[0] : 0
     }));
 
-    // FIXED: Frontend expects a raw array, not an object
     res.json(mappedQuestions); 
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to fetch questions' });
@@ -41,12 +86,26 @@ interviewRouter.get('/questions', async (req, res) => {
 // ADMIN ROUTE: GET all pending questions
 interviewRouter.get('/pending', async (req, res) => {
   try {
+    const email = String(req.headers['x-user-email'] || '').trim().toLowerCase();
+    const user = await prisma.user.findUnique({ where: { email } });
+    
+    if (!user || user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Forbidden. Admin access required.' });
+    }
+
     const pendingQuestions = await prisma.interviewQuestion.findMany({
       where: { isApproved: false },
       include: { track: true },
       orderBy: { createdAt: 'asc' }
     });
-    res.json({ success: true, questions: pendingQuestions });
+    
+    // Map indices so the frontend logic remains unified
+    const mappedPending = pendingQuestions.map(q => ({
+      ...q,
+      correctIndex: q.correctIndices && q.correctIndices.length > 0 ? q.correctIndices[0] : 0
+    }));
+
+    res.json({ success: true, questions: mappedPending });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to fetch pending questions' });
   }
@@ -55,6 +114,14 @@ interviewRouter.get('/pending', async (req, res) => {
 // ADMIN ROUTE: Approve a pending question
 interviewRouter.patch('/questions/:id/approve', async (req, res) => {
   try {
+    const email = String(req.headers['x-user-email'] || '').trim().toLowerCase();
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const requester = await prisma.user.findUnique({ where: { email } });
+    if (!requester || requester.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Only the platform owner can approve questions.' });
+    }
+
     const updatedQuestion = await prisma.interviewQuestion.update({
       where: { id: req.params.id },
       data: { isApproved: true }
@@ -80,13 +147,10 @@ interviewRouter.get('/questions/:id', async (req, res) => {
 });
 
 // POST endpoint for users to contribute questions
-// POST endpoint for users to contribute questions
 interviewRouter.post('/questions', async (req, res) => {
   try {
-    // 👉 FIX: Added expectedAnswer to the destructured body
     const { trackId, title, prompt, options, correctIndices, difficulty, tags, sourceCompany, expectedAnswer } = req.body;
 
-    // Basic validation
     if (!trackId || !title || !prompt || !options || !correctIndices) {
       return res.status(400).json({ error: 'Missing required fields (trackId, title, prompt, options, correctIndices).' });
     }
@@ -104,7 +168,6 @@ interviewRouter.post('/questions', async (req, res) => {
       return res.status(400).json({ error: 'Invalid track ID provided.' });
     }
 
-    // Create the question in a pending state
     const newQuestion = await prisma.interviewQuestion.create({
       data: {
         trackId,
@@ -116,7 +179,6 @@ interviewRouter.post('/questions', async (req, res) => {
         difficulty: difficulty || 'Medium',
         tags: tags || [],
         sourceCompany: sourceCompany || null,
-        // 👉 FIX: Make sure the expectedAnswer is saved to the database
         expectedAnswer: expectedAnswer || null,
         isApproved: false 
       }
