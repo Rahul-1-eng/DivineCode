@@ -1,3 +1,4 @@
+// apps/api/src/routes/v2.ts
 import { Express, NextFunction, Request, Response, Router } from 'express';
 import { Server } from 'socket.io';
 import { prisma } from '../prisma/client';
@@ -15,7 +16,7 @@ import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge
 import { recomputeContestStandings } from '../modules/standings/standingService';
 import { processContestRewards } from '../modules/ratings/ratingService';
 import { scrapeProblemFromUrl } from '../modules/external-sync/problemScraper'; 
-import { generateTestCasesWithAI, debugCodeWithAI, generateToughTestCases } from '../modules/ai/aiService'; 
+import { generateToughTestCases } from '../modules/ai/aiService'; // Retained only for mashup creation
 import { ContestStatus } from '@prisma/client';
 import axios from 'axios';
 import multer from 'multer';
@@ -25,13 +26,13 @@ import express from 'express';
 import { submissionRouter } from './submissionRoutes';
 import { profileRouter } from './profileRoutes';
 import { interviewRouter } from './interviewRoutes'; 
-import crypto from 'crypto';
 import { mcqQuestions } from '../data/mcq'; 
-import bcrypt from 'bcryptjs';
 import { searchRouter } from './searchRoutes';
 import { leaderboardRouter } from '../routes/leaderboardRoutes';
 import { adminRouter } from '../routes/adminRoutes';
 import { notificationRouter } from './notificationRoutes';
+import { authRouter } from './authRoutes';
+import { aiRouter } from './aiRoutes';
 
 const PLATFORM_OWNER_EMAIL = (process.env.PLATFORM_OWNER_EMAIL || '').trim().toLowerCase();
 
@@ -217,210 +218,6 @@ export function mountV2Routes(app: Express, io: Server) {
     }
   });
 
-  router.post('/ai/chat', asyncRoute(async (req, res) => {
-    const { message, history, image } = req.body;
-    const apiKey = process.env.AI_API_KEY;
-    if (!apiKey) return res.json({ reply: "I am unable to think right now. Please check the AI_API_KEY in the environment variables." });
-
-    try {
-      const contents = [];
-      
-      if (Array.isArray(history)) {
-         history.forEach(msg => {
-            contents.push({
-               role: msg.role === 'user' ? 'user' : 'model',
-               parts: [{ text: msg.text || msg.content || msg.parts?.[0]?.text || '' }]
-            });
-         });
-      }
-      
-      const currentParts: any[] = [];
-      if (message) currentParts.push({ text: message });
-      else if (!message && image) currentParts.push({ text: 'Please analyze this image and answer any related questions.' });
-
-      if (image) {
-          const mimeType = image.match(/data:(.*?);base64/)?.[1] || 'image/jpeg';
-          const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
-          currentParts.push({ inlineData: { data: base64Data, mimeType } });
-      }
-
-      contents.push({ role: 'user', parts: currentParts });
-
-      const modelName = process.env.AI_MODEL || 'gemini-3.5-flash';
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-      const { data } = await axios.post(url, { contents });
-      
-      res.json({ reply: data.candidates[0].content.parts[0].text });
-    } catch (e: any) {
-      console.error('[AI Chat] Error:', e.response?.data || e.message);
-      res.json({ reply: "AI Service Error: Failed to generate a response. The model may be rate-limited or unavailable." });
-    }
-  }));
-
-  router.post('/ai/generate-testcases', asyncRoute(async (req, res) => {
-    const { problemDescription } = req.body;
-    
-    if (!problemDescription) {
-      return res.status(400).json({ error: 'Problem description or image payload required' });
-    }
-
-    try {
-      const testcases = await generateToughTestCases(problemDescription);
-      
-      if (!testcases || testcases.length === 0) {
-        return res.status(500).json({ error: 'Failed to generate testcases from the provided input' });
-      }
-      
-      res.json({ success: true, testcases });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message || 'AI Generation Failed' });
-    }
-  }));
-
-  router.post('/auth/register', asyncRoute(async (req, res) => {
-    const { username, email, name, password } = req.body;
-
-    if (!username || !email || !password) {
-      return res.status(400).json({ error: 'Username, email and password are required fields.' });
-    }
-
-    const cleanUsername = String(username).trim();
-    const cleanEmail = String(email).trim().toLowerCase();
-
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { username: cleanUsername },
-          { email: cleanEmail }
-        ]
-      }
-    });
-
-    if (existingUser) {
-      return res.status(400).json({ error: 'Username or email handle already registered.' });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    const newUser = await prisma.user.create({
-      data: {
-        username: cleanUsername,
-        email: cleanEmail,
-        name: name || cleanUsername,
-        passwordHash: hashedPassword
-      }
-    });
-
-    res.status(201).json({ success: true, userId: newUser.id });
-  }));
-
-  router.post('/auth/login', asyncRoute(async (req, res) => {
-    const { handle, password } = req.body;
-
-    if (!handle || !password) {
-      return res.status(400).json({ error: 'Handle and password are required.' });
-    }
-
-    const cleanHandle = String(handle).trim();
-
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { username: cleanHandle },
-          { email: cleanHandle.toLowerCase() }
-        ]
-      }
-    });
-
-    if (!existingUser || !existingUser.passwordHash) {
-      return res.status(401).json({ error: 'Invalid credentials.' });
-    }
-
-    const isValid = await bcrypt.compare(password, existingUser.passwordHash);
-
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid credentials.' });
-    }
-
-    res.status(200).json({
-      id: existingUser.id,
-      username: existingUser.username,
-      email: existingUser.email,
-      name: existingUser.name,
-      avatarUrl: existingUser.avatarUrl
-    });
-  }));
-router.post('/auth/forgot-password', asyncRoute(async (req, res) => {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required.' });
-
-    const cleanEmail = String(email).trim().toLowerCase();
-    const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
-
-    if (!user) {
-      // Security: Return 200 anyway to prevent malicious users from guessing which emails exist
-      return res.json({ success: true, message: 'If that account exists, a reset link has been generated.' });
-    }
-
-    // Generate a secure 32-byte random token
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    
-    // Hash it before saving to the DB so even if the DB is compromised, the live tokens are safe
-    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-    const expires = new Date(Date.now() + 3600000); // Expires in 1 hour
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { resetPasswordToken: hashedToken, resetPasswordExpires: expires }
-    });
-
-    const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
-    const resetLink = `${clientOrigin}/reset-password?token=${resetToken}`;
-    
-    // TODO: In production, send this via Resend, AWS SES, or SendGrid
-    console.log(`\n========================================`);
-    console.log(`🔑 PASSWORD RESET LINK FOR ${user.email}`);
-    console.log(resetLink);
-    console.log(`========================================\n`);
-
-    res.json({ success: true, message: 'If that account exists, a reset link has been generated.', devLink: resetLink });
-  }));
-
-  router.post('/auth/reset-password', asyncRoute(async (req, res) => {
-    const { token, newPassword } = req.body;
-    
-    if (!token || !newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'Invalid token or password is too short (min 6 characters).' });
-    }
-
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-
-    const user = await prisma.user.findFirst({
-      where: {
-        resetPasswordToken: hashedToken,
-        resetPasswordExpires: { gt: new Date() } // Must not be expired
-      }
-    });
-
-    if (!user) {
-      return res.status(400).json({ error: 'This reset token is invalid or has expired.' });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(newPassword, salt);
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        passwordHash,
-        resetPasswordToken: null, // Consume the token so it can't be reused
-        resetPasswordExpires: null
-      }
-    });
-
-    res.json({ success: true, message: 'Your password has been reset successfully. You can now log in.' });
-  }));
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {
     const viewer = viewerFromRequest(req);
     const contest = await registerForContestV2(req.params.id, {
@@ -491,10 +288,6 @@ router.post('/auth/forgot-password', asyncRoute(async (req, res) => {
     res.json(sanitizeContestForViewer(updatedContest!, viewer));
   }));
 
-  // 👉 NEW: Virtual Contest Clone Endpoint
-// 👉 NEW: Virtual Contest Clone Endpoint
- 
-// 👉 NEW: Virtual Contest Clone Endpoint
   router.post('/contests/:id/virtual', asyncRoute(async (req, res) => {
     const { id } = req.params;
     const viewer = await resolvedViewerFromRequest(req, true);
@@ -516,7 +309,6 @@ router.post('/auth/forgot-password', asyncRoute(async (req, res) => {
     const virtualContest = await prisma.contest.create({
       data: {
         title: `[Virtual] ${original.title}`,
-        // 👉 THE FIX: Generate a random 6-character invite code for the solo arena
         inviteCode: Math.random().toString(36).substring(2, 8).toUpperCase(), 
         type: 'SOLO',
         status: 'RUNNING',
@@ -887,59 +679,6 @@ router.post('/auth/forgot-password', asyncRoute(async (req, res) => {
     res.json(result);
   }));
 
-  router.get('/ai-dataset', asyncRoute(async (req, res) => {
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
-    const search = String(req.query.search || '').trim();
-
-    const whereClause: any = search ? {
-      OR: [
-        { title: { contains: search, mode: 'insensitive' } },
-        { tags: { has: search } }
-      ]
-    } : {};
-
-    const problems = await prisma.aiProblemDataset.findMany({
-      where: whereClause,
-      orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * limit,
-      take: limit
-    });
-    
-    const totalFilteredCount = await prisma.aiProblemDataset.count({ where: whereClause });
-    const totalCount = await prisma.aiProblemDataset.count(); 
-    
-    res.json({ 
-      success: true, 
-      count: totalFilteredCount,
-      totalCount: totalCount, 
-      message: `${totalFilteredCount} matching DSA and System Design questions loaded.`, 
-      problems,
-      totalPages: Math.ceil(totalFilteredCount / limit),
-      currentPage: page
-    });
-  }));
-
-  router.post('/problems/:id/generate-ai-testcases', asyncRoute(async (req, res) => {
-     const cp = await prisma.contestProblem.findUnique({ where: { id: req.params.id }, include: { problem: true } });
-     if (!cp || !cp.problem) return res.status(404).json({ error: 'Problem not found' });
-
-     const description = cp.customDescription || cp.problem.description || cp.titleSnapshot;
-     const testCases = await generateTestCasesWithAI(description, req.body.masterSolution);
-
-     await prisma.testcase.createMany({
-       data: testCases.map((tc: any, i: number) => ({
-         problemId: cp.problemId!,
-         input: tc.input,
-         expectedOutput: tc.expectedOutput,
-         explanation: tc.explanation || '',
-         type: 'HIDDEN',
-         order: i + 10
-       }))
-     });
-     res.json({ success: true, generatedCount: testCases.length });
-  }));
-
   router.get('/problems/:id/redirect', asyncRoute(async (req, res) => {
     const problem = await prisma.contestProblem.findUnique({
       where: { id: req.params.id },
@@ -987,51 +726,11 @@ router.post('/auth/forgot-password', asyncRoute(async (req, res) => {
     res.json(response);
   }));
 
-  router.post('/contests/:id/ai-recommendations', asyncRoute(async (req, res) => {
-    const problems = await prisma.aiProblemDataset.findMany({
-      take: 3,
-      orderBy: { createdAt: 'desc' }
-    });
-    
-    const enriched = problems.map(p => ({
-      ...p,
-      requiresRedirect: p.platform !== 'DIVINECODE' && !!p.originalUrl,
-      externalUrl: p.originalUrl,
-      link: p.originalUrl || '#'
-    }));
-    
-    res.json({ success: true, recommendations: enriched });
-  }));
-  
-  router.post('/contests/:id/recommend-problems', asyncRoute(async (req, res) => {
-    const problems = await prisma.aiProblemDataset.findMany({
-      take: 2,
-      orderBy: { createdAt: 'desc' }
-    });
-    
-    const enriched = problems.map(p => ({
-      ...p,
-      requiresRedirect: p.platform !== 'DIVINECODE' && !!p.originalUrl,
-      externalUrl: p.originalUrl,
-      link: p.originalUrl || '#'
-    }));
-    
-    res.json({ success: true, recommendations: enriched });
-  }));
-
-  router.post('/contests/:id/problems/:problemId/ai-debug', asyncRoute(async (req, res) => {
-    const { userCode, problemDescription } = req.body;
-    const aiDebugData = await debugCodeWithAI(userCode, problemDescription);
-    if (!aiDebugData || !aiDebugData.hint) {
-        return res.status(500).json({ error: "AI failed to generate a debug response." });
-    }
-    res.json({ success: true, aiDebugData });
-  }));
-
   router.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
     res.status(statusFromError(error)).json({ ok: false, error: error.message || 'Unexpected V2 API error' });
   });
   
+  app.use('/api/v2/auth', authRouter);
   app.use('/api/v2/notifications', notificationRouter);
   app.use('/api/v2/admin', adminRouter);
   app.use('/api/v2/leaderboard', leaderboardRouter);
@@ -1041,4 +740,5 @@ router.post('/auth/forgot-password', asyncRoute(async (req, res) => {
   app.use('/api/v2/submissions', submissionRouter); 
   app.use('/api/v2/interview', interviewRouter);
   app.use('/api/v2/profile', profileRouter);
+  app.use('/api/v2', aiRouter); // Mounted the newly extracted AI router
 }

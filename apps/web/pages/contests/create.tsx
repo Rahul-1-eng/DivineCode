@@ -2,25 +2,12 @@ import { CSSProperties, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import toast, { Toaster } from 'react-hot-toast';
-
-const API_V2 = process.env.NEXT_PUBLIC_API_BASE_URL + '/api/v2';
-
-// 👉 SECURE AUTH PATTERN
-function viewerHeaders(token: string, email: string) {
-  return {
-    'Content-Type': 'application/json',
-    'x-user-email': email,
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-  };
-}
+import { fetchApi } from '../../lib/api';
 
 export default function GlobalNavigationAndMashupCreator() {
   const router = useRouter();
   const { data: session } = useSession();
   
-  // 👉 SECURE AUTH PATTERN
-  const [apiToken, setApiToken] = useState<string>('');
-
   const [navTab, setNavTab] = useState<'mashup' | 'duel' | 'interview'>('mashup');
 
   const [contestMode, setContestMode] = useState<'SOLO' | 'GROUP'>('GROUP');
@@ -50,22 +37,11 @@ export default function GlobalNavigationAndMashupCreator() {
   const [isCreating, setIsCreating] = useState(false);
   const [loadingContext, setLoadingContext] = useState('');
 
-  // 👉 SECURE AUTH PATTERN: Fetch the API token on mount
   useEffect(() => {
-    if (session?.user) {
-      fetch('/api/auth/api-token')
-        .then(res => res.json())
-        .then(data => { if (data.token) setApiToken(data.token); })
-        .catch(console.error);
-    }
-  }, [session]);
+    if (!session) return;
 
-  useEffect(() => {
-    if (session && !apiToken) return;
-
-    fetch(`${API_V2}/ai-dataset`, { headers: viewerHeaders(apiToken, session?.user?.email || '') })
-      .then(r => r.json())
-      .then(d => {
+    fetchApi('/api/v2/ai-dataset')
+      .then((d: any) => {
          if (d.problems && d.problems.length > 0) {
            setAiBank(d.problems);
          } else {
@@ -76,7 +52,7 @@ export default function GlobalNavigationAndMashupCreator() {
          }
       })
       .catch(() => {});
-  }, [session, apiToken]);
+  }, [session]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -192,12 +168,9 @@ export default function GlobalNavigationAndMashupCreator() {
     setIsCreating(true);
     setLoadingContext('Creating contest shell...');
 
-    const headers = viewerHeaders(apiToken, session.user.email);
-
     try {
-      const res = await fetch(`${API_V2}/contests`, {
+      const contest = await fetchApi('/api/v2/contests', {
         method: 'POST',
-        headers,
         body: JSON.stringify({ 
           title, 
           durationMinutes: duration, 
@@ -213,9 +186,6 @@ export default function GlobalNavigationAndMashupCreator() {
         })
       });
       
-      const contest = await res.json();
-      if (!res.ok) throw new Error(contest.error || "Shell creation failed on backend");
-      
       toast.success(`Contest Created! Invite Code: ${contest.inviteCode}`, { duration: 10000 });
 
       let failedAny = false;
@@ -223,19 +193,13 @@ export default function GlobalNavigationAndMashupCreator() {
       for (let i = 0; i < compiledProblems.length; i++) {
         setLoadingContext(`Adding problem ${i + 1}/${compiledProblems.length}...`);
         try {
-          const mRes = await fetch(`${API_V2}/contests/${contest.id}/problems/mashup`, {
+          await fetchApi(`/api/v2/contests/${contest.id}/problems/mashup`, {
             method: 'POST', 
-            headers, 
             body: JSON.stringify(compiledProblems[i])
           });
-
-          if (!mRes.ok) {
-            failedAny = true;
-            toast.error(`Failed to add '${compiledProblems[i].displayTitle}'`);
-          }
         } catch (err) {
           failedAny = true;
-          toast.error(`Network error on problem '${compiledProblems[i].displayTitle}'`);
+          toast.error(`Failed to add '${compiledProblems[i].displayTitle}'`);
         }
       }
       

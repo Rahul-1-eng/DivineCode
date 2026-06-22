@@ -1,17 +1,8 @@
-import { CSSProperties, useEffect, useState, useMemo, useRef } from 'react';
+import { CSSProperties, useEffect, useRef, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSession } from 'next-auth/react'; 
 import toast, { Toaster } from 'react-hot-toast';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-
-// 👉 SECURE AUTH PATTERN: Accept the raw JWT
-function viewerHeaders(token: string) {
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-  };
-}
+import { fetchApi } from '../lib/api';
 
 const SUGGESTED_QUESTIONS = [
   "Can you suggest a roadmap for learning Dynamic Programming?",
@@ -30,10 +21,7 @@ const BIG_O_SNIPPETS = [
 const BIG_O_OPTIONS = ["O(1)", "O(log n)", "O(n)", "O(n log n)", "O(n^2)", "O(2^n)"];
 
 export default function PracticePage() {
-  const { data: session } = useSession(); 
-  
-  // 👉 SECURE AUTH PATTERN: State to hold the API token
-  const [apiToken, setApiToken] = useState<string>('');
+  const { data: session, status } = useSession(); 
 
   const [problems, setProblems] = useState<any[]>([]);
   const [mcqData, setMcqData] = useState<any[]>([]);
@@ -77,31 +65,19 @@ export default function PracticePage() {
     { role: 'ai', text: 'Hello! I have access to over 5,000+ DSA questions. How can I help you practice today? Upload an image if you have a specific unexpected question!' }
   ]);
 
-  // 👉 SECURE AUTH PATTERN: Fetch the API token on mount
-  useEffect(() => {
-    if (session?.user) {
-      fetch('/api/auth/api-token')
-        .then(res => res.json())
-        .then(data => { if (data.token) setApiToken(data.token); })
-        .catch(console.error);
-    }
-  }, [session]);
-
   // FULLY DYNAMIC API FETCH
   useEffect(() => {
-    // Wait until token is fetched (if there's a session) before loading data
-    if (session && !apiToken) return;
+    if (status === 'loading') return;
 
-    const headers = viewerHeaders(apiToken);
     Promise.allSettled([
-      fetch(`${API_BASE_URL}/api/v2/ai-dataset`, { headers }).then(r => r.json()),
-      fetch(`${API_BASE_URL}/api/v2/mcqs`, { headers }).then(r => r.json())
+      fetchApi('/api/v2/ai-dataset'),
+      fetchApi('/api/v2/mcqs')
     ]).then(([dsaRes, mcqRes]) => { 
       if (dsaRes.status === 'fulfilled') setProblems(Array.isArray(dsaRes.value.problems) ? dsaRes.value.problems : []); 
       if (mcqRes.status === 'fulfilled') setMcqData(Array.isArray(mcqRes.value) ? mcqRes.value : []);
       setLoading(false); 
     }).catch(() => setLoading(false));
-  }, [session, apiToken]); 
+  }, [session, status]); 
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages, isAiTyping]);
 
@@ -137,7 +113,7 @@ export default function PracticePage() {
   // --- SLIDING PUZZLE LOGIC ---
   const initPuzzle = () => {
     let arr = Array.from({length: 15}, (_, i) => i + 1).concat([0]);
-    // Simple shuffle (might produce unsolvable, but good enough for v1 demo)
+    // Simple shuffle
     arr.sort(() => Math.random() - 0.5);
     setPuzzleGrid(arr);
     setPuzzleMoves(0);
@@ -228,12 +204,10 @@ export default function PracticePage() {
     ];
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v2/ai/chat`, {
+      const data = await fetchApi('/api/v2/ai/chat', {
         method: 'POST',
-        headers: viewerHeaders(apiToken),
         body: JSON.stringify({ message: text, history: payloadHistory, image: imageBase64 })
       });
-      const data = await res.json();
       setChatMessages(prev => [...prev, { role: 'ai', text: data.reply }]);
     } catch (err) {
       setChatMessages(prev => [...prev, { role: 'ai', text: 'Error connecting to neural core.' }]);

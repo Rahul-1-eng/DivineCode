@@ -2,27 +2,17 @@ import { CSSProperties, useEffect, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/router';
 import { io, Socket } from 'socket.io-client';
+import { fetchApi } from '../lib/api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || API_BASE_URL;
 
 type DuelMode = 'menu' | 'custom_menu' | 'random_waiting' | 'custom_host_waiting' | 'playing';
 
-// 👉 SECURE AUTH PATTERN
-function viewerHeaders(token: string) {
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-  };
-}
-
 export default function DuelPage() {
   const router = useRouter();
   const { data: session } = useSession();
   const socketRef = useRef<Socket | null>(null);
-  
-  // 👉 SECURE AUTH PATTERN: State to hold the API token
-  const [apiToken, setApiToken] = useState<string>('');
 
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState('Connect and enter the arena.');
@@ -48,27 +38,15 @@ export default function DuelPage() {
   const [myAttempts, setMyAttempts] = useState(0);
   const [lockedOptions, setLockedOptions] = useState<number[]>([]);
 
-  // 👉 SECURE AUTH PATTERN: Fetch the API token on mount
-  useEffect(() => {
-    if (session?.user) {
-      fetch('/api/auth/api-token')
-        .then(res => res.json())
-        .then(data => { if (data.token) setApiToken(data.token); })
-        .catch(console.error);
-    }
-  }, [session]);
-
   useEffect(() => {
     if (router.query.mode === 'custom') setDuelMode('custom_menu');
     
-    // 👉 Wait until token is fetched (if there's a session) before loading questions
-    if (session && !apiToken) return;
-
-    fetch(`${API_BASE_URL}/api/v2/interview/questions`, { headers: viewerHeaders(apiToken) })
-      .then(res => res.json())
-      .then(data => { if (Array.isArray(data)) setAvailableQuestions(data); })
-      .catch(console.error);
-  }, [router.query, session, apiToken]);
+    if (session) {
+      fetchApi(`/api/v2/interview/questions`)
+        .then(data => { if (Array.isArray(data)) setAvailableQuestions(data); })
+        .catch(console.error);
+    }
+  }, [router.query, session]);
 
   useEffect(() => {
     const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });

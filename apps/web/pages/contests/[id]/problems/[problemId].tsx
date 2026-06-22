@@ -5,13 +5,13 @@ import dynamic from 'next/dynamic';
 import { io, Socket } from 'socket.io-client';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
+import { fetchApi } from '../../../../lib/api';
 
 export async function getServerSideProps() { return { props: {} }; }
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
 type TestCase = { id: string; input: string; expectedOutput: string; output: string; status: 'idle' | 'running' | 'passed' | 'failed' | 'error'; isPublic?: boolean };
 
@@ -97,10 +97,8 @@ export default function ContestProblemWorkspace() {
 
   useEffect(() => {
     if (!id || !session?.user?.email) return;
-    fetch(`${API_V2_BASE_URL}/contests/${id}?viewerEmail=${session.user.email}`, {
-      headers: { 'x-user-email': session.user.email }
-    })
-      .then(res => res.json())
+    
+    fetchApi(`/api/v2/contests/${id}?viewerEmail=${session.user.email}`)
       .then(data => {
         const cData = data.data || data;
         if (!cData.viewerMember && session?.user && (cData.participants || cData.members)) {
@@ -170,11 +168,7 @@ export default function ContestProblemWorkspace() {
     if (!problemIdStr) return;
     const controller = new AbortController();
 
-    fetch(`${API_V2_BASE_URL}/problems/${problemIdStr}/redirect`, {
-      headers: { 'x-user-email': session?.user?.email || '' },
-      signal: controller.signal
-    })
-      .then((res) => res.ok ? res.json() : Promise.reject(new Error('Unable to fetch problem redirect data')))
+    fetchApi(`/api/v2/problems/${problemIdStr}/redirect`, { signal: controller.signal })
       .then((data) => {
         setRedirectInfo(data);
         setProblemType(data?.type || (problem?.isMCQ ? 'MCQ' : (problem?.externalUrl ? 'EXTERNAL' : 'INTERNAL')));
@@ -185,7 +179,7 @@ export default function ContestProblemWorkspace() {
       });
 
     return () => controller.abort();
-  }, [problemIdStr, session?.user?.email, problem?.isMCQ, problem?.externalUrl]);
+  }, [problemIdStr, problem?.isMCQ, problem?.externalUrl]);
 
   useEffect(() => {
     if (isMCQ && problem) {
@@ -330,20 +324,14 @@ export default function ContestProblemWorkspace() {
       setAiDebuggerLoading(true);
       setAiError(false);
       try {
-        const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemIdStr}/ai-debug`, {
+        const data = await fetchApi(`/api/v2/contests/${id}/problems/${problemIdStr}/ai-debug`, {
           method: 'POST', 
-          headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
           body: JSON.stringify({ userCode: code, problemDescription: problem?.titleSnapshot }) 
         });
-        const data = await res.json();
-        if (res.ok) {
-           setAiDebugResult(data.aiDebugData);
-        } else {
-           toast.error(data.error || "AI Service Error");
-        }
-      } catch (err) { 
+        setAiDebugResult(data.aiDebugData);
+      } catch (err: any) { 
         setAiError(true);
-        toast.error("AI connection failed. Please retry."); 
+        toast.error(err.message || "AI connection failed. Please retry."); 
       } finally { 
         setAiDebuggerLoading(false); 
       }
@@ -388,18 +376,15 @@ export default function ContestProblemWorkspace() {
     setActiveTab('terminal');
     setTerminalOutput(`> Compiling and running...\n`);
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/execute`, {
+      const data = await fetchApi(`/api/v2/execute`, {
         method: 'POST', 
-        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ sourceCode: code, language, input: customInput })
       });
-      const data = await res.json();
-      if (!res.ok) setTerminalOutput(`> Error: ${data.error || 'Server connection failed.'}`);
-      else if (data.verdict === 'COMPILATION_ERROR') setTerminalOutput(`> COMPILATION ERROR:\n\n${data.compileError}`);
+      if (data.verdict === 'COMPILATION_ERROR') setTerminalOutput(`> COMPILATION ERROR:\n\n${data.compileError}`);
       else if (data.verdict === 'RUNTIME_ERROR' || data.verdict === 'TIME_LIMIT_EXCEEDED') setTerminalOutput(`> ${data.verdict}:\n\n${data.stderr || ''}`);
       else setTerminalOutput(`> EXECUTED SUCCESSFULLY:\n\n${data.stdout || '[No Output]'}`);
-    } catch (e) {
-      setTerminalOutput('> Network error. Execution engine unreachable.');
+    } catch (e: any) {
+      setTerminalOutput(`> Error: ${e.message || 'Execution engine unreachable.'}`);
     }
   };
 
@@ -415,18 +400,13 @@ export default function ContestProblemWorkspace() {
       setTestcases(newCases);
 
       try {
-        const res = await fetch(`${API_V2_BASE_URL}/execute`, {
+        const data = await fetchApi(`/api/v2/execute`, {
           method: 'POST', 
-          headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
           body: JSON.stringify({ sourceCode: code, language, input: newCases[i].input })
         });
-        const data = await res.json();
-        let actualOut = '';
         
-        if (!res.ok) {
-          actualOut = data.error || 'Execution failed on server.';
-          newCases[i].status = 'error';
-        } else if (data.verdict === 'COMPILATION_ERROR') {
+        let actualOut = '';
+        if (data.verdict === 'COMPILATION_ERROR') {
           actualOut = data.compileError || 'Compilation Error';
           newCases[i].status = 'error';
         } else if (data.verdict === 'RUNTIME_ERROR' || data.verdict === 'TIME_LIMIT_EXCEEDED') {
@@ -438,9 +418,9 @@ export default function ContestProblemWorkspace() {
           newCases[i].status = (actualOut.trim() === expectedOut || !expectedOut) ? 'passed' : 'failed';
         }
         newCases[i].output = actualOut.trim();
-      } catch (e) {
+      } catch (e: any) {
         newCases[i].status = 'error';
-        newCases[i].output = 'Network error connecting to execution engine.';
+        newCases[i].output = e.message || 'Network error connecting to execution engine.';
       }
       setTestcases([...newCases]);
     }
@@ -449,18 +429,19 @@ export default function ContestProblemWorkspace() {
   const handleSyncCodeforces = async () => {
     setIsSyncing(true);
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/sync/codeforces?wait=true`, {
-        method: 'POST', headers: { 'x-user-email': session?.user?.email || '' }
-      });
-      const data = await res.json();
-      if (res.ok && data.synced?.length > 0) {
+      const data = await fetchApi(`/api/v2/contests/${id}/sync/codeforces?wait=true`, { method: 'POST' });
+      if (data.synced?.length > 0) {
         playSuccessSound(); 
         setShowCfModal(false);
         setTimeout(() => router.push(`/contests/${id}`), 1000);
       } else {
         alert("Could not find a matching ACCEPTED submission. Are you sure you submitted it on Codeforces?");
       }
-    } catch (e) { alert("Failed to connect to Codeforces sync engine."); } finally { setIsSyncing(false); }
+    } catch (e: any) { 
+      alert(e.message || "Failed to connect to Codeforces sync engine."); 
+    } finally { 
+      setIsSyncing(false); 
+    }
   };
 
   const handleSubmitCode = async () => {
@@ -496,20 +477,12 @@ export default function ContestProblemWorkspace() {
     const finalLanguage = isMCQ ? 'mcq' : language;
 
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, {
+      const submission = await fetchApi(`/api/v2/contests/${id}/submissions`, {
         method: 'POST', 
-        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ contestProblemId: problemIdStr, code: finalCode, language: finalLanguage })
       });
-      const submission = await res.json();
-      if (!res.ok) throw new Error(submission.error || 'Could not create submission');
 
-      const judgeRes = await fetch(`${API_V2_BASE_URL}/submissions/${submission.id}/judge?wait=true`, { 
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' }
-      });
-      const judgeData = await judgeRes.json();
-      if (!judgeRes.ok) throw new Error(judgeData.error || 'Error executing system judge.');
+      const judgeData = await fetchApi(`/api/v2/submissions/${submission.id}/judge?wait=true`, { method: 'POST' });
 
       const sub = judgeData.submission;
       if (sub?.verdict === 'ACCEPTED' || sub?.verdict === 'Accepted') {

@@ -4,13 +4,12 @@ import http from 'http';
 import path from 'path';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
-import { connectDB } from './db';
 import { prisma } from './prisma/client';
 import { mountV2Routes } from './routes/v2';
 import { startQueueWorkers } from './workers/index';
 import { setupDuelSockets } from './modules/duel/duelSocketService';
 import { upsertGoogleUser } from './storage';
+import { loginUser } from './modules/auth/authService';
 
 const app = express();
 
@@ -22,7 +21,6 @@ const allowedOrigins = [
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
-  // FIX 1.4: Only reflect allowed origins, not a wildcard with credentials
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else {
@@ -49,7 +47,6 @@ app.use((req: any, res, next) => {
       const decoded: any = jwt.verify(token, process.env.NEXTAUTH_SECRET || '');
       req.user = decoded; 
       
-      // 👉 THE MISSING BRIDGE
       if (decoded.email) req.headers['x-user-email'] = decoded.email;
       if (decoded.name) req.headers['x-user-name'] = decoded.name;
       
@@ -59,6 +56,7 @@ app.use((req: any, res, next) => {
   }
   next();
 });
+
 const server = http.createServer(app);
 
 const io = new Server(server, { 
@@ -86,48 +84,14 @@ app.post('/api/auth/google', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { handle, password } = req.body;
-    if (!handle || !password) {
-      return res.status(400).json({ error: 'Username and password are required.' });
-    }
-
-    const cleanHandle = String(handle).trim();
-    const cleanPassword = String(password).trim();
-
-    const user = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { username: { equals: cleanHandle, mode: 'insensitive' } },
-          { email: cleanHandle.toLowerCase() }
-        ]
-      }
-    });
-
-    if (!user || !user.passwordHash) {
-      return res.status(401).json({ error: 'Invalid username or password.' });
-    }
-
-    const isValid = await bcrypt.compare(cleanPassword, user.passwordHash);
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid username or password.' });
-    }
-
-    return res.json({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      username: user.username
-    });
-  } catch (err) {
-    console.error('[Auth] Login error:', err);
-    return res.status(500).json({ error: 'Internal server error during login.' });
+    const result = await loginUser(req.body);
+    return res.json(result);
+  } catch (err: any) {
+    console.error('[Auth] Login error:', err.message);
+    return res.status(401).json({ error: 'Invalid username or password.' });
   }
 });
 
 // --- STARTUP ---
-void connectDB().then(() => {
-    console.log('Database Connected. Booting engine...');
-}).catch(console.error);
-
 const PORT = Number(process.env.PORT) || 4000;
-server.listen(PORT, () => console.log(`🚀 DivineCode API online at ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 DivineCode API online at ${PORT} (PostgreSQL/Prisma Foundation Active)`));

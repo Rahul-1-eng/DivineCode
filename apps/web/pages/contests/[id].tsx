@@ -6,9 +6,9 @@ import toast, { Toaster } from 'react-hot-toast';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 import { io, Socket } from 'socket.io-client';
+import { fetchApi } from '../../lib/api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
 export function PostContestAiRecommendations({ contestId, contestStatus }: { contestId: string, contestStatus: string }) {
   const [recommendations, setRecommendations] = useState<any[]>([]);
@@ -17,8 +17,7 @@ export function PostContestAiRecommendations({ contestId, contestStatus }: { con
   useEffect(() => {
     if (contestStatus !== 'ENDED') return;
     setLoading(true);
-    fetch(`${API_V2_BASE_URL}/contests/${contestId}/ai-recommendations`, { method: 'POST' })
-      .then(r => r.json())
+    fetchApi(`/api/v2/contests/${contestId}/ai-recommendations`, { method: 'POST' })
       .then(data => { if (data.success) setRecommendations(data.recommendations || []); })
       .catch(err => console.error(err))
       .finally(() => setLoading(false));
@@ -46,23 +45,12 @@ export function PostContestAiRecommendations({ contestId, contestStatus }: { con
   );
 }
 
-// 👉 SECURE AUTH PATTERN: Pass the raw token instead of the NextAuth session
-function viewerHeaders(token: string) {
-  return { 
-    'Content-Type': 'application/json', 
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-  };
-}
-
 export default function ContestRoomPage() {
   const router = useRouter();
   const { id } = router.query;
   const isFinal = router.pathname.includes('/final');
   const { data: session, status } = useSession();
   
-  // 👉 SECURE AUTH PATTERN: Store the API token retrieved from our own Next.js backend
-  const [apiToken, setApiToken] = useState<string>('');
-
   const [contest, setContest] = useState<any>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [selectedMember, setSelectedMember] = useState<any>(null);
@@ -81,7 +69,7 @@ export default function ContestRoomPage() {
   const [overridePoints, setOverridePoints] = useState<number | ''>('');
   
   const [isRegistering, setIsRegistering] = useState(false);
-  const [startingVirtual, setStartingVirtual] = useState(false); // 👉 NEW: Virtual Contest State
+  const [startingVirtual, setStartingVirtual] = useState(false); 
   const [regMode, setRegMode] = useState<'SOLO' | 'TEAM_NEW' | 'TEAM_REQUEST' | 'TEAM_INVITE'>('SOLO');
   const [regHandle, setRegHandle] = useState('');
   const [regTeamName, setRegTeamName] = useState('');
@@ -142,18 +130,6 @@ export default function ContestRoomPage() {
     return parts.join(' : ');
   }
 
-  // 👉 SECURE AUTH PATTERN: Fetch the API token natively
-  useEffect(() => {
-    if (session?.user) {
-      fetch('/api/auth/api-token')
-        .then(res => res.json())
-        .then(data => {
-          if (data.token) setApiToken(data.token);
-        })
-        .catch(console.error);
-    }
-  }, [session]);
-
   useEffect(() => { const ticker = setInterval(() => setNowTick(Date.now()), 1000); return () => clearInterval(ticker); }, []);
 
   const { mcqCount, codingCount } = useMemo(() => {
@@ -179,56 +155,49 @@ export default function ContestRoomPage() {
     setLoadingText('Connecting to Lobby...'); 
     setSyncing(true);
 
-    let endpoint = `${API_V2_BASE_URL}/contests/${id}/register`;
+    let endpoint = `/api/v2/contests/${id}/register`;
     const payload: any = { codeforcesHandle: regHandle.trim(), isOfficial };
 
     if (regMode === 'SOLO') payload.teamName = 'Individuals';
     if (regMode === 'TEAM_NEW') {
-      endpoint = `${API_V2_BASE_URL}/contests/${id}/team/create`;
+      endpoint = `/api/v2/contests/${id}/team/create`;
       payload.teamName = regTeamName.trim();
     }
     if (regMode === 'TEAM_INVITE') {
-      endpoint = `${API_V2_BASE_URL}/contests/${id}/team/join-invite`;
+      endpoint = `/api/v2/contests/${id}/team/join-invite`;
       payload.inviteCode = regInviteCode.trim();
     }
     if (regMode === 'TEAM_REQUEST') {
-      endpoint = `${API_V2_BASE_URL}/contests/${id}/team/request-join`;
+      endpoint = `/api/v2/contests/${id}/team/request-join`;
       if (regTeamId) payload.teamId = regTeamId;
       else payload.teamName = regTeamName.trim();
     }
 
-    const res = await fetch(endpoint, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify(payload) });
-    const data = await res.json();
-    setIsRegistering(false); setSyncing(false);
-
-    if (!res.ok) return toast.error(data.error || 'Failed to register');
-    
-    setContest(data); await loadSubmissions(); playSuccessSound(); toast.success("Successfully registered!");
-    if (regMode === 'TEAM_NEW') {
-      const invite = data.viewerMember?.teamInviteCode || data.teams?.find((team: any) => team.id === data.viewerMember?.teamId)?.inviteCode;
-      if (invite) alert(`Team Created! Share this invite code with your friends: ${invite}`);
-    }
-    if (regMode === 'TEAM_REQUEST') {
-      toast.success('Join request sent to the group owner.');
+    try {
+      const data = await fetchApi(endpoint, { method: 'POST', body: JSON.stringify(payload) });
+      setContest(data); await loadSubmissions(); playSuccessSound(); toast.success("Successfully registered!");
+      if (regMode === 'TEAM_NEW') {
+        const invite = data.viewerMember?.teamInviteCode || data.teams?.find((team: any) => team.id === data.viewerMember?.teamId)?.inviteCode;
+        if (invite) alert(`Team Created! Share this invite code with your friends: ${invite}`);
+      }
+      if (regMode === 'TEAM_REQUEST') {
+        toast.success('Join request sent to the group owner.');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to register');
+    } finally {
+      setIsRegistering(false); setSyncing(false);
     }
   }
 
   async function approveMember(participantId: string) {
     if (!id || !session) return;
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/participants/${participantId}/approve`, {
-        method: 'POST',
-        headers: viewerHeaders(apiToken)
-      });
-      if (res.ok) {
-        toast.success('Player approved!');
-        await loadContest();
-      } else {
-        const data = await res.json();
-        toast.error(data.error || 'Failed to approve');
-      }
-    } catch (err) {
-      toast.error('Network error');
+      await fetchApi(`/api/v2/contests/${id}/participants/${participantId}/approve`, { method: 'POST' });
+      toast.success('Player approved!');
+      await loadContest();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to approve');
     }
   }
 
@@ -238,25 +207,18 @@ export default function ContestRoomPage() {
     setSyncing(true);
 
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/unregister`, { 
-        method: 'POST', 
-        headers: viewerHeaders(apiToken) 
-      });
-      
-      if (res.ok) {
-        toast.success('Successfully unregistered.');
-        const data = await res.json();
-        data.viewerMember = null;
-        setContest(data);
-        await loadSubmissions(); 
-      } else {
-        const data = await res.json();
-        toast.error(data.error || 'Failed to unregister');
-      }
-    } catch (err) { toast.error('Network error.'); } finally { setSyncing(false); }
+      const data = await fetchApi(`/api/v2/contests/${id}/unregister`, { method: 'POST' });
+      toast.success('Successfully unregistered.');
+      data.viewerMember = null;
+      setContest(data);
+      await loadSubmissions(); 
+    } catch (err: any) { 
+      toast.error(err.message || 'Failed to unregister'); 
+    } finally { 
+      setSyncing(false); 
+    }
   }
 
-  // 👉 NEW: Start Virtual Contest Logic
   const handleStartVirtualContest = async () => {
     if (!session?.user) {
       toast.error("Please log in to practice virtually.");
@@ -266,21 +228,15 @@ export default function ContestRoomPage() {
     if (confirm("This will start a timed, solo replica of this contest. Ready?")) {
       setStartingVirtual(true);
       try {
-        const res = await fetch(`${API_V2_BASE_URL}/contests/${contest.id}/virtual`, {
-          method: 'POST',
-          headers: viewerHeaders(apiToken)
-        });
-        const data = await res.json();
-
-        if (res.ok && data.virtualContestId) {
-          // Redirect them straight into their new personal arena
+        const data = await fetchApi(`/api/v2/contests/${contest.id}/virtual`, { method: 'POST' });
+        if (data.virtualContestId) {
           router.push(`/contests/${data.virtualContestId}`);
         } else {
-          toast.error(data.error || "Failed to start virtual contest.");
+          toast.error("Failed to start virtual contest.");
           setStartingVirtual(false);
         }
-      } catch (err) {
-        toast.error("Network error.");
+      } catch (err: any) {
+        toast.error(err.message || "Network error.");
         setStartingVirtual(false);
       }
     }
@@ -288,76 +244,78 @@ export default function ContestRoomPage() {
 
   async function loadContest() {
     if (!id) return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}`, { headers: viewerHeaders(apiToken) });
-    const data = await res.json();
-    if (!res.ok) { setError(data.error || 'Contest not found'); return; }
-    
-    if (!data.viewerMember && session?.user && (data.participants || data.members)) {
-      const arr = data.participants || data.members || [];
-      data.viewerMember = arr.find((p: any) => (session.user?.email && p.user?.email === session.user?.email) || (session.user?.name && p.displayName === session.user?.name));
+    try {
+      const data = await fetchApi(`/api/v2/contests/${id}`);
+      if (!data.viewerMember && session?.user && (data.participants || data.members)) {
+        const arr = data.participants || data.members || [];
+        data.viewerMember = arr.find((p: any) => (session.user?.email && p.user?.email === session.user?.email) || (session.user?.name && p.displayName === session.user?.name));
+      }
+      setContest(data);
+      const elapsed = Math.max(0, Math.floor((Date.now() - new Date(data.startTime).getTime()) / 1000));
+      setTimeLeft(Math.max(0, data.durationMinutes * 60 - elapsed));
+    } catch (err: any) {
+      setError(err.message || 'Contest not found');
     }
-    
-    setContest(data);
-    const elapsed = Math.max(0, Math.floor((Date.now() - new Date(data.startTime).getTime()) / 1000));
-    setTimeLeft(Math.max(0, data.durationMinutes * 60 - elapsed));
   }
 
   async function loadSubmissions() {
     if (!id) return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions`, { headers: viewerHeaders(apiToken) });
-    const data = await res.json();
-    setSubmissions(Array.isArray(data) ? data : []);
+    try {
+      const data = await fetchApi(`/api/v2/contests/${id}/submissions`);
+      setSubmissions(Array.isArray(data) ? data : []);
+    } catch (err) {}
   }
 
   async function syncCodeforces(silent = false) {
     if (!id || syncingRef.current || isFinal) return;
     syncingRef.current = true;
     if (!silent) { setLoadingText('Syncing Submissions...'); setSyncing(true); }
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/sync/codeforces`, { method: 'POST', headers: viewerHeaders(apiToken) });
-    const data = await res.json();
-    syncingRef.current = false; setSyncing(false);
-    if (!res.ok) { if (!silent) toast.error(data.error || 'Sync failed'); return; }
-    await loadContest(); await loadSubmissions();
-    setLastSync(data.queued ? `${new Date().toLocaleTimeString()} - sync queued` : `${new Date().toLocaleTimeString()} - ${data.synced?.length || 0} accepted`);
-    if (!silent) toast.success(data.queued ? 'Codeforces sync queued.' : `Synced ${data.synced?.length || 0} accepted submission(s).`);
+    try {
+      const data = await fetchApi(`/api/v2/contests/${id}/sync/codeforces`, { method: 'POST' });
+      await loadContest(); await loadSubmissions();
+      setLastSync(data.queued ? `${new Date().toLocaleTimeString()} - sync queued` : `${new Date().toLocaleTimeString()} - ${data.synced?.length || 0} accepted`);
+      if (!silent) toast.success(data.queued ? 'Codeforces sync queued.' : `Synced ${data.synced?.length || 0} accepted submission(s).`);
+    } catch (err: any) {
+      if (!silent) toast.error(err.message || 'Sync failed');
+    } finally {
+      syncingRef.current = false; setSyncing(false);
+    }
   }
 
   async function extendTime(minutes: number) {
     if (!id || !session) return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/extend`, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify({ minutes }) });
-    const data = await res.json();
-    if (!res.ok) return toast.error(data.error || 'Could not extend');
-    toast.success(`Time extended by ${minutes} minutes.`);
-    setContest(data);
+    try {
+      const data = await fetchApi(`/api/v2/contests/${id}/extend`, { method: 'POST', body: JSON.stringify({ minutes }) });
+      toast.success(`Time extended by ${minutes} minutes.`);
+      setContest(data);
+    } catch (err: any) {
+      toast.error(err.message || 'Could not extend');
+    }
   }
 
   async function deleteContest() {
     if (!id || !session || !confirm('Delete this live mashup and its submissions?')) return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}`, { method: 'DELETE', headers: viewerHeaders(apiToken) });
-    const data = await res.json();
-    if (!res.ok) return toast.error(data.error || 'Could not delete contest');
-    toast.success('Contest deleted successfully.');
-    router.push('/contests');
-  }
-
-  async function lookupProblem(platform: string, code: string) {
-    const res = await fetch(`${API_V2_BASE_URL}/problems/lookup?platform=${encodeURIComponent(platform)}&code=${encodeURIComponent(code)}`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Lookup failed');
-    return data;
+    try {
+      await fetchApi(`/api/v2/contests/${id}`, { method: 'DELETE' });
+      toast.success('Contest deleted successfully.');
+      router.push('/contests');
+    } catch (err: any) {
+      toast.error(err.message || 'Could not delete contest');
+    }
   }
 
   async function addProblem() {
     if (!id || !session || !newProblemCode.trim()) return toast.error('Enter a problem code.');
+    setLoadingText('Fetching Problem Data...'); setSyncing(true);
     try {
-      setLoadingText('Fetching Problem Data...'); setSyncing(true);
-      const p = await lookupProblem(newProblemPlatform, newProblemCode);
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems`, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify(p) });
-      const data = await res.json();
-      setSyncing(false);
-      if (!res.ok) return toast.error(data.error || 'Could not add problem');
+      const p = await fetchApi(`/api/v2/problems/lookup?platform=${encodeURIComponent(newProblemPlatform)}&code=${encodeURIComponent(newProblemCode)}`);
+      const data = await fetchApi(`/api/v2/contests/${id}/problems`, { method: 'POST', body: JSON.stringify(p) });
       toast.success('Problem added successfully.'); setContest(data); setNewProblemCode('');
-    } catch (e: any) { setSyncing(false); toast.error(e.message || 'Could not add problem'); }
+    } catch (e: any) { 
+      toast.error(e.message || 'Could not add problem'); 
+    } finally {
+      setSyncing(false);
+    }
   }
 
   async function generateAITestcases(problemId: string) {
@@ -365,73 +323,86 @@ export default function ContestRoomPage() {
     if (!masterSolution) return;
     setGeneratingTcFor(problemId);
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/problems/${problemId}/generate-ai-testcases`, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify({ masterSolution }) });
-      const data = await res.json();
-      if (res.ok) toast.success(`Successfully generated ${data.generatedCount} new system test cases!`);
-      else toast.error(data.error || 'Failed to generate test cases.');
-    } catch (e: any) { toast.error('Network error while connecting to AI.'); } 
-    finally { setGeneratingTcFor(null); }
+      const data = await fetchApi(`/api/v2/problems/${problemId}/generate-ai-testcases`, { method: 'POST', body: JSON.stringify({ masterSolution }) });
+      if (data.success) toast.success(`Successfully generated ${data.generatedCount} new system test cases!`);
+    } catch (e: any) { 
+      toast.error(e.message || 'Failed to generate test cases.'); 
+    } finally { 
+      setGeneratingTcFor(null); 
+    }
   }
 
   async function generateAIRecommendations() {
     if (!id || !session) return;
     setIsRecommending(true); setLoadingText('Curating Recommendations...'); setSyncing(true);
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/recommend-problems`, { method: 'POST', headers: viewerHeaders(apiToken) });
-      const data = await res.json();
-      if (res.ok) toast.success(`AI Recommended: ${data.recommendations.map((r: any) => r.name || r.title).join(', ')}`);
-      else toast.error(data.error || 'Failed to fetch AI recommendations');
-    } catch (e) { toast.error('Network error while generating recommendations.'); } 
-    finally { setIsRecommending(false); setSyncing(false); }
+      const data = await fetchApi(`/api/v2/contests/${id}/recommend-problems`, { method: 'POST' });
+      if (data.success) toast.success(`AI Recommended: ${data.recommendations.map((r: any) => r.name || r.title).join(', ')}`);
+    } catch (e: any) { 
+      toast.error(e.message || 'Failed to fetch AI recommendations'); 
+    } finally { 
+      setIsRecommending(false); setSyncing(false); 
+    }
   }
 
   async function removeProblem(problemId: string) {
     if (!id || !session || !confirm('Remove this problem from the live contest?')) return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, { method: 'DELETE', headers: viewerHeaders(apiToken) });
-    const data = await res.json();
-    if (!res.ok) return toast.error(data.error || 'Could not remove problem');
-    toast.success('Problem removed.'); setContest(data);
+    try {
+      const data = await fetchApi(`/api/v2/contests/${id}/problems/${problemId}`, { method: 'DELETE' });
+      toast.success('Problem removed.'); setContest(data);
+    } catch (err: any) {
+      toast.error(err.message || 'Could not remove problem');
+    }
   }
 
   async function replaceProblem(problemId: string) {
     if (!id || !session) return;
     const code = prompt('Enter replacement Codeforces problem code, e.g. 1805A');
     if (!code) return;
+    setLoadingText('Replacing Problem...'); setSyncing(true);
     try {
-      setLoadingText('Replacing Problem...'); setSyncing(true);
-      const p = await lookupProblem('Codeforces', code);
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, { method: 'PUT', headers: viewerHeaders(apiToken), body: JSON.stringify(p) });
-      const data = await res.json();
-      setSyncing(false);
-      if (!res.ok) return toast.error(data.error || 'Could not replace problem');
+      const p = await fetchApi(`/api/v2/problems/lookup?platform=Codeforces&code=${encodeURIComponent(code)}`);
+      const data = await fetchApi(`/api/v2/contests/${id}/problems/${problemId}`, { method: 'PUT', body: JSON.stringify(p) });
       toast.success('Problem replaced successfully.'); setContest(data);
-    } catch (e: any) { setSyncing(false); toast.error(e.message || 'Could not replace problem'); }
+    } catch (e: any) { 
+      toast.error(e.message || 'Could not replace problem'); 
+    } finally {
+      setSyncing(false);
+    }
   }
 
   async function submitReport() {
     if (!selectedSubmission || !reportReason.trim()) return;
-    const res = await fetch(`${API_BASE_URL}/api/submissions/${selectedSubmission.id}/report`, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify({ reason: reportReason }) });
-    if (res.ok) { toast.success('Report submitted successfully to the contest owner.'); setReportReason(''); } 
-    else { const data = await res.json(); toast.error(data.error || 'Failed to report submission'); }
+    try {
+      await fetchApi(`/api/v2/submissions/${selectedSubmission.id}/report`, { method: 'POST', body: JSON.stringify({ reason: reportReason }) });
+      toast.success('Report submitted successfully to the contest owner.'); setReportReason('');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to report submission');
+    }
   }
   
   async function finalizeContest() {
     if (!id || !session || !confirm('End this contest immediately and calculate final ratings/coins? This cannot be undone.')) return;
     setLoadingText('Calculating Final Ratings & Coins...'); setSyncing(true); 
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/finalize`, { method: 'POST', headers: viewerHeaders(apiToken) });
-    const data = await res.json();
-    setSyncing(false);
-    if (!res.ok) return toast.error(data.error || 'Could not finalize contest');
-    playSuccessSound(); toast.success(data.message || 'Contest finalized!'); router.push(`/contests/${id}/final`);
+    try {
+      const data = await fetchApi(`/api/v2/contests/${id}/finalize`, { method: 'POST' });
+      playSuccessSound(); toast.success(data.message || 'Contest finalized!'); router.push(`/contests/${id}/final`);
+    } catch (err: any) {
+      toast.error(err.message || 'Could not finalize contest');
+    } finally {
+      setSyncing(false);
+    }
   }
 
   async function submitOverride() {
     if (!selectedSubmission || overridePoints === '') return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/submissions/${selectedSubmission.id}/override`, { method: 'POST', headers: viewerHeaders(apiToken), body: JSON.stringify({ manualPoints: Number(overridePoints) }) });
-    if (res.ok) {
+    try {
+      await fetchApi(`/api/v2/contests/${id}/submissions/${selectedSubmission.id}/override`, { method: 'POST', body: JSON.stringify({ manualPoints: Number(overridePoints) }) });
       toast.success('Points overridden successfully. Standings will recalculate instantly.');
       setSelectedSubmission(null); await loadSubmissions(); await loadContest(); 
-    } else { const data = await res.json(); toast.error(data.error || 'Failed to override points'); }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to override points');
+    }
   }
 
   const handleSendMessage = () => {
@@ -469,13 +440,13 @@ export default function ContestRoomPage() {
     }
   };
 
-  // 👉 SECURE AUTH PATTERN: Only load once the token is actually resolved
   useEffect(() => {
     if (status === 'loading') return;
-    if (session && !apiToken) return; // Wait for the token fetch to finish
-    loadContest(); 
-    loadSubmissions(); 
-  }, [id, session, apiToken, status]);
+    if (session) {
+      loadContest(); 
+      loadSubmissions();
+    }
+  }, [id, session, status]);
   
   useEffect(() => {
     if (!id || !session || isFinal || !contest) return;
@@ -763,7 +734,6 @@ export default function ContestRoomPage() {
           </div>
         </div>
 
-        {/* 👉 NEW: Start Virtual Contest Button (Visible to everyone if contest is ENDED) */}
         {displayStatus === 'ENDED' && !isActuallyOwnerMode && (
           <div style={{ marginBottom: 18, textAlign: 'right' }}>
             <button 

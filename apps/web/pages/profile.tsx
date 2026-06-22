@@ -1,15 +1,6 @@
 import { CSSProperties, useEffect, useState } from 'react';
 import { signOut, useSession } from 'next-auth/react';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-
-// 👉 SECURE AUTH PATTERN: Accept the raw JWT instead of the session object
-function viewerHeaders(token: string) {
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-  };
-}
+import { fetchApi } from '../lib/api';
 
 const EloGraph = ({ history }: { history: any[] }) => {
   if (!history || history.length < 1) {
@@ -50,9 +41,6 @@ export default function ProfilePage() {
   const { data: session, status } = useSession();
   const [userData, setUserData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  
-  // 👉 SECURE AUTH PATTERN: State to hold the API token
-  const [apiToken, setApiToken] = useState<string>('');
 
   const [divineCodeUsername, setDivineCodeUsername] = useState('');
   const [cfHandle, setCfHandle] = useState('');
@@ -66,22 +54,14 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState('');
   const [pwMessage, setPwMessage] = useState({ text: '', type: '' });
 
-  // 👉 SECURE AUTH PATTERN: Fetch the API token on mount
-  useEffect(() => {
-    if (session?.user) {
-      fetch('/api/auth/api-token')
-        .then(res => res.json())
-        .then(data => { if (data.token) setApiToken(data.token); })
-        .catch(console.error);
-    }
-  }, [session]);
-
   useEffect(() => { 
-    // 👉 SECURE AUTH PATTERN: Wait until the token is fully loaded before fetching data
-    if (status !== 'authenticated' || !session?.user?.email || !apiToken) return;
+    if (status === 'loading') return;
+    if (status !== 'authenticated' || !session?.user?.email) {
+      setLoading(false);
+      return;
+    }
 
-    fetch(`${API_BASE_URL}/api/v2/profile/me`, { headers: viewerHeaders(apiToken) })
-      .then(r => r.json())
+    fetchApi('/api/v2/profile/me')
       .then(data => {
         setUserData(data);
         if (data.username) setDivineCodeUsername(data.username);
@@ -91,21 +71,28 @@ export default function ProfilePage() {
         if (cf) setCfHandle(cf.handle);
         if (lc) setLcHandle(lc.handle);
         setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch profile", err);
+        setLoading(false);
       });
-  }, [status, session, apiToken]);
+  }, [status, session]);
 
   async function handleClaimUsername() {
     if (!divineCodeUsername.trim()) return alert("Username cannot be empty");
     setSavingUser(true);
-    const res = await fetch(`${API_BASE_URL}/api/v2/profile/claim-username`, {
-      method: 'POST',
-      headers: viewerHeaders(apiToken),
-      body: JSON.stringify({ username: divineCodeUsername })
-    });
-    const data = await res.json();
-    setSavingUser(false);
-    if (res.ok) alert("Username updated successfully!");
-    else alert(data.error || "Failed to update username");
+    
+    try {
+      await fetchApi('/api/v2/profile/claim-username', {
+        method: 'POST',
+        body: JSON.stringify({ username: divineCodeUsername })
+      });
+      alert("Username updated successfully!");
+    } catch (err: any) {
+      alert(err.message || "Failed to update username");
+    } finally {
+      setSavingUser(false);
+    }
   }
 
   const handlePasswordUpdate = async (e: any) => {
@@ -113,54 +100,44 @@ export default function ProfilePage() {
     setPwMessage({ text: 'Updating...', type: 'info' });
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v2/profile/update-password`, {
+      await fetchApi('/api/v2/profile/update-password', {
         method: 'POST',
-        headers: viewerHeaders(apiToken),
         body: JSON.stringify({ currentPassword, newPassword })
       });
-      const data = await res.json();
-      
-      if (!res.ok) {
-        setPwMessage({ text: data.error || 'Failed to update', type: 'error' });
-      } else {
-        setPwMessage({ text: 'Password successfully updated!', type: 'success' });
-        setCurrentPassword('');
-        setNewPassword('');
-      }
-    } catch (err) {
-      setPwMessage({ text: 'Network error', type: 'error' });
+      setPwMessage({ text: 'Password successfully updated!', type: 'success' });
+      setCurrentPassword('');
+      setNewPassword('');
+    } catch (err: any) {
+      setPwMessage({ text: err.message || 'Failed to update', type: 'error' });
     }
   };
 
   async function unlinkHandle(platform: string, handle: string) {
     if (!confirm(`Are you sure you want to unlink ${handle}?`)) return;
-    const res = await fetch(`${API_BASE_URL}/api/v2/profile/handles/${platform}/${handle}`, {
-      method: 'DELETE',
-      headers: viewerHeaders(apiToken)
-    });
-    if (res.ok) {
+    
+    try {
+      await fetchApi(`/api/v2/profile/handles/${platform}/${handle}`, { method: 'DELETE' });
       alert('Handle unlinked!');
       window.location.reload();
-    } else {
+    } catch (err: any) {
       alert('Failed to unlink.');
     }
   }
 
   async function handleSaveLinks() {
     setSavingHandles(true);
-    const res = await fetch(`${API_BASE_URL}/api/v2/profile/save-handles`, {
-      method: 'POST',
-      headers: viewerHeaders(apiToken),
-      body: JSON.stringify({ codeforcesHandle: cfHandle, leetcodeHandle: lcHandle })
-    });
-    const data = await res.json();
-    setSavingHandles(false);
     
-    if (res.ok) {
+    try {
+      await fetchApi('/api/v2/profile/save-handles', {
+        method: 'POST',
+        body: JSON.stringify({ codeforcesHandle: cfHandle, leetcodeHandle: lcHandle })
+      });
       alert("Handles verified and linked successfully!");
       window.location.reload();
-    } else {
-      alert(data.error || "Failed to save handles. Please ensure the handle is correct.");
+    } catch (err: any) {
+      alert(err.message || "Failed to save handles. Please ensure the handle is correct.");
+    } finally {
+      setSavingHandles(false);
     }
   }
 
@@ -249,7 +226,6 @@ export default function ProfilePage() {
             </button>
           </section>
 
-          {/* NEW: SECURITY SETTINGS */}
           <section style={card}>
             <h2 style={{ margin: '0 0 10px 0', fontSize: 20 }}>Security Settings</h2>
             <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 16 }}>

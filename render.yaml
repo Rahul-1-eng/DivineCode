@@ -7,8 +7,10 @@ envVarGroups:
         generateValue: true
       - key: CRON_SECRET
         generateValue: true
-      - key: FRONTEND_URL
-        value: "https://your-vercel-frontend-url.vercel.app" # 👉 IMPORTANT: Update this in your Render dashboard after Vercel deployment
+      - key: CLIENT_ORIGIN # 👈 CHANGED: Matches index.ts CORS policy
+        value: "https://divine-code-web.vercel.app/" 
+      - key: NEXTAUTH_SECRET # 👈 ADDED: Required to decode API JWTs
+        value: "your-super-secure-nextauth-secret-here" # 👉 MUST exactly match the NEXTAUTH_SECRET in Vercel
 
 services:
   # 1. Managed Redis (Handles Socket.io scaling and BullMQ jobs)
@@ -39,7 +41,6 @@ services:
           type: keyvalue
           name: divinecode-redis
           property: connectionString
-      # 👉 FIXED: Pointing to the root API, the service appends /execute natively
       - key: PISTON_URL
         value: https://emkc.org/api/v2/piston
 

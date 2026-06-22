@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { motion } from 'framer-motion';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+import { fetchApi } from '../lib/api';
 
 function getRatingColor(rating: number) {
   if (rating < 1200) return '#94a3b8'; // Gray (Newbie)
@@ -20,8 +19,8 @@ export default function Leaderboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/v2/leaderboard`)
-      .then(res => res.json())
+    // We pass requireAuth: false since the leaderboard is public data
+    fetchApi('/api/v2/leaderboard', { requireAuth: false })
       .then(data => {
         setUsers(data);
         setLoading(false);

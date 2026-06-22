@@ -1,9 +1,10 @@
+// apps/api/src/workers/index.ts
 import { Job, Worker } from 'bullmq';
 import { Server } from 'socket.io';
 import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncService';
 import { judgeQueuedSubmission } from '../modules/judge/judge0Service';
 import { processContestRewards } from '../modules/ratings/ratingService';
-import { recomputeContestStandings } from '../modules/standings/standingService';
+import { endContestV2 } from '../modules/contests/contestService';
 import { CodeforcesContestSyncJob, JudgeSubmissionJob, ContestRewardsJob, QUEUE_NAMES } from '../queues/jobTypes';
 import { getSharedRedisConnection } from '../queues/redis';
 import { startCronJobs } from '../queues/queues';
@@ -14,6 +15,7 @@ type WorkerBundle = {
   judgeWorker: Worker<JudgeSubmissionJob>;
   externalSyncWorker: Worker<CodeforcesContestSyncJob>;
   rewardsWorker: Worker<ContestRewardsJob>;
+  autoFinalizeWorker: Worker;
 };
 
 let startedWorkers: WorkerBundle | null = null;
@@ -68,6 +70,30 @@ async function handleRewardsJob(job: Job<ContestRewardsJob>) {
   return result;
 }
 
+async function handleAutoFinalizeJob(job: Job) {
+  if (job.name === 'check-expired-contests') {
+    const expiredContests = await prisma.contest.findMany({
+      where: { status: ContestStatus.RUNNING, endTime: { lte: new Date() } },
+      select: { id: true }
+    });
+    
+    for (const contest of expiredContests) {
+      try {
+        // Enforce Single Source of Truth: Use the service method to handle the transaction, audit log, standings, and rewards securely
+        await endContestV2(contest.id, 'SYSTEM_CRON');
+        
+        if (activeIoInstance) {
+          activeIoInstance.to(`contest:${contest.id}`).emit('standings:update', { contestId: contest.id });
+        }
+        console.log(`[Cron] Auto-finalized contest ${contest.id}`);
+      } catch (err: any) {
+        // Failure Resilience: Prevent one toxic contest state from freezing the entire cron batch
+        console.error(`[Cron] Failed to auto-finalize contest ${contest.id}:`, err.message);
+      }
+    }
+  }
+}
+
 export function startQueueWorkers(io?: Server) {
   if (io) activeIoInstance = io;
 
@@ -98,30 +124,18 @@ export function startQueueWorkers(io?: Server) {
     drainDelay: 5000 
   });
 
+  // Extract cron handling to standard named worker pattern
+  startCronJobs();
+  const autoFinalizeWorker = new Worker('auto-finalize', handleAutoFinalizeJob, { 
+    connection: sharedConnection 
+  });
+
   judgeWorker.on('failed', (job, err) => console.error(`Judge failed: ${job?.id}`, err));
   externalSyncWorker.on('failed', (job, err) => console.error(`Sync failed: ${job?.id}`, err));
   rewardsWorker.on('failed', (job, err) => console.error(`Rewards failed: ${job?.id}`, err));
+  autoFinalizeWorker.on('failed', (job, err) => console.error(`Auto-finalize failed: ${job?.id}`, err));
 
-  // 👉 FIX 1.6: Start Cron Jobs & Auto-Finalize Worker
-  startCronJobs();
-  new Worker('auto-finalize', async (job) => {
-    if (job.name === 'check-expired-contests') {
-      const expiredContests = await prisma.contest.findMany({
-        where: { status: ContestStatus.RUNNING, endTime: { lte: new Date() } }
-      });
-      for (const contest of expiredContests) {
-        await prisma.contest.update({ where: { id: contest.id }, data: { status: ContestStatus.ENDED } });
-        await recomputeContestStandings(contest.id);
-        await processContestRewards(contest.id);
-        if (activeIoInstance) {
-          activeIoInstance.to(`contest:${contest.id}`).emit('standings:update', { contestId: contest.id });
-        }
-        console.log(`[Cron] Auto-finalized contest ${contest.id}`);
-      }
-    }
-  }, { connection: sharedConnection });
-
-  startedWorkers = { judgeWorker, externalSyncWorker, rewardsWorker };
+  startedWorkers = { judgeWorker, externalSyncWorker, rewardsWorker, autoFinalizeWorker };
   console.log('BullMQ workers initialized successfully.');
   return startedWorkers;
 }

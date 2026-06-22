@@ -1,3 +1,4 @@
+// apps/web/pages/api/auth/[...nextauth].ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import NextAuth from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
@@ -16,14 +17,14 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
           handle: { label: "Handle", type: "text" },
           password: { label: "Password", type: "password" }
         },
-        async authorize(credentials, req) {
+        async authorize(credentials) {
           if (!credentials?.handle || !credentials?.password) return null;
           
           const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
           
           try {
-            // UPDATED: Now pointing to the endpoint established in index.ts
-            const res = await fetch(`${apiBase}/api/auth/login`, {
+            // Using the new V2 authentication route
+            const res = await fetch(`${apiBase}/api/v2/auth/login`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -34,13 +35,12 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
 
             const user = await res.json();
 
-            // Return the mapped user object to inject into NextAuth
             if (res.ok && user && !user.error) {
               return {
                 id: user.id,
                 name: user.name,
                 email: user.email,
-                handle: user.username // Map internal username to session handle
+                handle: user.username 
               }; 
             }
             console.warn("API rejected login:", user);
@@ -71,7 +71,11 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
             });
             
             const data = await res.json();
-            if (data?.username) {
+            // Fix: The backend returns { ok: true, user: { username: "..." } }
+            if (data?.user?.username) {
+              (user as any).handle = data.user.username;
+            } else if (data?.username) {
+              // Fallback just in case
               (user as any).handle = data.username;
             }
           } catch (error) {

@@ -1,22 +1,10 @@
 import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import toast, { Toaster } from 'react-hot-toast';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-
-// 👉 SECURE AUTH PATTERN: Accept the raw JWT
-function viewerHeaders(token: string) {
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-  };
-}
+import { fetchApi } from '../lib/api';
 
 export default function InterviewPage() {
-  const { data: session } = useSession();
-  
-  // 👉 SECURE AUTH PATTERN: State to hold the API token
-  const [apiToken, setApiToken] = useState<string>('');
+  const { data: session, status } = useSession();
   
   const [profile, setProfile] = useState<any>(null);
   const [tracks, setTracks] = useState<any[]>([]);
@@ -39,37 +27,23 @@ export default function InterviewPage() {
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [newQ, setNewQ] = useState({ trackId: '', title: '', prompt: '', opt0: '', opt1: '', opt2: '', opt3: '', correctIndex: 0, explanation: '' });
 
-  // 👉 SECURE AUTH PATTERN: Fetch the API token on mount
   useEffect(() => {
-    if (session?.user) {
-      fetch('/api/auth/api-token')
-        .then(res => res.json())
-        .then(data => { if (data.token) setApiToken(data.token); })
-        .catch(console.error);
-    }
-  }, [session]);
-
-  useEffect(() => {
-    // Wait until token is fetched (if there's a session) before loading questions
-    if (session && !apiToken) return;
-
-    const headers = viewerHeaders(apiToken);
+    if (status === 'loading') return;
 
     if (session?.user) {
-      fetch(`${API_BASE_URL}/api/v2/profile/me`, { headers })
-        .then(r => r.json())
+      fetchApi('/api/v2/profile/me')
         .then(p => {
           if (!p.error) {
             setProfile(p);
-            if (p.role === 'ADMIN') fetchPending(headers);
+            if (p.role === 'ADMIN') fetchPending();
           }
         }).catch(() => null);
     }
 
     Promise.all([
-      fetch(`${API_BASE_URL}/api/v2/interview/tracks`, { headers }).then(r => r.json()),
-      fetch(`${API_BASE_URL}/api/v2/interview/questions`, { headers }).then(r => r.json()),
-      fetch(`${API_BASE_URL}/api/v2/interview/progress`, { headers }).then(r => r.json())
+      fetchApi('/api/v2/interview/tracks').catch(() => []),
+      fetchApi('/api/v2/interview/questions').catch(() => []),
+      session?.user ? fetchApi('/api/v2/interview/progress').catch(() => []) : Promise.resolve([])
     ]).then(([trackData, qData, progData]) => {
       setTracks(Array.isArray(trackData) ? trackData : []);
       setQuestions(Array.isArray(qData) ? qData : []);
@@ -85,11 +59,10 @@ export default function InterviewPage() {
       }
       setLoading(false);
     }).catch(console.error);
-  }, [session, apiToken]);
+  }, [session, status]);
 
-  const fetchPending = (headers: any) => {
-    fetch(`${API_BASE_URL}/api/v2/interview/pending`, { headers })
-      .then(r => r.json())
+  const fetchPending = () => {
+    fetchApi('/api/v2/interview/pending')
       .then(d => { if (d.success) setPendingQs(d.questions); })
       .catch(() => null);
   };
@@ -115,32 +88,31 @@ export default function InterviewPage() {
 
   const currentQ = filtered[currentIndex];
 
-  const updateProgress = async (qId: string, status: string) => {
-    setProgress(prev => ({ ...prev, [qId]: status }));
+  const updateProgress = async (qId: string, progressStatus: string) => {
+    setProgress(prev => ({ ...prev, [qId]: progressStatus }));
     if (!session?.user) return;
     
-    await fetch(`${API_BASE_URL}/api/v2/interview/progress/${qId}`, {
-      method: 'POST',
-      headers: viewerHeaders(apiToken),
-      body: JSON.stringify({ status })
-    });
+    try {
+      await fetchApi(`/api/v2/interview/progress/${qId}`, {
+        method: 'POST',
+        body: JSON.stringify({ status: progressStatus })
+      });
+    } catch (e) {
+      console.error("Failed to update progress", e);
+    }
   };
 
   const approveQuestion = async (qId: string) => {
-    const res = await fetch(`${API_BASE_URL}/api/v2/interview/questions/${qId}/approve`, {
-      method: 'PATCH',
-      headers: viewerHeaders(apiToken)
-    });
-    
-    if (res.ok) {
+    try {
+      await fetchApi(`/api/v2/interview/questions/${qId}/approve`, { method: 'PATCH' });
       toast.success("Question approved and live!");
       setPendingQs(prev => prev.filter(q => q.id !== qId));
+      
       // Refresh active questions silently
-      fetch(`${API_BASE_URL}/api/v2/interview/questions`, { headers: viewerHeaders(apiToken) })
-        .then(r => r.json())
-        .then(setQuestions);
-    } else {
-      toast.error("Failed to approve");
+      const refreshedQuestions = await fetchApi('/api/v2/interview/questions');
+      setQuestions(Array.isArray(refreshedQuestions) ? refreshedQuestions : []);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to approve");
     }
   };
 
@@ -159,18 +131,16 @@ export default function InterviewPage() {
       tags: []
     };
 
-    const res = await fetch(`${API_BASE_URL}/api/v2/interview/questions`, {
-      method: 'POST',
-      headers: viewerHeaders(apiToken),
-      body: JSON.stringify(payload)
-    });
-
-    if (res.ok) {
+    try {
+      await fetchApi('/api/v2/interview/questions', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
       toast.success("Thanks! Your question is pending owner approval.");
       setShowSubmitModal(false);
       setNewQ(prev => ({...prev, title: '', prompt: '', opt0: '', opt1: '', opt2: '', opt3: '', explanation: ''}));
-    } else {
-      toast.error("Failed to submit question.");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to submit question.");
     }
   }
 
