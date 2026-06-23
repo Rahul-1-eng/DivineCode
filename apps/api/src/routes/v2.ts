@@ -210,29 +210,7 @@ export function mountV2Routes(app: Express, io: Server) {
       socket.to(`voice:${teamId}`).emit('user-left-voice', socket.id);
     });
   });
-  router.get('/community/problems', asyncRoute(async (req, res) => {
-    const viewer = await resolvedViewerFromRequest(req);
-    
-    // ANTI-CHEAT: Check if user is in an active, running contest
-    if (viewer.userId) {
-      const activeContest = await prisma.contestParticipant.findFirst({
-        where: { userId: viewer.userId, contest: { status: 'RUNNING' } }
-      });
-      if (activeContest) {
-        return res.status(403).json({ 
-          error: "Community Resource hub is disabled while you are in an active contest to prevent cheating." 
-        });
-      }
-    }
 
-    // Fetch approved community contributions
-    const problems = await prisma.problem.findMany({ 
-      where: { isCommunity: true, approved: true },
-      orderBy: { createdAt: 'desc' }
-    });
-    
-    res.json(problems);
-  }));
   router.get('/mcqs', (req, res) => {
     try {
       res.json(mcqQuestions);
@@ -696,7 +674,6 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ ok: true, ...result });
   }));
 
-
   router.post('/contests/:id/mcq-submit', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req);
     if (!viewer.userId) throw new Error("Unauthorized");
@@ -735,6 +712,7 @@ export function mountV2Routes(app: Express, io: Server) {
     await recomputeContestStandings(req.params.id);
     res.json({ success: true, isCorrect, submission });
   }));
+
   router.post('/execute', asyncRoute(async (req, res) => {
     const { sourceCode, language, input, expectedOutput } = req.body;
     const result = await executeSubmission(sourceCode, language, input || '', expectedOutput);
@@ -792,8 +770,7 @@ export function mountV2Routes(app: Express, io: Server) {
     res.status(statusFromError(error)).json({ ok: false, error: error.message || 'Unexpected V2 API error' });
   });
   
-
-  router.use('/community', communityRoutes);
+  app.use('/api/v2/community', communityRoutes);
   app.use('/api/v2/auth', authRouter);
   app.use('/api/v2/notifications', notificationRouter);
   app.use('/api/v2/admin', adminRouter);

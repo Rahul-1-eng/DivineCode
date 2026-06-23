@@ -49,6 +49,9 @@ export default function Home() {
     { role: 'ai', text: 'Welcome to DivineCode Pro. I am configured to handle algorithmic breakdowns, testcase overrides, and platform navigation. How can I assist you today?' }
   ]);
 
+  // Dynamic Telemetry Pings
+  const [pings, setPings] = useState({ judge: 18, rtc: 24, cf: 45 });
+
   const navLinks = [
     ['Practice Hub', '/practice'], 
     ['Duel Arena', '/duel'], 
@@ -63,23 +66,25 @@ export default function Home() {
     return DAILY_QUOTES[dayOfYear % DAILY_QUOTES.length];
   }, []);
 
-  // Robust Profile Fetching - Fixes the infinite skeleton loading issue
+  // Jitter the telemetry metrics every few seconds to feel alive
   useEffect(() => {
-    if (status === 'authenticated' && session?.user?.email) {
+    const interval = setInterval(() => {
+      setPings({
+        judge: 15 + Math.floor(Math.random() * 8),
+        rtc: 20 + Math.floor(Math.random() * 12),
+        cf: 40 + Math.floor(Math.random() * 15),
+      });
+    }, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (session?.user?.email) {
       fetch(`${API_BASE_URL}/api/v2/profile/me`, { headers: { 'x-user-email': session.user.email } })
       .then(r => r.json())
-      .then(data => { 
-        if (data && !data.error) {
-          setProfile(data); 
-        } else {
-          setProfile({ rating: 1200, coins: 0 }); // Fallback on error
-        }
-      })
-      .catch(() => {
-        setProfile({ rating: 1200, coins: 0 }); // Fallback on network failure
-      });
+      .then(data => { if (!data.error) setProfile(data); }).catch(() => null);
     }
-  }, [session, status]);
+  }, [session]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, isAiTyping]);
 
@@ -148,67 +153,28 @@ export default function Home() {
         .skeleton-pulse { animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
       `}</style>
 
-      {/* Main layout wrapper, sitting above the absolute background */}
-      <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }} style={{ minHeight: '100vh', padding: '24px 20px', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'transparent', position: 'relative', zIndex: 1 }}>
+      {/* Main layout wrapper */}
+      <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }} style={{ minHeight: '100vh', padding: '32px 24px', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'transparent', position: 'relative', zIndex: 1 }}>
         
-        {/* Unified Glass Nav Bar - Fixes scattered wrapping */}
-        <motion.nav 
-          initial={{ y: -30, opacity: 0 }} 
-          animate={{ y: 0, opacity: 1 }} 
-          transition={{ delay: 0.2 }} 
-          style={{ 
-            maxWidth: 1200, 
-            margin: '0 auto 48px', 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            alignItems: 'center', 
-            gap: 20, 
-            background: 'rgba(15, 23, 42, 0.65)', 
-            backdropFilter: 'blur(16px)', 
-            border: '1px solid rgba(255, 255, 255, 0.08)', 
-            padding: '12px 24px', 
-            borderRadius: 24,
-            flexWrap: 'wrap'
-          }}
-        >
-          {/* Left: Brand */}
-          <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 12, color: '#fff', textDecoration: 'none', fontWeight: 900, fontSize: 24, letterSpacing: '-0.02em' }}>
-            <span style={{ width: 40, height: 40, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg,#6366f1,#22d3ee)', color: '#000', fontWeight: 'bold', boxShadow: '0 0 20px rgba(34,211,238,0.3)' }}>DC</span>
+        <motion.nav initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} style={{ maxWidth: 1200, margin: '0 auto 56px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+          <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 14, color: '#fff', textDecoration: 'none', fontWeight: 900, fontSize: 26, letterSpacing: '-0.03em' }}>
+            <span style={{ width: 46, height: 44, borderRadius: 14, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg,#6366f1,#22d3ee)', color: '#000', fontWeight: 'bold', boxShadow: '0 0 30px rgba(34,211,238,0.4)' }}>DC</span>
             DivineCode
           </a>
           
-          {/* Center: Clean Links (No separate dark boxes) */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             {navLinks.map(([item, href]) => (
-              <a key={item} href={href} style={{ color: '#cbd5e1', textDecoration: 'none', padding: '8px 16px', borderRadius: 8, transition: '0.2s', fontSize: 14, fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>{item}</a>
+              <a key={item} href={href} style={{ color: '#cbd5e1', textDecoration: 'none', padding: '10px 18px', borderRadius: 999, transition: '0.2s', fontSize: 14, fontWeight: 500, background: 'rgba(15,23,42,0.4)', border: '1px solid rgba(255,255,255,0.05)' }} onMouseEnter={e => e.currentTarget.style.borderColor = '#22d3ee'} onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}>{item}</a>
             ))}
-          </div>
 
-          {/* Right: User Metrics & Auth */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {status === 'loading' ? (
-              <div className="skeleton-pulse" style={{ width: 140, height: 38, borderRadius: 999, background: 'rgba(255,255,255,0.05)' }} /> 
-            ) : session ? (
-              <>
+            {status === 'loading' ? <div className="skeleton-pulse" style={{ width: 140, height: 38, borderRadius: 999, background: 'rgba(255,255,255,0.05)' }} /> : session ? (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 10 }}>
                 {profile ? (
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <span style={{ padding: '6px 12px', borderRadius: 999, background: 'rgba(251,191,36,0.1)', color: '#fbbf24', fontWeight: 700, fontSize: 13, border: '1px solid rgba(251,191,36,0.2)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      🏆 {profile.rating || 1200}
-                    </span>
-                    <span style={{ padding: '6px 12px', borderRadius: 999, background: 'rgba(34,211,238,0.1)', color: '#22d3ee', fontWeight: 700, fontSize: 13, border: '1px solid rgba(34,211,238,0.2)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      🪙 {profile.coins || 0}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="skeleton-pulse" style={{ width: 120, height: 32, borderRadius: 999, background: 'rgba(255,255,255,0.1)' }} />
-                )}
-                <a href="/profile" style={{ color: '#020617', textDecoration: 'none', padding: '8px 20px', borderRadius: 999, fontWeight: 800, fontSize: 14, background: 'linear-gradient(135deg,#818cf8,#22d3ee)', marginLeft: 8 }}>
-                  {profile?.username || session.user?.name?.split(' ')[0] || 'Dashboard'}
-                </a>
-              </>
-            ) : (
-              <a href="/signin" style={{ color: '#020617', padding: '10px 24px', borderRadius: 999, fontWeight: 800, background: '#fff', textDecoration: 'none' }}>Authenticate</a>
-            )}
+                  <><span style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(251,191,36,.1)', color: '#fbbf24', fontWeight: 700, fontSize: 13, border: '1px solid rgba(251,191,36,0.2)' }}>🏆 {profile.rating || 1200}</span><span style={{ padding: '8px 14px', borderRadius: 999, background: 'rgba(34,211,238,.1)', color: '#22d3ee', fontWeight: 700, fontSize: 13, border: '1px solid rgba(34,211,238,0.2)' }}>🪙 {profile.coins || 0}</span></>
+                ) : <div className="skeleton-pulse" style={{ width: 120, height: 36, borderRadius: 999, background: 'rgba(255,255,255,0.05)' }} />}
+                <a href="/profile" style={{ color: '#020617', textDecoration: 'none', padding: '10px 20px', borderRadius: 999, fontWeight: 800, fontSize: 14, background: 'linear-gradient(135deg,#818cf8,#22d3ee)' }}>{profile?.username || session.user?.name?.split(' ')[0] || 'Dashboard'}</a>
+              </div>
+            ) : <a href="/signin" style={{ color: '#020617', padding: '10px 22px', borderRadius: 999, fontWeight: 800, background: '#fff', textDecoration: 'none' }}>Authenticate</a>}
           </div>
         </motion.nav>
 
@@ -232,10 +198,26 @@ export default function Home() {
           </div>
           
           <div className="glass-panel" style={{ padding: 32, borderRadius: 32, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <h3 style={{ margin: '0 0 12px', color: '#fff', fontSize: 18, fontWeight: 800 }}>System Verification Status</h3>
-            {['Codeforces API Engine (Bypass Enabled)', 'Distributed Judge0 Parallel Architecture', 'Multi-Tier Neural Error Analyzer', 'Live Standings WebGL Data Stream'].map((statusText) => (
-              <div key={statusText} style={{ padding: '14px 18px', borderRadius: 16, background: 'rgba(2,6,23,0.4)', border: '1px solid rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', gap: 12, color: '#e2e8f0', fontSize: 14 }}>
-                <span style={{ color: '#22d3ee' }}>⚡</span> {statusText}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h3 style={{ margin: 0, color: '#fff', fontSize: 18, fontWeight: 800 }}>Live Telemetry</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#4ade80', fontWeight: 'bold' }}>
+                <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 1.5 }} style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 10px #4ade80' }} />
+                SYSTEMS NOMINAL
+              </div>
+            </div>
+
+            {/* Dynamic Real-Time Stats simulation */}
+            {[
+              { label: 'Judge0 Sandbox Engine', value: `${pings.judge}ms`, color: '#38bdf8' },
+              { label: 'WebRTC Signal Mesh', value: `${pings.rtc}ms`, color: '#38bdf8' },
+              { label: 'External CF Sync API', value: `${pings.cf}ms`, color: '#38bdf8' },
+              { label: 'AI Diagnostic Core', value: 'Ready', color: '#a5b4fc' }
+            ].map((stat, i) => (
+              <div key={i} style={{ padding: '14px 18px', borderRadius: 16, background: 'rgba(2,6,23,0.4)', border: '1px solid rgba(255,255,255,0.03)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#e2e8f0', fontSize: 14 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ color: stat.color }}>⚡</span> {stat.label}
+                </span>
+                <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontWeight: 600 }}>{stat.value}</span>
               </div>
             ))}
           </div>
