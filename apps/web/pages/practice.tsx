@@ -28,7 +28,10 @@ export default function PracticePage() {
   const [loading, setLoading] = useState(true);
   
   // Tab State
-  const [activeTab, setActiveTab] = useState<'coding' | 'logical'>('coding');
+  // Tab State
+  const [activeTab, setActiveTab] = useState<'coding' | 'logical' | 'community'>('coding');
+  const [communityProblems, setCommunityProblems] = useState<any[]>([]);
+  const [communityError, setCommunityError] = useState('');
   const [logicalMode, setLogicalMode] = useState<'daily'|'sliding'|'base'|'bigo'>('daily');
 
   // Coding Filters
@@ -64,7 +67,19 @@ export default function PracticePage() {
   const [chatMessages, setChatMessages] = useState<{role: 'user'|'ai', text: string, image?: string}[]>([
     { role: 'ai', text: 'Hello! I have access to over 5,000+ DSA questions. How can I help you practice today? Upload an image if you have a specific unexpected question!' }
   ]);
-
+useEffect(() => {
+    if (activeTab === 'community') {
+      fetchApi('/api/v2/community/problems')
+        .then(data => {
+          if (data.error) {
+            setCommunityError(data.error);
+          } else {
+            setCommunityProblems(data);
+          }
+        })
+        .catch(() => setCommunityError("Failed to load community hub."));
+    }
+  }, [activeTab]);
   // FULLY DYNAMIC API FETCH
   useEffect(() => {
     if (status === 'loading') return;
@@ -263,7 +278,40 @@ export default function PracticePage() {
             Logical & Reasoning Games
           </button>
         </div>
+<div style={{ display: 'flex', gap: 15, marginBottom: 25, borderBottom: '1px solid #1e293b', paddingBottom: 15 }}>
+          <button onClick={() => setActiveTab('coding')} style={activeTab === 'coding' ? activeTabStyle : inactiveTabStyle}>Terminal & Coding Problems</button>
+          <button onClick={() => setActiveTab('logical')} style={activeTab === 'logical' ? activeTabStyle : inactiveTabStyle}>Logical & Reasoning Games</button>
+          <button onClick={() => setActiveTab('community')} style={activeTab === 'community' ? activeTabStyle : inactiveTabStyle}>🌍 Community Hub</button>
+        </div>
 
+        {/* NEW COMMUNITY HUB SECTION */}
+        {activeTab === 'community' && (
+  <section style={{ background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b' }}>
+    <h2 style={{ color: '#38bdf8', marginTop: 0 }}>🌍 Community Hub</h2>
+    <p style={{ color: '#94a3b8', marginBottom: 20 }}>Problems contributed by the DivineCode community. Approved for practice.</p>
+    
+    {communityError ? (
+      <div style={{ padding: 20, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', borderRadius: 12, color: '#ef4444' }}>
+        <strong>Access Denied:</strong> {communityError}
+      </div>
+    ) : communityProblems.length === 0 ? (
+      <p style={{ color: '#94a3b8' }}>No approved community problems found.</p>
+    ) : (
+      <div style={{ display: 'grid', gap: 15 }}>
+        {communityProblems.map(p => (
+          <div 
+            key={p.id} 
+            style={{ background: '#020617', padding: 20, borderRadius: 12, border: '1px solid #334155', cursor: 'pointer' }} 
+            onClick={() => window.location.href = `/practice/${p.id}`}
+          >
+            <strong style={{ color: '#eef2ff', fontSize: 18 }}>{p.title}</strong>
+            <p style={{ color: '#94a3b8', margin: '8px 0' }}>{p.platform} Difficulty: {p.difficulty || 'N/A'}</p>
+          </div>
+        ))}
+      </div>
+    )}
+  </section>
+)}
         {activeTab === 'logical' && (
           <div style={{ background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b' }}>
             

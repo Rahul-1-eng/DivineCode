@@ -2,9 +2,12 @@ import { useEffect, useState, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/router';
+import { io } from 'socket.io-client';
+import toast from 'react-hot-toast';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-
+// Example usage in a component
+const socket = io(process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000');
 export default function NotificationBell() {
   const { data: session } = useSession();
   const router = useRouter();
@@ -37,10 +40,29 @@ export default function NotificationBell() {
   };
 
   // Poll every 30 seconds
-  useEffect(() => {
+useEffect(() => {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(interval);
+    
+    // Connect to the socket for real-time updates
+    const socket = io(API_BASE_URL, { transports: ['websocket'] });
+    
+    if (session?.user?.email) {
+       socket.on('connect', () => {
+         socket.emit('join-personal-notifications', session.user!.email);
+       });
+       
+       socket.on('new_notification', (newNotif) => {
+         setNotifications(prev => [newNotif, ...prev]);
+         setUnreadCount(prev => prev + 1);
+         toast.success(newNotif.title); // Pop a toast on screen
+       });
+    }
+
+    return () => {
+      clearInterval(interval);
+      socket.disconnect();
+    };
   }, [session]);
 
   const markAsRead = async (id: string, link: string | null) => {

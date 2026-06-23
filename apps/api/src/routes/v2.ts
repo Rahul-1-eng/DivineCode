@@ -209,7 +209,29 @@ export function mountV2Routes(app: Express, io: Server) {
       socket.to(`voice:${teamId}`).emit('user-left-voice', socket.id);
     });
   });
+  router.get('/community/problems', asyncRoute(async (req, res) => {
+    const viewer = await resolvedViewerFromRequest(req);
+    
+    // ANTI-CHEAT: Check if user is in an active, running contest
+    if (viewer.userId) {
+      const activeContest = await prisma.contestParticipant.findFirst({
+        where: { userId: viewer.userId, contest: { status: 'RUNNING' } }
+      });
+      if (activeContest) {
+        return res.status(403).json({ 
+          error: "Community Resource hub is disabled while you are in an active contest to prevent cheating." 
+        });
+      }
+    }
 
+    // Fetch approved community contributions
+    const problems = await prisma.problem.findMany({ 
+      where: { isCommunity: true, approved: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    res.json(problems);
+  }));
   router.get('/mcqs', (req, res) => {
     try {
       res.json(mcqQuestions);
@@ -673,6 +695,45 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json({ ok: true, ...result });
   }));
 
+
+  router.post('/contests/:id/mcq-submit', asyncRoute(async (req, res) => {
+    const viewer = await resolvedViewerFromRequest(req);
+    if (!viewer.userId) throw new Error("Unauthorized");
+
+    const { problemId, answerIndices } = req.body;
+
+    const contestProblem = await prisma.contestProblem.findUnique({
+      where: { id: problemId },
+      include: { interviewQuestion: true }
+    });
+
+    if (!contestProblem || !contestProblem.interviewQuestion) {
+        throw new Error("MCQ problem not found");
+    }
+
+    // Auto-grade
+    const correctIndices = contestProblem.interviewQuestion.correctIndices || [];
+    const isCorrect = correctIndices.sort().toString() === (answerIndices || []).sort().toString();
+    const verdict = isCorrect ? 'ACCEPTED' : 'WRONG_ANSWER';
+    const points = isCorrect ? contestProblem.points : 0;
+
+    // Create submission as the user
+    const submission = await prisma.submission.create({
+      data: {
+        contestId: req.params.id,
+        contestProblemId: problemId,
+        userId: viewer.userId,
+        verdict: verdict,
+        language: 'MCQ',
+        code: JSON.stringify(answerIndices),
+        status: 'FINISHED',
+        manualPoints: points
+      }
+    });
+
+    await recomputeContestStandings(req.params.id);
+    res.json({ success: true, isCorrect, submission });
+  }));
   router.post('/execute', asyncRoute(async (req, res) => {
     const { sourceCode, language, input, expectedOutput } = req.body;
     const result = await executeSubmission(sourceCode, language, input || '', expectedOutput);

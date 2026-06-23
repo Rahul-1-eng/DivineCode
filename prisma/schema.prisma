@@ -146,6 +146,9 @@ model Problem {
   problemTopics     ProblemTopic[]
   submissions       Submission[]
   testcases         Testcase[]
+  isCommunity    Boolean @default(true)  // For the dynamic hub
+  approved       Boolean @default(false) // To hide pending questions
+  videoUrl       String?                 // For video explanations
 }
 
 model Submission {
@@ -238,6 +241,7 @@ model Editorial {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   problem      Problem   @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  videoUrl       String?
 }
 
 // -----------------------------------------------------------------------------

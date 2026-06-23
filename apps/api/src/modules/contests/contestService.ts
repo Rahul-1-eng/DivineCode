@@ -233,14 +233,22 @@ export async function createContestV2(input: CreateContestInput) {
       teamRecordMap.set(tName!, team.id);
     }
 
-    for (const member of playerMembers) {
-      const user = await ensureParticipantUser(tx, member);
-      let externalHandle = null;
-      if (member.codeforcesHandle) externalHandle = await ensureCodeforcesHandle(tx, user.id, member.codeforcesHandle);
-      else externalHandle = await tx.externalHandle.findFirst({ where: { userId: user.id, platform: Platform.CODEFORCES } });
-      const teamId = (member.teamName && teamRecordMap.has(member.teamName)) ? teamRecordMap.get(member.teamName) : null;
-      await tx.contestParticipant.create({ data: { contestId: created.id, userId: user.id, externalHandleId: externalHandle?.id || null, displayName: member.displayName!, teamName: member.teamName, teamId: teamId || null, role: ContestParticipantRole.PARTICIPANT, isOfficial: member.isOfficial ?? true, ratingBefore: member.ratingBefore } });
-    }
+   // Replace the entire 'for (const member of playerMembers)' loop with this:
+    const ownerExternalHandle = await tx.externalHandle.findFirst({ 
+        where: { userId: owner.id, platform: Platform.CODEFORCES } 
+    });
+    
+    // Only auto-register the creator of the contest
+    await tx.contestParticipant.create({
+      data: {
+        contestId: created.id,
+        userId: owner.id,
+        externalHandleId: ownerExternalHandle?.id || null,
+        displayName: owner.name || owner.email || 'Owner',
+        role: ContestParticipantRole.OWNER,
+        isOfficial: true
+      }
+    });
 
     for (const [index, problem] of problems.entries()) {
       const preparedProblem = { ...problem, description: problem.description || 'No description provided.', imageUrl: problem.imageUrl || null };

@@ -51,9 +51,10 @@ export default function AnimatedBackground() {
     canvas.width = canvas.height = size;
     const ctx = canvas.getContext('2d')!;
     const grad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
-    grad.addColorStop(0, 'rgba(255,255,255,1)');
-    grad.addColorStop(0.35, 'rgba(165,180,252,0.9)');
-    grad.addColorStop(1, 'rgba(34,211,238,0)');
+    grad.addColorStop(0, 'rgba(148, 163, 184, 0.4)'); // Dimmer center
+    grad.addColorStop(0.35, 'rgba(30, 58, 138, 0.2)'); // Darker blue edge
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, size, size);
     

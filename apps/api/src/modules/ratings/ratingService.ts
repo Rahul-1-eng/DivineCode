@@ -100,11 +100,23 @@ export async function processContestRewards(contestId: string) {
       }
 
       // 4. Commit DB Updates
+    // 4. Commit DB Updates
       await tx.user.update({
         where: { id: pA.userId! },
         data: {
           rating: newRating,
           coins: { increment: earnedCoins }
+        }
+      });
+
+      // ADD THIS NOTIFICATION BLOCK:
+      await tx.notification.create({
+        data: {
+          userId: pA.userId!,
+          title: `Contest Finished!`,
+          message: `You earned ${earnedCoins} coins. Your new rating is ${newRating} (${ratingDelta >= 0 ? '+' : ''}${ratingDelta}).`,
+          type: "SUCCESS",
+          link: `/contests/${contest.id}/final`
         }
       });
 

@@ -647,6 +647,17 @@ export default function ContestProblemWorkspace() {
       ) : (
         <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
           <section style={{ width: '40%', overflowY: 'auto', background: '#0f172a', padding: 20 }}>
+            {/* NEW VIDEO EXPLANATION BLOCK */}
+            {(problem?.videoUrl || problem?.problem?.videoUrl) && (
+              <div style={{ marginBottom: 20, padding: 15, background: '#020617', borderRadius: 12, border: '1px solid #38bdf8' }}>
+                <strong style={{ color: '#38bdf8', display: 'block', marginBottom: 10 }}>🎥 Video Explanation</strong>
+                <iframe 
+                  src={problem.videoUrl || problem.problem.videoUrl} 
+                  style={{ width: '100%', height: 250, borderRadius: 8, border: 'none' }} 
+                  allowFullScreen 
+                />
+              </div>
+            )}
             {problemType === 'EXTERNAL' && externalUrl && (
               <div style={{ marginBottom: 20, padding: 20, borderRadius: 14, background: '#081327', border: '1px solid #334155' }}>
                 <strong style={{ display: 'block', color: '#38bdf8', marginBottom: 10, fontSize: 16 }}>External problem detected</strong>
@@ -658,6 +669,18 @@ export default function ContestProblemWorkspace() {
                 </a>
               </div>
             )}
+            {/* Video Explanation Section */}
+{(problem?.videoUrl || problem?.problem?.videoUrl) && (
+  <div style={{ marginBottom: 20, padding: 15, background: '#020617', borderRadius: 12, border: '1px solid #38bdf8' }}>
+    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: 10 }}>🎥 Video Explanation</strong>
+    <iframe 
+      src={problem.videoUrl || problem.problem.videoUrl} 
+      style={{ width: '100%', height: 250, borderRadius: 8, border: 'none' }} 
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      allowFullScreen 
+    />
+  </div>
+)}
             {problemDescriptionHtml && problemDescriptionHtml.length > 10 ? (
               <div 
                 className="problem-statement-html" 

@@ -1,6 +1,8 @@
 import { SubmissionSource, SubmissionStatus, Verdict, ContestStatus } from '@prisma/client';
 import { prisma } from '../../prisma/client';
+import { getSharedRedisConnection } from '../../queues/redis';
 
+const redis = getSharedRedisConnection();
 const PENALTY_PER_WRONG_ATTEMPT = 50;
 
 function isCountableSubmission(contest: any, submission: any) {
@@ -22,6 +24,15 @@ function isWrongAttempt(submission: any) {
 }
 
 export async function recomputeContestStandings(contestId: string) {
+  // CACHE CHECK: If cached data exists, return it immediately to reduce latency
+  try {
+    const cacheKey = `contest:standings:${contestId}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch (err) {
+    console.error("Redis Cache read failed:", err);
+  }
+
   return prisma.$transaction(async (tx) => {
     const contest = await tx.contest.findUnique({
       where: { id: contestId },
@@ -53,7 +64,7 @@ export async function recomputeContestStandings(contestId: string) {
       const isSubmissionFrozen = freezeTime !== null && submissionTime > freezeTime;
       const isAccepted = (sub.verdict === Verdict.ACCEPTED || String(sub.verdict) === 'OK') && sub.status === SubmissionStatus.FINISHED;
 
-      // --- TEAM LOGIC (Points given once per team) ---
+      // --- TEAM LOGIC ---
       if (!teamState.has(sub.teamId)) teamState.set(sub.teamId, new Map());
       const tMap = teamState.get(sub.teamId)!;
       const tState = tMap.get(pId) || { wrongAttempts: 0, acceptedAt: undefined, manualPoints: null, isFrozen: false };
@@ -66,7 +77,7 @@ export async function recomputeContestStandings(contestId: string) {
         tMap.set(pId, tState);
       }
 
-      // --- INDIVIDUAL LOGIC (Points given per individual) ---
+      // --- INDIVIDUAL LOGIC ---
       if (!sub.participantId) continue;
       if (!individualState.has(sub.participantId)) individualState.set(sub.participantId, new Map());
       const iMap = individualState.get(sub.participantId)!;
@@ -87,7 +98,6 @@ export async function recomputeContestStandings(contestId: string) {
       
       let teamPenalty = solvedEntries.reduce((sum, [, state]) => sum + acceptedMinute(contest, state.acceptedAt!) + (state.wrongAttempts * PENALTY_PER_WRONG_ATTEMPT), 0);
       const testcasePenalty = participant.standing?.testcasePenalty || 0;
-      
       let teamScore = solvedEntries.reduce((sum, [id, state]) => sum + (state.manualPoints !== null ? state.manualPoints : (pointsMap.get(id) || 1000)), 0) - teamPenalty - testcasePenalty;
 
       const iMap = individualState.has(participant.id) ? individualState.get(participant.id)! : new Map();
@@ -112,7 +122,6 @@ export async function recomputeContestStandings(contestId: string) {
       };
     });
 
-    // Precise sorting: Team Score > Team Penalty > Individual Score > Individual Penalty
     standingRows.sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       if (a.penalty !== b.penalty) return a.penalty - b.penalty;
@@ -144,12 +153,20 @@ export async function recomputeContestStandings(contestId: string) {
           score: row.score, 
           individualScore: row.individualScore, 
           individualSolved: row.individualSolved, 
-          individualPenalty: row.individualPenalty, // FIXED: Added missing update mapping
-          testcasePenalty: row.testcasePenalty,     // FIXED: Added missing update mapping
+          individualPenalty: row.individualPenalty,
+          testcasePenalty: row.testcasePenalty,
           solvedProblemIds: row.solvedProblemIds, 
           lastAcceptedAt: row.lastAcceptedAt 
         }
       });
+    }
+
+    // CACHE UPDATE: Store result in Redis for 60 seconds
+    try {
+      const cacheKey = `contest:standings:${contestId}`;
+      await redis.set(cacheKey, JSON.stringify(standingRows), 'EX', 60);
+    } catch (redisErr) {
+      console.error("Redis Cache write failed:", redisErr);
     }
 
     return standingRows;
