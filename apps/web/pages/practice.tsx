@@ -1,6 +1,6 @@
-import { CSSProperties, useEffect, useRef, useState, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useEffect, useState, useRef, useMemo, CSSProperties } from 'react';
 import { useSession } from 'next-auth/react'; 
+import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../lib/api';
 
@@ -28,7 +28,6 @@ export default function PracticePage() {
   const [loading, setLoading] = useState(true);
   
   // Tab State
-  // Tab State
   const [activeTab, setActiveTab] = useState<'coding' | 'logical' | 'community'>('coding');
   const [communityProblems, setCommunityProblems] = useState<any[]>([]);
   const [communityError, setCommunityError] = useState('');
@@ -42,7 +41,7 @@ export default function PracticePage() {
   // Logical Games State: Daily MCQs
   const [stopwatchTime, setStopwatchTime] = useState(0);
   const [isStopwatchRunning, setIsStopwatchRunning] = useState(false);
-  const [logicalAnswers, setLogicalAnswers] = useState<Record<number, number>>({});
+  const [logicalAnswers, setLogicalAnswers] = useState<Record<string, number>>({});
   const [logicalScore, setLogicalScore] = useState<number | null>(null);
 
   // Logical Games State: Sliding Puzzle
@@ -67,19 +66,7 @@ export default function PracticePage() {
   const [chatMessages, setChatMessages] = useState<{role: 'user'|'ai', text: string, image?: string}[]>([
     { role: 'ai', text: 'Hello! I have access to over 5,000+ DSA questions. How can I help you practice today? Upload an image if you have a specific unexpected question!' }
   ]);
-useEffect(() => {
-    if (activeTab === 'community') {
-      fetchApi('/api/v2/community/problems')
-        .then(data => {
-          if (data.error) {
-            setCommunityError(data.error);
-          } else {
-            setCommunityProblems(data);
-          }
-        })
-        .catch(() => setCommunityError("Failed to load community hub."));
-    }
-  }, [activeTab]);
+
   // FULLY DYNAMIC API FETCH
   useEffect(() => {
     if (status === 'loading') return;
@@ -93,6 +80,21 @@ useEffect(() => {
       setLoading(false); 
     }).catch(() => setLoading(false));
   }, [session, status]); 
+
+  // COMMUNITY HUB FETCH
+  useEffect(() => {
+    if (activeTab === 'community') {
+      fetchApi('/api/v2/community/problems')
+        .then(data => {
+          if (data.error) {
+            setCommunityError(data.error);
+          } else {
+            setCommunityProblems(data);
+          }
+        })
+        .catch(() => setCommunityError("Failed to load community hub."));
+    }
+  }, [activeTab]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages, isAiTyping]);
 
@@ -108,6 +110,28 @@ useEffect(() => {
     const s = (seconds % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   };
+
+  // --- QUESTION OF THE DAY LOGIC ---
+  const dailyChallenges = useMemo(() => {
+    if (!problems || problems.length < 3) return [];
+    
+    // Seeded random based on current day so it changes exactly at midnight
+    const today = new Date().toDateString();
+    let seed = 0;
+    for (let i = 0; i < today.length; i++) seed += today.charCodeAt(i);
+    
+    const shuffled = [...problems].sort((a, b) => (a.title.charCodeAt(0) + seed) % 2 === 0 ? 1 : -1);
+    
+    const lc = shuffled.find(p => p.platform === 'LeetCode') || shuffled[0];
+    const cf = shuffled.find(p => p.platform === 'Codeforces' && p.id !== lc?.id) || shuffled[1];
+    const hard = shuffled.find(p => p.difficulty === 'Hard' && p.id !== lc?.id && p.id !== cf?.id) || shuffled[2];
+    
+    return [
+      { ...lc, dayLabel: 'Codeforces Core (Easy)', dColor: '#4ade80' },
+      { ...cf, dayLabel: 'LeetCode Vector (Medium)', dColor: '#fbbf24' },
+      { ...hard, dayLabel: 'Extreme Platform Arena (Hard)', dColor: '#f87171' }
+    ].filter(Boolean);
+  }, [problems]);
 
   // Dynamically uses backend dataset for daily MCQs
   const dailyLogicalGames = useMemo(() => {
@@ -128,7 +152,6 @@ useEffect(() => {
   // --- SLIDING PUZZLE LOGIC ---
   const initPuzzle = () => {
     let arr = Array.from({length: 15}, (_, i) => i + 1).concat([0]);
-    // Simple shuffle
     arr.sort(() => Math.random() - 0.5);
     setPuzzleGrid(arr);
     setPuzzleMoves(0);
@@ -198,11 +221,11 @@ useEffect(() => {
 
   const filteredProblems = useMemo(() => {
     return problems.filter((p) => {
-      const matchesSearch = p.title?.toLowerCase().includes(searchQuery.toLowerCase()) || p.tags?.some((t: string) => t.toLowerCase().includes(searchQuery.toLowerCase()));
-      const difficulty = p.difficulty || 'Unrated';
-      const matchesDifficulty = difficultyFilter === 'All' || difficulty === difficultyFilter;
-      const matchesPlatform = platformFilter === 'All' || (p.platform || 'DivineCode') === platformFilter;
-      return matchesSearch && matchesDifficulty && matchesPlatform;
+      const titleStr = p.title || '';
+      const matchesSearch = titleStr.toLowerCase().includes(searchQuery.toLowerCase()) || p.tags?.some((t: string) => t.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesDiff = difficultyFilter === 'All' || p.difficulty === difficultyFilter;
+      const matchesPlat = platformFilter === 'All' || (p.platform || 'DivineCode') === platformFilter;
+      return matchesSearch && matchesDiff && matchesPlat;
     });
   }, [problems, searchQuery, difficultyFilter, platformFilter]);
 
@@ -270,45 +293,43 @@ useEffect(() => {
           </div>
         </motion.div>
 
+        {/* Master Tab Bar - Cleaned up to avoid duplication */}
         <div style={{ display: 'flex', gap: 15, marginBottom: 25, borderBottom: '1px solid #1e293b', paddingBottom: 15 }}>
           <button onClick={() => setActiveTab('coding')} style={activeTab === 'coding' ? activeTabStyle : inactiveTabStyle}>Terminal & Coding Problems</button>
           <button onClick={() => setActiveTab('logical')} style={activeTab === 'logical' ? activeTabStyle : inactiveTabStyle}>Logical & Reasoning Games</button>
           <button onClick={() => setActiveTab('community')} style={activeTab === 'community' ? activeTabStyle : inactiveTabStyle}>🌍 Community Hub</button>
         </div>
-<div style={{ display: 'flex', gap: 15, marginBottom: 25, borderBottom: '1px solid #1e293b', paddingBottom: 15 }}>
-          <button onClick={() => setActiveTab('coding')} style={activeTab === 'coding' ? activeTabStyle : inactiveTabStyle}>Terminal & Coding Problems</button>
-          <button onClick={() => setActiveTab('logical')} style={activeTab === 'logical' ? activeTabStyle : inactiveTabStyle}>Logical & Reasoning Games</button>
-          <button onClick={() => setActiveTab('community')} style={activeTab === 'community' ? activeTabStyle : inactiveTabStyle}>🌍 Community Hub</button>
-        </div>
 
-        {/* NEW COMMUNITY HUB SECTION */}
+        {/* COMMUNITY HUB SECTION */}
         {activeTab === 'community' && (
-  <section style={{ background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b' }}>
-    <h2 style={{ color: '#38bdf8', marginTop: 0 }}>🌍 Community Hub</h2>
-    <p style={{ color: '#94a3b8', marginBottom: 20 }}>Problems contributed by the DivineCode community. Approved for practice.</p>
-    
-    {communityError ? (
-      <div style={{ padding: 20, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', borderRadius: 12, color: '#ef4444' }}>
-        <strong>Access Denied:</strong> {communityError}
-      </div>
-    ) : communityProblems.length === 0 ? (
-      <p style={{ color: '#94a3b8' }}>No approved community problems found.</p>
-    ) : (
-      <div style={{ display: 'grid', gap: 15 }}>
-        {communityProblems.map(p => (
-          <div 
-            key={p.id} 
-            style={{ background: '#020617', padding: 20, borderRadius: 12, border: '1px solid #334155', cursor: 'pointer' }} 
-            onClick={() => window.location.href = `/practice/${p.id}`}
-          >
-            <strong style={{ color: '#eef2ff', fontSize: 18 }}>{p.title}</strong>
-            <p style={{ color: '#94a3b8', margin: '8px 0' }}>{p.platform} Difficulty: {p.difficulty || 'N/A'}</p>
-          </div>
-        ))}
-      </div>
-    )}
-  </section>
-)}
+          <section style={{ background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b' }}>
+            <h2 style={{ color: '#38bdf8', marginTop: 0 }}>🌍 Community Hub</h2>
+            <p style={{ color: '#94a3b8', marginBottom: 20 }}>Problems contributed by the DivineCode community. Approved for practice.</p>
+            
+            {communityError ? (
+              <div style={{ padding: 20, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', borderRadius: 12, color: '#ef4444' }}>
+                <strong>Access Denied:</strong> {communityError}
+              </div>
+            ) : communityProblems.length === 0 ? (
+              <p style={{ color: '#94a3b8' }}>No approved community problems found.</p>
+            ) : (
+              <div style={{ display: 'grid', gap: 15 }}>
+                {communityProblems.map(p => (
+                  <div 
+                    key={p.id} 
+                    style={{ background: '#020617', padding: 20, borderRadius: 12, border: '1px solid #334155', cursor: 'pointer' }} 
+                    onClick={() => window.location.href = `/practice/${p.id}`}
+                  >
+                    <strong style={{ color: '#eef2ff', fontSize: 18 }}>{p.title}</strong>
+                    <p style={{ color: '#94a3b8', margin: '8px 0' }}>{p.platform} Difficulty: {p.difficulty || 'N/A'}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* LOGICAL GAMES SECTION */}
         {activeTab === 'logical' && (
           <div style={{ background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b' }}>
             
@@ -446,24 +467,63 @@ useEffect(() => {
           </div>
         )}
 
+        {/* CODING PROBLEMS SECTION */}
         {activeTab === 'coding' && (
           <>
+            {/* Dynamic QOTD Display */}
+            {dailyChallenges.length > 0 && (
+              <div style={{ marginBottom: 40 }}>
+                <h2 style={{ color: '#22d3ee', margin: '0 0 16px', fontSize: 20, fontWeight: 800 }}>⚡ Dynamic Questions of the Day</h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
+                  {dailyChallenges.map((q) => (
+                    <div key={q.id} onClick={() => window.location.href = `/practice/${q.id}`} style={{ background: '#0f172a', padding: 24, borderRadius: 16, border: '1px solid #1e293b', cursor: 'pointer', transition: '0.2s' }} onMouseEnter={e => e.currentTarget.style.borderColor = '#22d3ee'} onMouseLeave={e => e.currentTarget.style.borderColor = '#1e293b'}>
+                      <div style={{ color: q.dColor, fontSize: 12, fontWeight: 800, textTransform: 'uppercase', marginBottom: 8 }}>{q.dayLabel}</div>
+                      <h3 style={{ margin: '0 0 12px', color: '#fff', fontSize: 18 }}>{q.title}</h3>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {q.tags?.slice(0, 2).map((t: string) => <span key={t} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid #334155', padding: '4px 10px', borderRadius: 6, fontSize: 11, color: '#94a3b8' }}>{t}</span>)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
               <input placeholder="Search 5000+ questions or topics..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ ...filterInput, flex: 1, minWidth: 250 }} />
-              <select value={difficultyFilter} onChange={(e) => setDifficultyFilter(e.target.value)} style={filterInput}><option value="All">All Difficulties</option><option value="Easy">Easy</option><option value="Medium">Medium</option><option value="Hard">Hard</option></select>
-              <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={filterInput}><option value="All">All Platforms</option><option value="Codeforces">Codeforces</option><option value="LeetCode">LeetCode</option><option value="AtCoder">AtCoder</option><option value="CodeChef">CodeChef</option></select>
+              <select value={difficultyFilter} onChange={(e) => setDifficultyFilter(e.target.value)} style={filterInput}>
+                <option value="All">All Difficulties</option>
+                <option value="Easy">Easy</option>
+                <option value="Medium">Medium</option>
+                <option value="Hard">Hard</option>
+              </select>
+              <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={filterInput}>
+                <option value="All">All Platforms</option>
+                <option value="Codeforces">Codeforces</option>
+                <option value="LeetCode">LeetCode</option>
+                <option value="AtCoder">AtCoder</option>
+                <option value="CodeChef">CodeChef</option>
+              </select>
             </div>
 
             <div style={tableContainer}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid #1e293b', color: '#94a3b8', fontSize: 14, background: '#020617' }}>
-                    <th style={{ padding: '16px 20px', width: '5%' }}>Status</th><th style={{ padding: '16px 20px', width: '40%' }}>Title</th><th style={{ padding: '16px 20px', width: '15%' }}>Platform</th><th style={{ padding: '16px 20px', width: '15%' }}>Difficulty</th><th style={{ padding: '16px 20px', width: '25%' }}>Topics</th>
+                    <th style={{ padding: '16px 20px', width: '5%' }}>Status</th>
+                    <th style={{ padding: '16px 20px', width: '40%' }}>Title</th>
+                    <th style={{ padding: '16px 20px', width: '15%' }}>Platform</th>
+                    <th style={{ padding: '16px 20px', width: '15%' }}>Difficulty</th>
+                    <th style={{ padding: '16px 20px', width: '25%' }}>Topics</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={5} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}><motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ display: 'inline-block', width: 30, height: 30, border: '3px solid rgba(103,232,249,0.2)', borderTopColor: '#67e8f9', borderRadius: '50%' }} /><p style={{ marginTop: 15 }}>Loading 5000+ Questions...</p></td></tr>
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
+                        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ display: 'inline-block', width: 30, height: 30, border: '3px solid rgba(103,232,249,0.2)', borderTopColor: '#67e8f9', borderRadius: '50%' }} />
+                        <p style={{ marginTop: 15 }}>Loading 5000+ Questions...</p>
+                      </td>
+                    </tr>
                   ) : filteredProblems.length === 0 ? (
                     <tr><td colSpan={5} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>No problems match your filters in the database.</td></tr>
                   ) : (
@@ -471,7 +531,7 @@ useEffect(() => {
                       const hasDescription = p.descriptionHtml && p.descriptionHtml.replace(/<[^>]*>/g, '').trim().length > 15;
                       return (
                         <motion.tr 
-                          key={p.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.02 }}
+                          key={p.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: Math.min(idx * 0.02, 0.5) }}
                           style={{ borderBottom: '1px solid #1e293b', background: idx % 2 === 0 ? 'transparent' : 'rgba(15,23,42,0.4)', transition: 'background 0.2s', cursor: 'pointer' }}
                           onClick={() => window.location.href = `/practice/${p.id}`}
                           onMouseOver={(e) => e.currentTarget.style.background = 'rgba(30,41,59,0.8)'}
@@ -514,6 +574,7 @@ useEffect(() => {
         )}
       </section>
 
+      {/* FLOATING AI CHATBOT */}
       <div style={floatingAiWrapper}>
         <AnimatePresence>
           {isChatOpen && (

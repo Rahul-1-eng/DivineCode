@@ -92,7 +92,6 @@ export default function ContestRoomPage() {
   const [messages, setMessages] = useState<any[]>([]);
   
   const [voiceStatus, setVoiceStatus] = useState('disconnected');
-  const [lobbyChat, setLobbyChat] = useState('');
   const [lobbyMessages, setLobbyMessages] = useState<any[]>([]);
 
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -405,15 +404,23 @@ export default function ContestRoomPage() {
     }
   }
 
+  // --- CORE CHAT LOGIC ---
   const handleSendMessage = () => {
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() || !socketRef.current) return;
     
-    if (contest?.viewerMember?.teamId && socketRef.current) {
+    if (contest?.viewerMember?.teamId) {
       socketRef.current.emit('sendTeamMessage', {
-        contestId: id, teamId: contest.viewerMember.teamId, senderId: contest.viewerMember.user?.id || contest.viewerMember.userId || session?.user?.email, content: chatInput.trim()
+        contestId: id, 
+        teamId: contest.viewerMember.teamId, 
+        senderId: contest.viewerMember.userId || session?.user?.email, 
+        content: chatInput.trim()
       });
-    } else if (socketRef.current) {
-      socketRef.current.emit('sendLobbyMessage', { contestId: id, sender: session?.user?.name || 'Guest', text: chatInput.trim(), time: Date.now() });
+    } else {
+      socketRef.current.emit('sendLobbyMessage', { 
+        contestId: id, 
+        sender: session?.user?.name || 'Guest', 
+        text: chatInput.trim()
+      });
     }
     setChatInput('');
   };
@@ -424,18 +431,28 @@ export default function ContestRoomPage() {
     if (voiceStatus === 'connected' || voiceStatus === 'connecting') {
       setVoiceStatus('disconnected');
       socketRef.current?.emit('leave-voice', contest.viewerMember.teamId);
-      if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(track => track.stop()); localStreamRef.current = null; }
-      Object.values(peersRef.current).forEach(pc => pc.close()); peersRef.current = {};
+      if (localStreamRef.current) { 
+        localStreamRef.current.getTracks().forEach(track => track.stop()); 
+        localStreamRef.current = null; 
+      }
+      Object.values(peersRef.current).forEach(pc => pc.close()); 
+      peersRef.current = {};
       toast.success("Voice disconnected.");
     } else {
       setVoiceStatus('connecting');
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        localStreamRef.current = stream; setVoiceStatus('connected');
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, 
+            video: false 
+        });
+        localStreamRef.current = stream; 
+        setVoiceStatus('connected');
         socketRef.current?.emit('join-voice', contest.viewerMember.teamId);
         toast.success("Voice channel joined!");
       } catch (err) {
-        console.error('Mic access denied:', err); setVoiceStatus('disconnected'); toast.error("Microphone access denied.");
+        console.error('Mic access denied:', err); 
+        setVoiceStatus('disconnected'); 
+        toast.error("Microphone access denied.");
       }
     }
   };
@@ -485,30 +502,97 @@ export default function ContestRoomPage() {
       loadSubmissions();
     });
 
+    // Fortified WebRTC Architecture
     socket.on('user-joined-voice', async (peerId) => {
       if (!localStreamRef.current) return;
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      const pc = new RTCPeerConnection({ 
+          iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' }, 
+              { urls: 'stun:global.stun.twilio.com:3478' }
+          ] 
+      });
       peersRef.current[peerId] = pc;
+      
       localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
-      pc.ontrack = (event) => { const audio = new Audio(); audio.srcObject = event.streams[0]; audio.autoplay = true; audio.play().catch(e => console.log('Audio play blocked:', e)); };
-      pc.onicecandidate = (event) => { if (event.candidate) socket.emit('voice-ice-candidate', { to: peerId, candidate: event.candidate }); };
-      const offer = await pc.createOffer(); await pc.setLocalDescription(offer); socket.emit('voice-offer', { to: peerId, offer });
+      
+      pc.ontrack = (event) => { 
+          const globalAudioNode = document.createElement('audio');
+          globalAudioNode.srcObject = event.streams[0];
+          globalAudioNode.autoplay = true;
+          document.body.appendChild(globalAudioNode);
+      };
+      
+      pc.onicecandidate = (event) => { 
+          if (event.candidate) socket.emit('voice-ice-candidate', { to: peerId, candidate: event.candidate }); 
+      };
+      
+      pc.oniceconnectionstatechange = () => {
+          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+              pc.close();
+              delete peersRef.current[peerId];
+          }
+      };
+
+      const offer = await pc.createOffer(); 
+      await pc.setLocalDescription(offer); 
+      socket.emit('voice-offer', { to: peerId, offer });
     });
 
     socket.on('voice-offer', async ({ from, offer }) => {
       if (!localStreamRef.current) return;
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      const pc = new RTCPeerConnection({ 
+          iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:global.stun.twilio.com:3478' }
+          ] 
+      });
       peersRef.current[from] = pc;
+      
       localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
-      pc.ontrack = (event) => { const audio = new Audio(); audio.srcObject = event.streams[0]; audio.autoplay = true; audio.play().catch(e => console.log('Audio play blocked:', e)); };
-      pc.onicecandidate = (event) => { if (event.candidate) socket.emit('voice-ice-candidate', { to: from, candidate: event.candidate }); };
+      
+      pc.ontrack = (event) => { 
+          const globalAudioNode = document.createElement('audio');
+          globalAudioNode.srcObject = event.streams[0];
+          globalAudioNode.autoplay = true;
+          document.body.appendChild(globalAudioNode);
+      };
+      
+      pc.onicecandidate = (event) => { 
+          if (event.candidate) socket.emit('voice-ice-candidate', { to: from, candidate: event.candidate }); 
+      };
+      
+      pc.oniceconnectionstatechange = () => {
+          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+              pc.close();
+              delete peersRef.current[from];
+          }
+      };
+
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer(); await pc.setLocalDescription(answer); socket.emit('voice-answer', { to: from, answer });
+      const answer = await pc.createAnswer(); 
+      await pc.setLocalDescription(answer); 
+      socket.emit('voice-answer', { to: from, answer });
     });
 
-    socket.on('voice-answer', async ({ from, answer }) => { const pc = peersRef.current[from]; if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer)); });
-    socket.on('voice-ice-candidate', async ({ from, candidate }) => { const pc = peersRef.current[from]; if (pc && pc.remoteDescription) { try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){} } });
-    socket.on('user-left-voice', (peerId) => { if (peersRef.current[peerId]) { peersRef.current[peerId].close(); delete peersRef.current[peerId]; } });
+    socket.on('voice-answer', async ({ from, answer }) => { 
+        const pc = peersRef.current[from]; 
+        if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer)); 
+    });
+    
+    socket.on('voice-ice-candidate', async ({ from, candidate }) => { 
+        const pc = peersRef.current[from]; 
+        if (pc && pc.remoteDescription) { 
+            try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } 
+            catch(e){} 
+        } 
+    });
+    
+    socket.on('user-left-voice', (peerId) => { 
+        if (peersRef.current[peerId]) { 
+            peersRef.current[peerId].close(); 
+            delete peersRef.current[peerId]; 
+        } 
+    });
 
     return () => { 
       socket.disconnect(); socketRef.current = null;
@@ -517,11 +601,19 @@ export default function ContestRoomPage() {
     };
   }, [id, session, isFinal, contest?.viewerMember?.teamId]);
   
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, lobbyMessages]);
-  useEffect(() => { if (!id || !contest || isFinal) return; if (timeLeft === 0 && !isScheduledLockScreen && !isFinal) { 
-  toast("Contest Ended. Redirecting...");
-  router.push(`/contests/${id}/final`); 
-} }, [timeLeft, id, contest, isFinal, isScheduledLockScreen]);
+  // Scrolls the chat window to the bottom when new messages arrive or when chat is opened
+  useEffect(() => { 
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); 
+  }, [messages, lobbyMessages, isChatOpen]);
+  
+  useEffect(() => { 
+      if (!id || !contest || isFinal) return; 
+      if (timeLeft === 0 && !isScheduledLockScreen && !isFinal) { 
+          toast("Contest Ended. Redirecting...");
+          router.push(`/contests/${id}/final`); 
+      } 
+  }, [timeLeft, id, contest, isFinal, isScheduledLockScreen]);
+  
   useEffect(() => { if (isFinal) playSuccessSound(); }, [isFinal]);
 
   const problemById = useMemo(() => Object.fromEntries((contest?.problems || []).map((p: any, i: number) => [p.id, { ...p, label: String.fromCharCode(65 + i) }])), [contest]);
@@ -706,6 +798,16 @@ export default function ContestRoomPage() {
           </div>
           <div style={userPill}>{session.user?.name || session.user?.email}</div>
         </nav>
+
+        {isFinal && viewerMember && (
+          <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(34,211,238,0.2))', border: '1px solid #22d3ee', padding: 24, borderRadius: 20, marginBottom: 32, textAlign: 'center', marginTop: 24 }}>
+            <h2 style={{ margin: '0 0 8px', color: '#fff' }}>🏆 Contest Allocation Finalized!</h2>
+            <p style={{ color: '#cbd5e1', margin: 0 }}>
+              Rating Delta: <strong style={{ color: '#4ade80' }}>{ratingDelta >= 0 ? '+' : ''}{ratingDelta} Elo</strong> | 
+              Tokens Awarded: <strong style={{ color: '#fbbf24' }}>🪙 {earnedCoins} Coins</strong>
+            </p>
+          </div>
+        )}
 
         <div style={hero}>
           <div>
@@ -1252,7 +1354,7 @@ export default function ContestRoomPage() {
                 )}
               </div>
               <div style={{ padding: 12, borderTop: '1px solid #334155', display: 'flex', gap: 8 }}>
-                <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ ...smallInput, margin: 0, flex: 1 }} />
+                <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleSendMessage(); }} placeholder="Type a message..." style={{ ...smallInput, margin: 0, flex: 1 }} />
                 <button onClick={handleSendMessage} style={{ ...primaryButton, width: 'auto', margin: 0 }}>Send</button>
               </div>
             </motion.div>

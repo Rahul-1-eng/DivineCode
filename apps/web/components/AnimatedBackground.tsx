@@ -7,7 +7,7 @@ export default function AnimatedBackground() {
 
   useEffect(() => {
     if (!mountRef.current) return;
-    
+
     // Check if user prefers reduced motion (accessibility)
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -15,112 +15,84 @@ export default function AnimatedBackground() {
     const height = window.innerHeight;
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-    camera.position.z = 60;
+    // Deep dark void core to ensure perfect typography contrast
+    scene.background = new THREE.Color('#020617'); 
+    scene.fog = new THREE.FogExp2('#020617', 0.007);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    // Cap pixel ratio for performance
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
+    camera.position.z = 80;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    // Cap pixel ratio for performance while keeping it sharp
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(width, height);
     mountRef.current.appendChild(renderer.domElement);
 
-    // --- Particle field ---
-    const PARTICLE_COUNT = width < 700 ? 120 : 220;
-    const FIELD = 140; 
+    // --- Cosmic Neural Mesh Dataset (The Vortex) ---
+    const particleCount = width < 768 ? 1500 : 3500;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
 
-    const positions = new Float32Array(PARTICLE_COUNT * 3);
-    const velocities: { x: number, y: number, z: number }[] = [];
-    
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      positions[i * 3]     = (Math.random() - 0.5) * FIELD;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * FIELD * 0.6;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * FIELD * 0.6 - 20;
-      velocities.push({
-        x: (Math.random() - 0.5) * 0.02,
-        y: (Math.random() - 0.5) * 0.02,
-        z: (Math.random() - 0.5) * 0.02
-      });
+    const baseColor = new THREE.Color('#22d3ee');   // Cyan/Blue
+    const accentColor = new THREE.Color('#818cf8'); // Indigo/Purple
+
+    for (let i = 0; i < particleCount; i++) {
+      // Create structural data streams along a cylindrical/wormhole coordinate system
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 15 + Math.random() * 75;
+      const depth = (Math.random() - 0.5) * 250;
+
+      positions[i * 3] = Math.cos(angle) * radius;
+      positions[i * 3 + 1] = Math.sin(angle) * radius;
+      positions[i * 3 + 2] = depth;
+
+      // Mix colors for a glowing ethereal gradient look
+      const mixedColor = baseColor.clone().lerp(accentColor, Math.random());
+      colors[i * 3] = mixedColor.r;
+      colors[i * 3 + 1] = mixedColor.g;
+      colors[i * 3 + 2] = mixedColor.b;
     }
 
-    const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-    // Procedural glow texture
-    const size = 64;
+    // Procedural glow shader map texture (Makes dots look like glowing orbs)
+    const size = 32;
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = size;
     const ctx = canvas.getContext('2d')!;
-    const grad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
-    grad.addColorStop(0, 'rgba(148, 163, 184, 0.4)'); // Dimmer center
-    grad.addColorStop(0.35, 'rgba(30, 58, 138, 0.2)'); // Darker blue edge
-    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    
-    ctx.fillStyle = grad;
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    gradient.addColorStop(0.3, 'rgba(34, 211, 238, 0.6)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, size, size);
-    
-    const particleMaterial = new THREE.PointsMaterial({
-      size: 1.6,
+
+    const material = new THREE.PointsMaterial({
+      size: 1.4,
       map: new THREE.CanvasTexture(canvas),
+      vertexColors: true,
       transparent: true,
-      depthWrite: false,
+      opacity: 0.85,
       blending: THREE.AdditiveBlending,
-      color: new THREE.Color('#7dd3fc')
+      depthWrite: false
     });
-    
-    const points = new THREE.Points(geometry, particleMaterial);
-    scene.add(points);
 
-    // --- Connecting Lines ---
-    const lineGeometry = new THREE.BufferGeometry();
-    const MAX_LINE_VERTS = PARTICLE_COUNT * 12; 
-    const linePositions = new Float32Array(MAX_LINE_VERTS * 3);
-    lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
-    
-    const lineMaterial = new THREE.LineBasicMaterial({
-      color: new THREE.Color('#334155'),
-      transparent: true,
-      opacity: 0.35
-    });
-    const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
-    scene.add(lines);
-
-    const LINK_DIST = 16;
-
-    const updateLinks = () => {
-      let vertexIndex = 0;
-      const pos = geometry.attributes.position.array as Float32Array;
-      for (let i = 0; i < PARTICLE_COUNT; i++) {
-        for (let j = i + 1; j < PARTICLE_COUNT; j++) {
-          const dx = pos[i*3] - pos[j*3];
-          const dy = pos[i*3+1] - pos[j*3+1];
-          const dz = pos[i*3+2] - pos[j*3+2];
-          const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-          
-          if (dist < LINK_DIST && vertexIndex < MAX_LINE_VERTS - 2) {
-            linePositions[vertexIndex*3]     = pos[i*3];
-            linePositions[vertexIndex*3 + 1] = pos[i*3+1];
-            linePositions[vertexIndex*3 + 2] = pos[i*3+2];
-            vertexIndex++;
-            linePositions[vertexIndex*3]     = pos[j*3];
-            linePositions[vertexIndex*3 + 1] = pos[j*3+1];
-            linePositions[vertexIndex*3 + 2] = pos[j*3+2];
-            vertexIndex++;
-          }
-        }
-      }
-      lineGeometry.setDrawRange(0, vertexIndex);
-      lineGeometry.attributes.position.needsUpdate = true;
-    };
+    const particleMesh = new THREE.Points(geometry, material);
+    scene.add(particleMesh);
 
     // --- Interaction & Animation ---
-    let mouseX = 0, mouseY = 0;
-    let targetRotX = 0, targetRotY = 0;
+    let mouseX = 0;
+    let mouseY = 0;
+    let targetX = 0;
+    let targetY = 0;
     let animationFrameId: number;
     let running = true;
 
-    const onMouseMove = (e: MouseEvent) => {
-      mouseX = (e.clientX / window.innerWidth) * 2 - 1;
-      mouseY = (e.clientY / window.innerHeight) * 2 - 1;
+    const onMouseMove = (event: MouseEvent) => {
+      mouseX = (event.clientX - width / 2) * 0.05;
+      mouseY = (event.clientY - height / 2) * 0.05;
     };
 
     const onResize = () => {
@@ -137,35 +109,32 @@ export default function AnimatedBackground() {
     window.addEventListener('resize', onResize);
     document.addEventListener('visibilitychange', onVisibilityChange);
 
-    let frame = 0;
     const animate = () => {
       if (!running) {
         animationFrameId = requestAnimationFrame(animate);
         return;
       }
-      
-      frame++;
 
       if (!reduceMotion) {
-        const pos = geometry.attributes.position.array as Float32Array;
-        for (let i = 0; i < PARTICLE_COUNT; i++) {
-          pos[i*3]     += velocities[i].x;
-          pos[i*3 + 1] += velocities[i].y;
-          pos[i*3 + 2] += velocities[i].z;
+        // Ethereal auto-rotation coupled with physics-based mouse damping
+        targetX += (mouseX - targetX) * 0.05;
+        targetY += (mouseY - targetY) * 0.05;
 
-          if (Math.abs(pos[i*3])     > FIELD/2)        velocities[i].x *= -1;
-          if (Math.abs(pos[i*3+1])   > FIELD*0.6/2)    velocities[i].y *= -1;
-          if (Math.abs(pos[i*3+2]+20)> FIELD*0.6/2)    velocities[i].z *= -1;
+        particleMesh.rotation.z += 0.0015;
+        particleMesh.rotation.x = targetY * 0.005;
+        particleMesh.rotation.y = targetX * 0.005;
+
+        const posArray = geometry.attributes.position.array as Float32Array;
+        for (let i = 0; i < particleCount; i++) {
+          // Drive data streams forward through space
+          posArray[i * 3 + 2] += 0.65;
+          
+          // Reset particles that go past the camera back into the deep fog
+          if (posArray[i * 3 + 2] > 120) {
+            posArray[i * 3 + 2] = -130;
+          }
         }
         geometry.attributes.position.needsUpdate = true;
-
-        if (frame % 4 === 0) updateLinks();
-
-        targetRotY += (mouseX * 0.25 - targetRotY) * 0.03;
-        targetRotX += (-mouseY * 0.15 - targetRotX) * 0.03;
-        scene.rotation.y = targetRotY;
-        scene.rotation.x = targetRotX;
-        points.rotation.z += 0.0006;
       }
 
       renderer.render(scene, camera);
@@ -173,7 +142,6 @@ export default function AnimatedBackground() {
     };
 
     if (reduceMotion) {
-      updateLinks();
       renderer.render(scene, camera);
     } else {
       animate();
@@ -186,14 +154,12 @@ export default function AnimatedBackground() {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       cancelAnimationFrame(animationFrameId);
       
-      if (mountRef.current) {
+      if (mountRef.current && renderer.domElement) {
         mountRef.current.removeChild(renderer.domElement);
       }
       
       geometry.dispose();
-      particleMaterial.dispose();
-      lineGeometry.dispose();
-      lineMaterial.dispose();
+      material.dispose();
       renderer.dispose();
     };
   }, []);
