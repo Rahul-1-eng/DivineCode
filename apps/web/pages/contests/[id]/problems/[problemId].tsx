@@ -3,8 +3,8 @@ import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
 import { io, Socket } from 'socket.io-client';
-import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
+import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../../../../lib/api';
 
 export async function getServerSideProps() { return { props: {} }; }
@@ -519,7 +519,7 @@ export default function ContestProblemWorkspace() {
   const activeMcqPrompt = mcqData?.prompt || problem?.customDescription || problem?.titleSnapshot || 'No description provided';
   const activeMcqOptions = Array.isArray(mcqData?.options) ? mcqData.options : [];
 
-  return (
+ return (
     <main style={{...page, minHeight: '100vh', height: '100vh', overflow: 'hidden'}}>
       <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
       

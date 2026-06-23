@@ -271,12 +271,9 @@ useEffect(() => {
         </motion.div>
 
         <div style={{ display: 'flex', gap: 15, marginBottom: 25, borderBottom: '1px solid #1e293b', paddingBottom: 15 }}>
-          <button onClick={() => setActiveTab('coding')} style={activeTab === 'coding' ? activeTabStyle : inactiveTabStyle}>
-            Terminal & Coding Problems
-          </button>
-          <button onClick={() => setActiveTab('logical')} style={activeTab === 'logical' ? activeTabStyle : inactiveTabStyle}>
-            Logical & Reasoning Games
-          </button>
+          <button onClick={() => setActiveTab('coding')} style={activeTab === 'coding' ? activeTabStyle : inactiveTabStyle}>Terminal & Coding Problems</button>
+          <button onClick={() => setActiveTab('logical')} style={activeTab === 'logical' ? activeTabStyle : inactiveTabStyle}>Logical & Reasoning Games</button>
+          <button onClick={() => setActiveTab('community')} style={activeTab === 'community' ? activeTabStyle : inactiveTabStyle}>🌍 Community Hub</button>
         </div>
 <div style={{ display: 'flex', gap: 15, marginBottom: 25, borderBottom: '1px solid #1e293b', paddingBottom: 15 }}>
           <button onClick={() => setActiveTab('coding')} style={activeTab === 'coding' ? activeTabStyle : inactiveTabStyle}>Terminal & Coding Problems</button>
