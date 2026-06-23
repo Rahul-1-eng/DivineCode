@@ -33,6 +33,7 @@ import { adminRouter } from '../routes/adminRoutes';
 import { notificationRouter } from './notificationRoutes';
 import { authRouter } from './authRoutes';
 import { aiRouter } from './aiRoutes';
+import communityRoutes from './communityRoutes';
 
 const PLATFORM_OWNER_EMAIL = (process.env.PLATFORM_OWNER_EMAIL || '').trim().toLowerCase();
 
@@ -791,6 +792,8 @@ export function mountV2Routes(app: Express, io: Server) {
     res.status(statusFromError(error)).json({ ok: false, error: error.message || 'Unexpected V2 API error' });
   });
   
+
+  router.use('/community', communityRoutes);
   app.use('/api/v2/auth', authRouter);
   app.use('/api/v2/notifications', notificationRouter);
   app.use('/api/v2/admin', adminRouter);
