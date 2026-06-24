@@ -1,4 +1,4 @@
-import { CSSProperties, useEffect, useState, useRef } from 'react';
+import { CSSProperties, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import toast, { Toaster } from 'react-hot-toast';
@@ -34,7 +34,7 @@ export default function SubmitPage() {
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [verdict, setVerdict] = useState<any>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(120); // 2 minute default timer for MCQs
+  const [timeLeft, setTimeLeft] = useState(120);
   
   useEffect(() => {
     if (!contestId || status === 'loading') return;
@@ -44,7 +44,6 @@ export default function SubmitPage() {
         setContest(data); 
         const p = data.problems?.find((p: any) => p.id === problemId);
         
-        // 👉 FIX: Map the backend's 'interviewQuestion' to frontend's 'mcqData'
         if (p && p.interviewQuestion) {
           p.mcqData = p.interviewQuestion;
         }
@@ -63,7 +62,14 @@ export default function SubmitPage() {
   const isMCQ = !!problem?.interviewQuestionId;
   const requiresRedirect = problem?.requiresRedirect === true || Boolean(problem?.externalUrl);
 
-  // MCQ Timer Logic
+  const playSuccessAudio = () => {
+    try {
+      const audio = new Audio('/accepted.mp3');
+      audio.volume = 0.8;
+      audio.play().catch(() => {});
+    } catch (e) {}
+  };
+
   useEffect(() => {
     if (isMCQ && timeLeft > 0) {
       const timer = setTimeout(() => setTimeLeft(prev => prev - 1), 1000);
@@ -75,13 +81,11 @@ export default function SubmitPage() {
   }, [isMCQ, timeLeft, submitting, verdict]);
 
   async function submitCode() {
-    // 👉 External Platform Redirection Logic
    if (requiresRedirect && problem?.externalUrl) {
-    // Optionally trigger a silent 'Started' submission to track user activity
     toast.success("Redirecting to external platform...");
-    window.location.href = problem.externalUrl; // Use this to force redirect in same tab if preferred, or window.open
+    window.location.href = problem.externalUrl;
     return;
-}
+   }
 
     setSubmitting(true);
     try {
@@ -94,7 +98,17 @@ export default function SubmitPage() {
       if (res.ok) {
          const judge = await fetch(`${API_V2_BASE_URL}/submissions/${data.id}/judge?wait=true`, { method: 'POST', headers: viewerHeaders(session) });
          const jData = await judge.json();
-         setVerdict({ verdict: jData.submission.verdict, message: jData.submission.judgeMessage, testResults: jData.testResults });
+         
+         const finalVerdict = jData.submission.verdict;
+         setVerdict({ verdict: finalVerdict, message: jData.submission.judgeMessage, testResults: jData.testResults });
+         
+         if (finalVerdict === 'ACCEPTED') {
+             playSuccessAudio();
+             toast.success('System Tests Passed!', { icon: '🏆' });
+         } else {
+             toast.error('Testcases Failed.');
+         }
+
       } else {
          toast.error(data.error || "Submission failed");
       }
@@ -114,14 +128,12 @@ export default function SubmitPage() {
   </div>
    
   <div style={problemArea}>
-    {/* 1. Display Prompt/Description */}
     <h2 style={{ color: '#fff' }}>{isMCQ ? problem?.mcqData?.prompt : 'Description'}</h2>
     
     {!isMCQ && (
        <div dangerouslySetInnerHTML={{ __html: proxiedHtml || problem?.customDescription || problem?.description || problem?.problem?.description || 'No description provided.' }} />
     )}
 
-    {/* 2. Display Image if exists for both MCQ and Coding */}
     {problem?.imageUrl && (
       <img src={problem.imageUrl} alt="Problem" style={{ width: '100%', borderRadius: 8, marginTop: 15 }} />
     )}
@@ -159,7 +171,7 @@ export default function SubmitPage() {
   </button>
   
   {verdict && (
-    <div style={{...verdictBox, borderColor: verdict.verdict === 'ACCEPTED' ? '#22c55e' : '#ef4444'}}>
+    <div style={{...verdictBox, borderColor: verdict.verdict === 'ACCEPTED' ? '#22c55e' : '#ef4444', background: verdict.verdict === 'ACCEPTED' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)'}}>
       <h3 style={{ color: verdict.verdict === 'ACCEPTED' ? '#22c55e' : '#ef4444' }}>{verdict.verdict}</h3>
       <p>{verdict.message}</p>
     </div>

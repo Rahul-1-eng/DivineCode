@@ -67,15 +67,24 @@ export default function ActivityHeatmap({ submissions = [] }: { submissions: any
   };
 
   return (
-    <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 16, padding: 24, marginTop: 20 }}>
-      <h3 style={{ margin: '0 0 16px', color: '#e2e8f0', fontSize: 18, display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span>🔥</span> Activity Heatmap
+    <div className="glass-panel" style={{ borderRadius: 24, padding: 24, margin: 0, border: '1px solid rgba(255,255,255,0.05)' }}>
+      <h3 style={{ margin: '0 0 16px', color: '#e2e8f0', fontSize: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span>🔥</span> Solving Heatmap
       </h3>
       
-      <div style={{ display: 'flex', gap: 20, marginBottom: 20 }}>
-        <div><div style={{ fontSize: 12, color: '#94a3b8', textTransform: 'uppercase' }}>Current Streak</div><div style={{ fontSize: 24, fontWeight: 'bold', color: '#38bdf8' }}>{currentStreak} <span style={{fontSize: 14, color: '#64748b', fontWeight: 'normal'}}>days</span></div></div>
-        <div><div style={{ fontSize: 12, color: '#94a3b8', textTransform: 'uppercase' }}>Max Streak</div><div style={{ fontSize: 24, fontWeight: 'bold', color: '#eef2ff' }}>{maxStreak} <span style={{fontSize: 14, color: '#64748b', fontWeight: 'normal'}}>days</span></div></div>
-        <div><div style={{ fontSize: 12, color: '#94a3b8', textTransform: 'uppercase' }}>Active Days</div><div style={{ fontSize: 24, fontWeight: 'bold', color: '#4ade80' }}>{activeDays} <span style={{fontSize: 14, color: '#64748b', fontWeight: 'normal'}}>days</span></div></div>
+      <div style={{ display: 'flex', gap: 24, marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>Current Streak</div>
+          <div style={{ fontSize: 22, fontWeight: 'bold', color: '#38bdf8' }}>{currentStreak} <span style={{fontSize: 13, color: '#64748b', fontWeight: 'normal'}}>days</span></div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>Max Streak</div>
+          <div style={{ fontSize: 22, fontWeight: 'bold', color: '#eef2ff' }}>{maxStreak} <span style={{fontSize: 13, color: '#64748b', fontWeight: 'normal'}}>days</span></div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>Active Days</div>
+          <div style={{ fontSize: 22, fontWeight: 'bold', color: '#4ade80' }}>{activeDays} <span style={{fontSize: 13, color: '#64748b', fontWeight: 'normal'}}>days</span></div>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(52, 1fr)', gridAutoFlow: 'column', gridTemplateRows: 'repeat(7, 1fr)', gap: 4, overflowX: 'auto', paddingBottom: 10 }}>
@@ -90,12 +99,12 @@ export default function ActivityHeatmap({ submissions = [] }: { submissions: any
         ))}
       </div>
       
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 12, color: '#94a3b8' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 11, color: '#94a3b8' }}>
         <span>Less</span>
-        <div style={{ width: 12, height: 12, background: 'rgba(56, 189, 248, 0.05)', borderRadius: 3 }}></div>
-        <div style={{ width: 12, height: 12, background: 'rgba(56, 189, 248, 0.4)', borderRadius: 3 }}></div>
-        <div style={{ width: 12, height: 12, background: 'rgba(56, 189, 248, 0.7)', borderRadius: 3 }}></div>
-        <div style={{ width: 12, height: 12, background: 'rgba(56, 189, 248, 1)', borderRadius: 3 }}></div>
+        <div style={{ width: 10, height: 10, background: 'rgba(56, 189, 248, 0.05)', borderRadius: 2 }}></div>
+        <div style={{ width: 10, height: 10, background: 'rgba(56, 189, 248, 0.4)', borderRadius: 2 }}></div>
+        <div style={{ width: 10, height: 10, background: 'rgba(56, 189, 248, 0.7)', borderRadius: 2 }}></div>
+        <div style={{ width: 10, height: 10, background: 'rgba(56, 189, 248, 1)', borderRadius: 2 }}></div>
         <span>More</span>
       </div>
     </div>

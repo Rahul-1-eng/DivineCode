@@ -16,6 +16,7 @@ export default function ProblemWorkspace() {
   const [language, setLanguage] = useState('cpp');
   const [outputs, setOutputs] = useState<any[]>([]);
   const [running, setRunning] = useState(false);
+  const [isKitsMenuOpen, setIsKitsMenuOpen] = useState(false);
   
   const [workspaceTab, setWorkspaceTab] = useState<'problem' | 'video' | 'discuss'>('problem');
   const [consoleTab, setConsoleTab] = useState<'output' | 'mentor'>('output');
@@ -27,6 +28,21 @@ export default function ProblemWorkspace() {
   const [posts, setPosts] = useState([
     { author: 'RKS_Rider', message: 'If executing in O(N), ensure the sparse initialization bounds are checked properly to avoid segment errors.', timestamp: '1 hour ago' }
   ]);
+
+  // Pre-loaded Battle-Kits tailored for high-speed contest environments
+  const battleKits = [
+    { name: 'IICPC Standard IO Boilerplate', code: '#include <bits/stdc++.h>\nusing namespace std;\n\nvoid solve() {\n    // Implementation here\n}\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n    int t; cin >> t;\n    while(t--) solve();\n    return 0;\n}' },
+    { name: 'Segment Tree Template', code: '// Segment Tree (Point Update, Range Query)\nconst int N = 1e5+5;\nint tree[4*N];\n\nvoid build(int node, int start, int end) {\n    if(start == end) return;\n    int mid = (start + end) / 2;\n    build(2*node, start, mid);\n    build(2*node+1, mid+1, end);\n    tree[node] = tree[2*node] + tree[2*node+1];\n}' },
+    { name: 'Graph BFS/DFS Skeleton', code: 'vector<int> adj[100005];\nbool vis[100005];\n\nvoid dfs(int node) {\n    vis[node] = true;\n    for(int child : adj[node]) {\n        if(!vis[child]) dfs(child);\n    }\n}' }
+  ];
+
+  const playSuccessAudio = () => {
+    try {
+      const audio = new Audio('/accepted.mp3');
+      audio.volume = 0.6;
+      audio.play().catch(() => {}); // Catch prevents browser auto-play block errors
+    } catch (e) {}
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -45,15 +61,9 @@ export default function ProblemWorkspace() {
   const sampleData = useMemo(() => {
     if (!problem || !problem.testcases) return { input: '', output: '' };
     try {
-      const parsed = typeof problem.testcases === 'string' 
-        ? JSON.parse(problem.testcases) 
-        : problem.testcases;
-      
+      const parsed = typeof problem.testcases === 'string' ? JSON.parse(problem.testcases) : problem.testcases;
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return {
-          input: parsed[0].input || parsed[0].stdin || '',
-          output: parsed[0].expectedOutput || parsed[0].output || ''
-        };
+        return { input: parsed[0].input || parsed[0].stdin || '', output: parsed[0].expectedOutput || parsed[0].output || '' };
       }
     } catch (e) {
       console.error("Failed parsing testcase array on frontend:", e);
@@ -73,6 +83,12 @@ export default function ProblemWorkspace() {
       });
       const data = await res.json();
       setOutputs(data.results || []);
+
+      // Trigger Audio Gamification if all tests pass
+      const allAccepted = data.results?.length > 0 && data.results.every((r: any) => r.verdict === 'ACCEPTED');
+      if (allAccepted) {
+        playSuccessAudio();
+      }
     } catch (err) { 
       alert('Failed to connect to execution server.'); 
     } finally { 
@@ -204,15 +220,48 @@ export default function ProblemWorkspace() {
       {/* Editor & AI Workspace Plane (Right Side) */}
       <section style={{ width: '55%', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: 12, background: '#020617', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b' }}>
-          <select value={language} onChange={e => setLanguage(e.target.value)} style={{ background: '#0f172a', color: '#fff', border: '1px solid #334155', padding: '8px 12px', borderRadius: 8, outline: 'none', cursor: 'pointer' }}>
-            <option value="cpp">C++ (GCC 9.2)</option>
-            <option value="python">Python 3</option>
-            <option value="c">C</option>
-          </select>
-          <button onClick={runCode} disabled={running || problem?.error} style={{ background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', border: 'none', padding: '8px 20px', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}>{running ? 'Running...' : 'Run Code ▶'}</button>
+          
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <select value={language} onChange={e => setLanguage(e.target.value)} style={{ background: '#0f172a', color: '#fff', border: '1px solid #334155', padding: '8px 12px', borderRadius: 8, outline: 'none', cursor: 'pointer' }}>
+              <option value="cpp">C++ (GCC 9.2)</option>
+              <option value="python">Python 3</option>
+              <option value="c">C</option>
+            </select>
+
+            {/* Battle-Kits Injector */}
+            <div style={{ position: 'relative' }}>
+              <button 
+                onClick={() => setIsKitsMenuOpen(!isKitsMenuOpen)}
+                style={{ background: 'rgba(56,189,248,0.1)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.3)', padding: '8px 16px', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}>
+                🎒 Battle-Kits ▼
+              </button>
+              
+              {isKitsMenuOpen && (
+                <div style={{ position: 'absolute', top: 45, left: 0, width: 280, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.5)', zIndex: 100, overflow: 'hidden' }}>
+                  <div style={{ padding: '10px 15px', background: '#020617', borderBottom: '1px solid #1e293b', fontSize: 12, color: '#94a3b8', fontWeight: 'bold' }}>INJECT TEMPLATE</div>
+                  {battleKits.map((kit, i) => (
+                    <button 
+                      key={i} 
+                      onClick={() => { setCode(kit.code); setIsKitsMenuOpen(false); }}
+                      style={{ display: 'block', width: '100%', padding: '12px 15px', textAlign: 'left', background: 'transparent', border: 'none', color: '#e2e8f0', cursor: 'pointer', borderBottom: '1px solid #1e293b' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(56,189,248,0.1)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      ⚡ {kit.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <button onClick={runCode} disabled={running || problem?.error} style={{ background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', border: 'none', padding: '8px 24px', borderRadius: 8, fontWeight: 900, cursor: 'pointer', boxShadow: '0 0 15px rgba(34,211,238,0.3)' }}>
+            {running ? 'Compiling...' : 'Run Code ▶'}
+          </button>
         </div>
+        
         <div style={{ height: '60%' }}>
-          <Editor height="100%" theme="vs-dark" language={monacoLanguage} value={code} onChange={v => setCode(v || '')} options={{ fontSize: 14, minimap: { enabled: false }, padding: { top: 16 } }} />
+          <Editor height="100%" theme="vs-dark" language={monacoLanguage} value={code} onChange={v => setCode(v || '')} options={{ fontSize: 15, minimap: { enabled: false }, padding: { top: 16 } }} />
         </div>
         
         <div style={{ height: '40%', background: '#020617', borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column' }}>

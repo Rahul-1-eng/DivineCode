@@ -67,6 +67,12 @@ const io = new Server(server, {
   } 
 });
 
+// ==========================================
+// 🚀 ATTACH SOCKET SERVER TO EXPRESS APP
+// This allows other route files to broadcast events using req.app.get('io')
+// ==========================================
+app.set('io', io);
+
 // --- MODULE INITIALIZATION ---
 startQueueWorkers(io);
 setupDuelSockets(io);

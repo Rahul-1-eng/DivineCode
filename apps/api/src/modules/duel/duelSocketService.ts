@@ -1,8 +1,8 @@
 import { Server, Socket } from 'socket.io';
 import { prisma } from '../../prisma/client';
 
-// Added attempts tracking
 type Player = { id: string; name: string; socket: Socket; score: number; attempts: number };
+type QueuedPlayer = Player & { queuedAt: number; rating: number };
 type DuelState = {
   roomId: string;
   players: Player[];
@@ -12,16 +12,49 @@ type DuelState = {
 };
 
 export function setupDuelSockets(io: Server) {
-  let waitingPlayer: Player | null = null;
+  let matchmakingQueue: QueuedPlayer[] = [];
   const customWaitingRooms = new Map<string, { host: Player, customQuestionIds?: string[] }>(); 
   const activeRooms = new Map<string, DuelState>();
+
+  // Active Elo Matchmaking Engine Loop (Runs every 2 seconds)
+  setInterval(async () => {
+    if (matchmakingQueue.length < 2) return;
+
+    const now = Date.now();
+    // Sort queue by wait time (longest waiting first)
+    matchmakingQueue.sort((a, b) => a.queuedAt - b.queuedAt);
+
+    for (let i = 0; i < matchmakingQueue.length; i++) {
+      const p1 = matchmakingQueue[i];
+      if (!p1) continue;
+
+      // Expand rating bounds based on how long they've waited (+/- 50 Elo per second waited)
+      const waitTimeSecs = (now - p1.queuedAt) / 1000;
+      const acceptableDelta = Math.max(100, waitTimeSecs * 50);
+
+      for (let j = i + 1; j < matchmakingQueue.length; j++) {
+        const p2 = matchmakingQueue[j];
+        if (!p2) continue;
+
+        const ratingDelta = Math.abs(p1.rating - p2.rating);
+        
+        if (ratingDelta <= acceptableDelta) {
+          matchmakingQueue.splice(j, 1);
+          matchmakingQueue.splice(i, 1);
+          i--; 
+          
+          await initializeMatch(p1, p2);
+          break;
+        }
+      }
+    }
+  }, 2000);
 
   const emitState = (roomId: string) => {
     const state = activeRooms.get(roomId);
     if (!state) return;
 
     const currentQ = state.questions[state.currentQuestionIndex];
-    // Don't leak sockets to the client
     const safePlayers = state.players.map(p => ({ id: p.id, name: p.name, score: p.score, attempts: p.attempts }));
 
     io.to(roomId).emit('duel:state', {
@@ -39,7 +72,6 @@ export function setupDuelSockets(io: Server) {
     });
   };
 
- // Replace just the initializeMatch function in duelSocketService.ts
   async function initializeMatch(p1: Player, p2: Player, customQuestionIds?: string[]) {
     const roomId = `duel_${Date.now()}`;
     p1.socket.join(roomId);
@@ -60,7 +92,6 @@ export function setupDuelSockets(io: Server) {
 
       if (selectedQuestions.length === 0) throw new Error("No questions available");
 
-      // 👉 FIX: Map correctIndex from the array safely
       selectedQuestions = selectedQuestions.map((q: any) => ({
         ...q,
         correctIndex: Array.isArray(q.correctIndices) && q.correctIndices.length > 0
@@ -87,19 +118,36 @@ export function setupDuelSockets(io: Server) {
       p2.socket.emit('duel:waiting', { message: 'Matchmaking failed. Try again.' });
     }
   }
+
   io.on('connection', (socket: Socket) => {
     
-    // --- MATCHMAKING EVENTS ---
-    socket.on('duel:join', async ({ name }) => {
-      if (waitingPlayer && waitingPlayer.socket.id !== socket.id) {
-        const p1 = waitingPlayer;
-        const p2 = { id: socket.id, name, socket, score: 0, attempts: 0 };
-        waitingPlayer = null;
-        await initializeMatch(p1, p2);
-      } else {
-        waitingPlayer = { id: socket.id, name, socket, score: 0, attempts: 0 };
-        socket.emit('duel:waiting', { message: 'Waiting for a worthy opponent...' });
+    // --- ADVANCED MATCHMAKING EVENT ---
+    socket.on('duel:join', async ({ name, userEmail }) => {
+      // Prevent duplicate queueing
+      if (matchmakingQueue.some(p => p.id === socket.id)) return;
+
+      let playerRating = 1200; // Default Elo
+
+      // Fetch actual Elo rating from database if email is provided
+      if (userEmail) {
+        try {
+          const user = await prisma.user.findUnique({ where: { email: userEmail } });
+          if (user) playerRating = user.duelRating || 1200;
+        } catch (e) { console.error("Elo fetch failed"); }
       }
+
+      const queuedPlayer: QueuedPlayer = {
+        id: socket.id,
+        name,
+        socket,
+        score: 0,
+        attempts: 0,
+        rating: playerRating,
+        queuedAt: Date.now()
+      };
+
+      matchmakingQueue.push(queuedPlayer);
+      socket.emit('duel:waiting', { message: `Queued. Searching for opponents near Rating: ${playerRating}...` });
     });
 
     socket.on('duel:createCustom', ({ name, questionIds }) => {
@@ -201,7 +249,9 @@ export function setupDuelSockets(io: Server) {
     });
 
     socket.on('disconnect', () => {
-      if (waitingPlayer?.id === socket.id) waitingPlayer = null; 
+      // Remove from matchmaking queue
+      matchmakingQueue = matchmakingQueue.filter(p => p.id !== socket.id);
+
       for (const [code, room] of customWaitingRooms.entries()) {
         if (room.host.id === socket.id) customWaitingRooms.delete(code);
       }

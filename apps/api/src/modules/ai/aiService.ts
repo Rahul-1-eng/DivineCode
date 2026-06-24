@@ -21,7 +21,6 @@ function sanitizeDescriptionForPrompt(html: string) {
   return html.replace(/<img[^>]*src="data:image[^>]*>/g, '[Image omitted for token limits]');
 }
 
-// 👉 FIX: Replaced dead model. Controlled via ENV or safe default.
 const getAiModel = () => process.env.AI_MODEL || 'gemini-3.5-flash';
 
 export async function analyzeSubmissionLogic(submissionId: string, problemDescription: string, userCode: string) {
@@ -200,5 +199,45 @@ export async function askAiChatbot(query: string): Promise<string> {
   } catch (err: any) {
     console.error("AI Fallback Error:", err.response?.data || err.message);
     return "AI Service Error: Failed to generate a response. The model may be rate-limited or unavailable.";
+  }
+}
+
+// --------------------------------------------------------
+// NEW: FAANG Technical Interview AI Engine
+// --------------------------------------------------------
+export async function conductAiInterview(problemPrompt: string, userResponse: string, chatHistory: any[] = []) {
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
+
+  const historyString = chatHistory.map(msg => `${msg.role.toUpperCase()}: ${msg.text}`).join('\n');
+
+  const prompt = `You are a senior FAANG technical interviewer. 
+  The candidate is answering the following question: "${problemPrompt}"
+  
+  Previous Conversation:
+  ${historyString}
+
+  Candidate's Latest Response: "${userResponse}"
+
+  Evaluate the candidate's latest response. 
+  1. Provide constructive, conversational feedback.
+  2. If their answer is incomplete or mathematically unoptimized, ask a follow-up question to guide them.
+  3. If they fully solved it, congratulate them.
+  4. Assign a current progress score from 0 to 100.
+  5. Set "isPassed" to true ONLY if they have thoroughly answered the core concept optimally.
+
+  Respond strictly with a JSON object. Format: 
+  {"feedback": "...", "followUpQuestion": "...", "score": 85, "isPassed": false}`;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
+    const { data } = await axios.post(url, { 
+      contents: [{ parts: [{ text: prompt }] }], 
+      generationConfig: { responseMimeType: "application/json" } 
+    });
+    return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
+  } catch (error: any) {
+    console.error("AI Interview Error:", error.response?.data || error.message);
+    throw new Error("Failed to process mock interview response.");
   }
 }

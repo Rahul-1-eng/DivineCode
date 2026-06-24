@@ -6,8 +6,7 @@ import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-// Example usage in a component
-const socket = io(process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000');
+
 export default function NotificationBell() {
   const { data: session } = useSession();
   const router = useRouter();
@@ -16,7 +15,6 @@ export default function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown if clicked outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsOpen(false);
@@ -39,12 +37,10 @@ export default function NotificationBell() {
     } catch (err) {}
   };
 
-  // Poll every 30 seconds
-useEffect(() => {
+  useEffect(() => {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 30000);
     
-    // Connect to the socket for real-time updates
     const socket = io(API_BASE_URL, { transports: ['websocket'] });
     
     if (session?.user?.email) {
@@ -55,7 +51,7 @@ useEffect(() => {
        socket.on('new_notification', (newNotif) => {
          setNotifications(prev => [newNotif, ...prev]);
          setUnreadCount(prev => prev + 1);
-         toast.success(newNotif.title); // Pop a toast on screen
+         toast.success(newNotif.title);
        });
     }
 
@@ -93,13 +89,24 @@ useEffect(() => {
 
   return (
     <div style={{ position: 'relative', display: 'inline-block' }} ref={dropdownRef}>
+      <style>{`
+        @keyframes bell-pulse {
+          0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+          70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .has-notifications {
+          animation: bell-pulse 2s infinite;
+        }
+      `}</style>
+      
       <button 
         onClick={() => setIsOpen(!isOpen)} 
         style={{ background: 'transparent', border: 'none', fontSize: 24, cursor: 'pointer', position: 'relative', padding: 0 }}
       >
         🔔
         {unreadCount > 0 && (
-          <span style={{ position: 'absolute', top: -5, right: -5, background: '#ef4444', color: '#fff', fontSize: 11, fontWeight: 'bold', width: 18, height: 18, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #0f172a' }}>
+          <span className="has-notifications" style={{ position: 'absolute', top: -5, right: -5, background: '#ef4444', color: '#fff', fontSize: 11, fontWeight: 'bold', width: 18, height: 18, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #0f172a' }}>
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
@@ -111,9 +118,9 @@ useEffect(() => {
             initial={{ opacity: 0, y: 10, scale: 0.95 }} 
             animate={{ opacity: 1, y: 0, scale: 1 }} 
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            style={{ position: 'absolute', top: 45, right: 0, width: 320, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, boxShadow: '0 20px 40px rgba(0,0,0,0.5)', overflow: 'hidden', zIndex: 999 }}
+            style={{ position: 'absolute', top: 45, right: 0, width: 320, background: 'rgba(15, 23, 42, 0.95)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, boxShadow: '0 20px 40px rgba(0,0,0,0.5)', overflow: 'hidden', zIndex: 999 }}
           >
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid #1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(2, 6, 23, 0.5)' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(2, 6, 23, 0.5)' }}>
               <strong style={{ color: '#eef2ff' }}>Notifications</strong>
               {unreadCount > 0 && (
                 <button onClick={markAllRead} style={{ background: 'transparent', border: 'none', color: '#38bdf8', fontSize: 12, cursor: 'pointer' }}>Mark all read</button>
@@ -128,7 +135,7 @@ useEffect(() => {
                   <div 
                     key={notif.id} 
                     onClick={() => markAsRead(notif.id, notif.link)}
-                    style={{ padding: '12px 16px', borderBottom: '1px solid #1e293b', cursor: 'pointer', background: notif.isRead ? 'transparent' : 'rgba(56, 189, 248, 0.05)', display: 'flex', gap: 12, alignItems: 'flex-start', transition: '0.2s' }}
+                    style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', background: notif.isRead ? 'transparent' : 'rgba(56, 189, 248, 0.05)', display: 'flex', gap: 12, alignItems: 'flex-start', transition: '0.2s' }}
                     onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(30, 41, 59, 0.8)'}
                     onMouseLeave={(e) => e.currentTarget.style.background = notif.isRead ? 'transparent' : 'rgba(56, 189, 248, 0.05)'}
                   >

@@ -6,6 +6,9 @@ const COINS_PER_PERSONAL_SOLVE = 50;
 const COINS_PER_GROUP_SOLVE = 20;
 const BASE_PARTICIPATION_COINS = 10;
 
+// ==========================================
+// 1. CONTEST REWARDS & RATING LOGIC
+// ==========================================
 export async function processContestRewards(contestId: string) {
   console.log(`[REWARD ENGINE] Starting reward processing for contest: ${contestId}`);
 
@@ -100,7 +103,6 @@ export async function processContestRewards(contestId: string) {
       }
 
       // 4. Commit DB Updates
-    // 4. Commit DB Updates
       await tx.user.update({
         where: { id: pA.userId! },
         data: {
@@ -109,7 +111,6 @@ export async function processContestRewards(contestId: string) {
         }
       });
 
-      // ADD THIS NOTIFICATION BLOCK:
       await tx.notification.create({
         data: {
           userId: pA.userId!,
@@ -133,4 +134,75 @@ export async function processContestRewards(contestId: string) {
     console.log(`[REWARD ENGINE] Successfully finished processing rewards.`);
     return { success: true, processedCount: participants.length };
   }, { timeout: 30000 });
+}
+
+
+// ==========================================
+// 2. 1v1 DUEL ELO & REWARD LOGIC
+// ==========================================
+
+/**
+ * Calculates the expected win probability of Player A against Player B.
+ */
+function getExpectedScore(ratingA: number, ratingB: number): number {
+  return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
+}
+
+/**
+ * Updates the Elo ratings and awards coins for two players after a 1v1 Duel Match.
+ */
+export async function processDuelEloUpdate(winnerId: string, loserId: string, duelId: string) {
+  try {
+    const winner = await prisma.user.findUnique({ where: { id: winnerId } });
+    const loser = await prisma.user.findUnique({ where: { id: loserId } });
+
+    if (!winner || !loser) throw new Error("Could not find players to update ratings.");
+
+    const ratingWinner = winner.duelRating || 1200;
+    const ratingLoser = loser.duelRating || 1200;
+
+    const expectedWinner = getExpectedScore(ratingWinner, ratingLoser);
+    const expectedLoser = getExpectedScore(ratingLoser, ratingWinner);
+
+    const newRatingWinner = Math.round(ratingWinner + K_FACTOR * (1 - expectedWinner));
+    const newRatingLoser = Math.round(ratingLoser + K_FACTOR * (0 - expectedLoser));
+
+    const winnerDelta = newRatingWinner - ratingWinner;
+    const loserDelta = newRatingLoser - ratingLoser;
+
+    await prisma.$transaction([
+      // Update Winner
+      prisma.user.update({
+        where: { id: winnerId },
+        data: { duelRating: newRatingWinner, coins: { increment: 100 } }
+      }),
+      prisma.ratingHistory.create({
+        data: { userId: winnerId, eventType: 'DUEL', oldRating: ratingWinner, newRating: newRatingWinner, delta: winnerDelta, reason: 'Won 1v1 Duel', duelId: duelId }
+      }),
+      prisma.notification.create({
+        data: { userId: winnerId, title: "Duel Victory! 🏆", message: `You crushed it! Duel Rating: ${newRatingWinner} (+${winnerDelta}). Earned 100 coins.`, type: "SUCCESS", link: "/duel" }
+      }),
+
+      // Update Loser
+      prisma.user.update({
+        where: { id: loserId },
+        data: { duelRating: newRatingLoser }
+      }),
+      prisma.ratingHistory.create({
+        data: { userId: loserId, eventType: 'DUEL', oldRating: ratingLoser, newRating: newRatingLoser, delta: loserDelta, reason: 'Lost 1v1 Duel', duelId: duelId }
+      }),
+      prisma.notification.create({
+        data: { userId: loserId, title: "Duel Defeat ⚔️", message: `You were bested. Duel Rating dropped to ${newRatingLoser} (${loserDelta}). Keep practicing!`, type: "WARNING", link: "/duel" }
+      })
+    ]);
+
+    return {
+      winner: { old: ratingWinner, new: newRatingWinner, delta: winnerDelta },
+      loser: { old: ratingLoser, new: newRatingLoser, delta: loserDelta }
+    };
+
+  } catch (error) {
+    console.error("[Elo Rating Error]:", error);
+    throw new Error("Failed to process Elo updates.");
+  }
 }

@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
+import { conductAiInterview } from '../modules/ai/aiService';
+
 export const interviewRouter = Router();
 
 // GET all tracks
@@ -18,9 +20,9 @@ interviewRouter.get('/tracks', async (req, res) => {
 // GET user progress
 interviewRouter.get('/progress', async (req, res) => {
   try {
-const viewer = await resolvedViewerFromRequest(req, true);
-const email = viewer.email;
-    if (!email) return res.json([]); // Return empty array if guest
+    const viewer = await resolvedViewerFromRequest(req, true);
+    const email = viewer.email;
+    if (!email) return res.json([]); 
     
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.json([]);
@@ -37,8 +39,8 @@ const email = viewer.email;
 // POST update progress (Mark as REVIEWING, MASTERED, etc)
 interviewRouter.post('/progress/:questionId', async (req, res) => {
   try {
-const viewer = await resolvedViewerFromRequest(req, true);
-const email = viewer.email;
+    const viewer = await resolvedViewerFromRequest(req, true);
+    const email = viewer.email;
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
     const user = await prisma.user.findUnique({ where: { email } });
@@ -88,8 +90,8 @@ interviewRouter.get('/questions', async (req, res) => {
 // ADMIN ROUTE: GET all pending questions
 interviewRouter.get('/pending', async (req, res) => {
   try {
-const viewer = await resolvedViewerFromRequest(req, true);
-const email = viewer.email;
+    const viewer = await resolvedViewerFromRequest(req, true);
+    const email = viewer.email;
     const user = await prisma.user.findUnique({ where: { email } });
     
     if (!user || user.role !== 'ADMIN') {
@@ -102,7 +104,6 @@ const email = viewer.email;
       orderBy: { createdAt: 'asc' }
     });
     
-    // Map indices so the frontend logic remains unified
     const mappedPending = pendingQuestions.map(q => ({
       ...q,
       correctIndex: q.correctIndices && q.correctIndices.length > 0 ? q.correctIndices[0] : 0
@@ -117,8 +118,8 @@ const email = viewer.email;
 // ADMIN ROUTE: Approve a pending question
 interviewRouter.patch('/questions/:id/approve', async (req, res) => {
   try {
-const viewer = await resolvedViewerFromRequest(req, true);
-const email = viewer.email;
+    const viewer = await resolvedViewerFromRequest(req, true);
+    const email = viewer.email;
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
     const requester = await prisma.user.findUnique({ where: { email } });
@@ -197,5 +198,38 @@ interviewRouter.post('/questions', async (req, res) => {
   } catch (err: any) {
     console.error("[Interview Submit Error]", err);
     res.status(500).json({ error: 'Failed to submit question.' });
+  }
+});
+
+// NEW: AI Mock Interview Engine Endpoint
+interviewRouter.post('/questions/:id/mock', async (req, res) => {
+  try {
+    const { userResponse, history } = req.body;
+    const question = await prisma.interviewQuestion.findUnique({
+      where: { id: req.params.id }
+    });
+
+    if (!question) return res.status(404).json({ error: 'Question not found' });
+
+    const aiEvaluation = await conductAiInterview(question.prompt, userResponse, history || []);
+    
+    // Auto-update to MASTERED if the AI grades them successfully
+    if (aiEvaluation.isPassed) {
+       const viewer = await resolvedViewerFromRequest(req, true);
+       if (viewer.email) {
+         const user = await prisma.user.findUnique({ where: { email: viewer.email } });
+         if (user) {
+            await prisma.interviewProgress.upsert({
+              where: { userId_questionId: { userId: user.id, questionId: question.id } },
+              update: { status: 'MASTERED', lastReviewedAt: new Date() },
+              create: { userId: user.id, questionId: question.id, status: 'MASTERED', lastReviewedAt: new Date() }
+            });
+         }
+       }
+    }
+
+    res.json({ success: true, evaluation: aiEvaluation });
+  } catch (err: any) {
+    res.status(500).json({ error: 'AI Interview Service Failed' });
   }
 });

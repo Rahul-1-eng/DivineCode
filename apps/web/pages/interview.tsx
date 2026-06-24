@@ -2,6 +2,7 @@ import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../lib/api';
+import VoiceInterviewer from '../components/VoiceInterviewer';
 
 export default function InterviewPage() {
   const { data: session, status } = useSession();
@@ -17,11 +18,14 @@ export default function InterviewPage() {
   
   // Filters
   const [selectedTrack, setSelectedTrack] = useState('All');
-  const [filterStatus, setFilterStatus] = useState('All'); // 'All', 'NOT_STARTED', 'WEAK', 'MASTERED'
+  const [filterStatus, setFilterStatus] = useState('All'); 
   
-  // Pagination State
+  // Pagination & MCQ State
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
+
+  // Conversational AI State
+  const [isMockMode, setIsMockMode] = useState(false);
   
   // Contribution Modal State
   const [showSubmitModal, setShowSubmitModal] = useState(false);
@@ -80,11 +84,12 @@ export default function InterviewPage() {
     return list;
   }, [questions, selectedTrack, filterStatus, progress]);
 
-  // Reset pagination when filters change
+  // Reset states when changing questions or filters
   useEffect(() => { 
     setCurrentIndex(0); 
     setSelectedOption(null); 
-  }, [selectedTrack, filterStatus]);
+    setIsMockMode(false); // Default back to MCQ mode on next question
+  }, [selectedTrack, filterStatus, currentIndex]);
 
   const currentQ = filtered[currentIndex];
 
@@ -108,7 +113,6 @@ export default function InterviewPage() {
       toast.success("Question approved and live!");
       setPendingQs(prev => prev.filter(q => q.id !== qId));
       
-      // Refresh active questions silently
       const refreshedQuestions = await fetchApi('/api/v2/interview/questions');
       setQuestions(Array.isArray(refreshedQuestions) ? refreshedQuestions : []);
     } catch (err: any) {
@@ -143,6 +147,12 @@ export default function InterviewPage() {
       toast.error(err.message || "Failed to submit question.");
     }
   }
+
+  // Hook for the VoiceInterviewer to call upon AI pass evaluation
+  const handleAiSuccess = () => {
+    toast.success('AI FAANG Interviewer passed your response! Marked as Mastered.', { icon: '💼' });
+    updateProgress(currentQ.id, 'MASTERED');
+  };
 
   return (
     <main style={page}>
@@ -194,7 +204,7 @@ export default function InterviewPage() {
         ) : (
           <>
             <div style={hero}>
-              <p style={eyebrow}>Database-Backed Rated MCQs</p>
+              <p style={eyebrow}>Database-Backed Rated MCQs & Mocks</p>
               <h1 style={{ fontSize: 'clamp(32px, 5vw, 58px)', margin: '10px 0' }}>Master Core CSE Topics.</h1>
               <p style={{ color: '#a8b3c7' }}>Focus on one question at a time. Track your mastery and drill down into your weak points.</p>
             </div>
@@ -238,36 +248,47 @@ export default function InterviewPage() {
                   </div>
                   
                   <h2 style={{ fontSize: 24, margin: '0 0 30px 0', lineHeight: 1.5, color: '#fff' }}>{currentQ.prompt}</h2>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {(currentQ.options || []).map((opt: string, i: number) => {
-                      const isSelected = selectedOption === i;
-                      const isCorrect = currentQ.correctIndex === i;
-                      const reveal = selectedOption !== null;
 
-                      let styleToUse = option;
-                      if (reveal && isCorrect) styleToUse = {...option, border: '1px solid #4ade80', background: 'rgba(34,197,94,.1)'};
-                      else if (reveal && isSelected && !isCorrect) styleToUse = {...option, border: '1px solid #f87171', background: 'rgba(248,113,113,.1)'};
-                      else if (isSelected) styleToUse = selected;
-
-                      return (
-                        <button key={i} disabled={reveal} onClick={() => setSelectedOption(i)} style={styleToUse}>
-                          <span style={{ fontWeight: 'bold', marginRight: 15, color: reveal && isCorrect ? '#4ade80' : '#67e8f9', fontSize: 16 }}>{String.fromCharCode(65 + i)}.</span> 
-                          <span style={{ fontSize: 16 }}>{opt}</span>
-                        </button>
-                      );
-                    })}
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+                    <button onClick={() => setIsMockMode(false)} style={{...pill, background: !isMockMode ? '#38bdf8' : 'rgba(15,23,42,.72)', color: !isMockMode ? '#000' : '#dbeafe'}}>MCQ Drill</button>
+                    <button onClick={() => setIsMockMode(true)} style={{...pill, background: isMockMode ? '#818cf8' : 'rgba(15,23,42,.72)', color: isMockMode ? '#000' : '#dbeafe'}}>Voice Mock 🎙️</button>
                   </div>
 
-                  {selectedOption !== null && (
-                    <div style={{ marginTop: 24, padding: 20, borderRadius: 16, background: selectedOption === currentQ.correctIndex ? 'rgba(34,197,94,.1)' : 'rgba(248,113,113,.1)', border: `1px solid ${selectedOption === currentQ.correctIndex ? 'rgba(34,197,94,.3)' : 'rgba(248,113,113,.3)'}` }}>
-                      <strong style={{ color: selectedOption === currentQ.correctIndex ? '#4ade80' : '#f87171', fontSize: 18 }}>
-                        {selectedOption === currentQ.correctIndex ? '✅ Correct! Marking as Mastered.' : `❌ Incorrect. The correct answer was ${String.fromCharCode(65 + currentQ.correctIndex)}.`}
-                      </strong>
-                      {currentQ.expectedAnswer && (
-                        <p style={{ marginTop: 12, color: '#eef2ff', fontSize: 15, lineHeight: 1.6 }}><b>Explanation:</b> {currentQ.expectedAnswer}</p>
+                  {!isMockMode ? (
+                    <>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {(currentQ.options || []).map((opt: string, i: number) => {
+                          const isSelected = selectedOption === i;
+                          const isCorrect = currentQ.correctIndex === i;
+                          const reveal = selectedOption !== null;
+
+                          let styleToUse = option;
+                          if (reveal && isCorrect) styleToUse = {...option, border: '1px solid #4ade80', background: 'rgba(34,197,94,.1)'};
+                          else if (reveal && isSelected && !isCorrect) styleToUse = {...option, border: '1px solid #f87171', background: 'rgba(248,113,113,.1)'};
+                          else if (isSelected) styleToUse = selected;
+
+                          return (
+                            <button key={i} disabled={reveal} onClick={() => setSelectedOption(i)} style={styleToUse}>
+                              <span style={{ fontWeight: 'bold', marginRight: 15, color: reveal && isCorrect ? '#4ade80' : '#67e8f9', fontSize: 16 }}>{String.fromCharCode(65 + i)}.</span> 
+                              <span style={{ fontSize: 16 }}>{opt}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      
+                      {selectedOption !== null && (
+                        <div style={{ marginTop: 24, padding: 20, borderRadius: 16, background: selectedOption === currentQ.correctIndex ? 'rgba(34,197,94,.1)' : 'rgba(248,113,113,.1)', border: `1px solid ${selectedOption === currentQ.correctIndex ? 'rgba(34,197,94,.3)' : 'rgba(248,113,113,.3)'}` }}>
+                          <strong style={{ color: selectedOption === currentQ.correctIndex ? '#4ade80' : '#f87171', fontSize: 18 }}>
+                            {selectedOption === currentQ.correctIndex ? '✅ Correct! Marking as Mastered.' : `❌ Incorrect. The correct answer was ${String.fromCharCode(65 + currentQ.correctIndex)}.`}
+                          </strong>
+                          {currentQ.expectedAnswer && (
+                            <p style={{ marginTop: 12, color: '#eef2ff', fontSize: 15, lineHeight: 1.6 }}><b>Explanation:</b> {currentQ.expectedAnswer}</p>
+                          )}
+                        </div>
                       )}
-                    </div>
+                    </>
+                  ) : (
+                    <VoiceInterviewer currentQuestion={currentQ} onSuccess={handleAiSuccess} />
                   )}
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 35, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 25 }}>
@@ -280,7 +301,7 @@ export default function InterviewPage() {
                     <button 
                       disabled={currentIndex === filtered.length - 1} 
                       onClick={() => { 
-                         if (selectedOption === currentQ.correctIndex && progress[currentQ.id] !== 'REVIEWING') {
+                         if (!isMockMode && selectedOption === currentQ.correctIndex && progress[currentQ.id] !== 'REVIEWING') {
                             updateProgress(currentQ.id, 'MASTERED');
                          }
                          setCurrentIndex(c => c + 1); 

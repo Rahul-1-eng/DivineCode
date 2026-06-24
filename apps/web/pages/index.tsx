@@ -3,8 +3,9 @@ import { useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
+import ActivityHeatmap from '../components/ActivityHeatmap';
+import NotificationBell from '../components/NotificationBell';
 
-// Dynamically import the 3D background so it doesn't break Server-Side Rendering
 const AnimatedBackground = dynamic(() => import('../components/AnimatedBackground'), { ssr: false });
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -24,7 +25,6 @@ const SUGGESTED_QUESTIONS = [
   "How do I use the live team voice chat?"
 ];
 
-// Natural, human-sounding motivational quotes for the daily grind
 const DAILY_QUOTES = [
   "Every top-tier coder was once a beginner who just refused to quit. Put in the reps today.",
   "Stop staring at the editorial. Start writing code. The best way to learn is to break things and fix them.",
@@ -33,6 +33,15 @@ const DAILY_QUOTES = [
   "The hardest bug you fix today becomes the intuition you use tomorrow. Keep pushing.",
   "Make it work, make it right, make it fast. Don't worry about elegant code on your first try.",
   "It’s not about how fast you type. It’s about how deeply you understand the problem before you touch the keyboard."
+];
+
+// Mock data for the live ticker
+const LIVE_EVENTS = [
+  "🔥 User_Alpha just solved 'Div2 C' in 12 mins!",
+  "⚔️ 1v1 Duel starting: Neo vs Trinity (Rating ~1800)",
+  "🏆 IICPC Global Prelims Mashup is now LIVE. 142 participants.",
+  "⚡ System: Judge0 nodes scaled up to handle peak traffic.",
+  "💼 New Interview Track added: 'Advanced Graph Theory'."
 ];
 
 export default function Home() {
@@ -49,7 +58,6 @@ export default function Home() {
     { role: 'ai', text: 'Welcome to DivineCode Pro. I am configured to handle algorithmic breakdowns, testcase overrides, and platform navigation. How can I assist you today?' }
   ]);
 
-  // Dynamic Telemetry Pings
   const [pings, setPings] = useState({ judge: 18, rtc: 24, cf: 45 });
 
   const navLinks = [
@@ -60,13 +68,11 @@ export default function Home() {
     ['Create Room', '/contests/create']
   ];
 
-  // Rotate the quote exactly once every 24 hours based on the calendar date
   const quoteOfTheDay = useMemo(() => {
     const dayOfYear = Math.floor(Date.now() / 86400000);
     return DAILY_QUOTES[dayOfYear % DAILY_QUOTES.length];
   }, []);
 
-  // Jitter the telemetry metrics every few seconds to feel alive
   useEffect(() => {
     const interval = setInterval(() => {
       setPings({
@@ -135,7 +141,6 @@ export default function Home() {
 
   return (
     <>
-      {/* 3D Animated Data Vortex Background */}
       <AnimatedBackground />
 
       <style>{`
@@ -151,12 +156,26 @@ export default function Home() {
         .footer-link:hover { color: #38bdf8 !important; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } } 
         .skeleton-pulse { animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        
+        /* Ticker Animation */
+        @keyframes ticker-scroll {
+          0% { transform: translateX(100%); }
+          100% { transform: translateX(-100%); }
+        }
+        .live-ticker {
+          display: flex;
+          white-space: nowrap;
+          animation: ticker-scroll 35s linear infinite;
+        }
+        .live-ticker:hover {
+          animation-play-state: paused;
+        }
       `}</style>
 
-      {/* Main layout wrapper */}
       <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }} style={{ minHeight: '100vh', padding: '32px 24px', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'transparent', position: 'relative', zIndex: 1 }}>
         
-        <motion.nav initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} style={{ maxWidth: 1200, margin: '0 auto 56px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+        {/* Navigation */}
+        <motion.nav initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} style={{ maxWidth: 1200, margin: '0 auto 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
           <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 14, color: '#fff', textDecoration: 'none', fontWeight: 900, fontSize: 26, letterSpacing: '-0.03em' }}>
             <span style={{ width: 46, height: 44, borderRadius: 14, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg,#6366f1,#22d3ee)', color: '#000', fontWeight: 'bold', boxShadow: '0 0 30px rgba(34,211,238,0.4)' }}>DC</span>
             DivineCode
@@ -166,6 +185,8 @@ export default function Home() {
             {navLinks.map(([item, href]) => (
               <a key={item} href={href} style={{ color: '#cbd5e1', textDecoration: 'none', padding: '10px 18px', borderRadius: 999, transition: '0.2s', fontSize: 14, fontWeight: 500, background: 'rgba(15,23,42,0.4)', border: '1px solid rgba(255,255,255,0.05)' }} onMouseEnter={e => e.currentTarget.style.borderColor = '#22d3ee'} onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}>{item}</a>
             ))}
+
+            <NotificationBell />
 
             {status === 'loading' ? <div className="skeleton-pulse" style={{ width: 140, height: 38, borderRadius: 999, background: 'rgba(255,255,255,0.05)' }} /> : session ? (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 10 }}>
@@ -178,48 +199,76 @@ export default function Home() {
           </div>
         </motion.nav>
 
-        <motion.section initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.4 }} style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 32, alignItems: 'center' }}>
-          <div className="glass-panel" style={{ padding: 48, borderRadius: 32, boxShadow: '0 40px 120px rgba(0,0,0,0.5)' }}>
-            <p style={{ color: '#22d3ee', fontWeight: 800, letterSpacing: '.15em', textTransform: 'uppercase', fontSize: 12, marginBottom: 16 }}>The Developer Arena</p>
-            <h1 className="hero-glow" style={{ fontSize: 'clamp(44px,5vw,82px)', lineHeight: 0.95, fontWeight: 900, letterSpacing: '-0.05em', margin: '0 0 24px', color: '#fff' }}>Code. Sync.<br />Duel. Interview.</h1>
-            
-            {/* Dynamic Motivation Quote Card */}
-            <div style={{ background: 'rgba(255,255,255,0.02)', padding: '20px 24px', borderRadius: 16, borderLeft: '4px solid #22d3ee', margin: '0 0 36px', maxWidth: 640 }}>
-              <p style={{ color: '#e2e8f0', fontSize: 16, lineHeight: 1.6, margin: 0, fontStyle: 'italic' }}>
-                "{quoteOfTheDay}"
-              </p>
-              <p style={{ color: '#64748b', fontSize: 12, margin: '10px 0 0', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>— Daily Grind</p>
-            </div>
-
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-              <motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} href="/contests/create" style={{ display: 'inline-block', color: '#020617', textDecoration: 'none', padding: '14px 28px', borderRadius: 999, fontWeight: 800, background: 'linear-gradient(135deg,#818cf8,#22d3ee)', boxShadow: '0 10px 30px rgba(34,211,238,0.3)' }}>Deploy Mashup Room</motion.a>
-              <motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} href="/practice" style={{ display: 'inline-block', color: '#fff', textDecoration: 'none', padding: '14px 28px', borderRadius: 999, fontWeight: 800, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.03)' }}>Open Practice Hub</motion.a>
+        {/* Live Matchmaking Carousel / Ticker */}
+        <div style={{ maxWidth: 1200, margin: '0 auto 40px', background: 'rgba(2, 6, 23, 0.4)', border: '1px solid rgba(34, 211, 238, 0.1)', borderRadius: 12, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
+          <div style={{ padding: '10px 16px', background: 'linear-gradient(90deg, #1e293b, rgba(30,41,59,0))', fontWeight: 'bold', color: '#38bdf8', fontSize: 14, zIndex: 2, borderRight: '1px solid rgba(255,255,255,0.05)' }}>
+            LIVE
+          </div>
+          <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+            <div className="live-ticker">
+              {LIVE_EVENTS.map((event, i) => (
+                <span key={i} style={{ display: 'inline-block', padding: '10px 30px', color: '#cbd5e1', fontSize: 14, fontWeight: 500 }}>
+                  {event}
+                </span>
+              ))}
             </div>
           </div>
-          
-          <div className="glass-panel" style={{ padding: 32, borderRadius: 32, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <h3 style={{ margin: 0, color: '#fff', fontSize: 18, fontWeight: 800 }}>Live Telemetry</h3>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#4ade80', fontWeight: 'bold' }}>
-                <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 1.5 }} style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 10px #4ade80' }} />
-                SYSTEMS NOMINAL
+        </div>
+
+        {/* Immersive Stats Hub */}
+        <motion.section initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.4 }} style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr', gap: 32 }}>
+          <div className="glass-panel" style={{ padding: 48, borderRadius: 32, boxShadow: '0 40px 120px rgba(0,0,0,0.5)', display: 'flex', flexWrap: 'wrap', gap: 40, justifyContent: 'space-between', alignItems: 'center' }}>
+            
+            <div style={{ flex: '1 1 400px' }}>
+              <p style={{ color: '#22d3ee', fontWeight: 800, letterSpacing: '.15em', textTransform: 'uppercase', fontSize: 12, marginBottom: 16 }}>The Developer Arena</p>
+              <h1 className="hero-glow" style={{ fontSize: 'clamp(36px,4vw,64px)', lineHeight: 0.95, fontWeight: 900, letterSpacing: '-0.05em', margin: '0 0 24px', color: '#fff' }}>Code. Sync.<br />Duel. Interview.</h1>
+              
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '20px 24px', borderRadius: 16, borderLeft: '4px solid #22d3ee', margin: '0 0 36px', maxWidth: 640 }}>
+                <p style={{ color: '#e2e8f0', fontSize: 16, lineHeight: 1.6, margin: 0, fontStyle: 'italic' }}>"{quoteOfTheDay}"</p>
+                <p style={{ color: '#64748b', fontSize: 12, margin: '10px 0 0', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>— Daily Grind</p>
+              </div>
+
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} href="/contests/create" style={{ display: 'inline-block', color: '#020617', textDecoration: 'none', padding: '14px 28px', borderRadius: 999, fontWeight: 800, background: 'linear-gradient(135deg,#818cf8,#22d3ee)', boxShadow: '0 10px 30px rgba(34,211,238,0.3)' }}>Deploy Mashup Room</motion.a>
+                <motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} href="/practice" style={{ display: 'inline-block', color: '#fff', textDecoration: 'none', padding: '14px 28px', borderRadius: 999, fontWeight: 800, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.03)' }}>Open Practice Hub</motion.a>
               </div>
             </div>
 
-            {/* Dynamic Real-Time Stats simulation */}
-            {[
-              { label: 'Judge0 Sandbox Engine', value: `${pings.judge}ms`, color: '#38bdf8' },
-              { label: 'WebRTC Signal Mesh', value: `${pings.rtc}ms`, color: '#38bdf8' },
-              { label: 'External CF Sync API', value: `${pings.cf}ms`, color: '#38bdf8' },
-              { label: 'AI Diagnostic Core', value: 'Ready', color: '#a5b4fc' }
-            ].map((stat, i) => (
-              <div key={i} style={{ padding: '14px 18px', borderRadius: 16, background: 'rgba(2,6,23,0.4)', border: '1px solid rgba(255,255,255,0.03)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#e2e8f0', fontSize: 14 }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ color: stat.color }}>⚡</span> {stat.label}
-                </span>
-                <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontWeight: 600 }}>{stat.value}</span>
+            {/* Dashboard Telemetry & Heatmap Integration */}
+            <div style={{ flex: '1 1 350px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+               {/* Display the heatmap prominently if a user is logged in */}
+              {session && (
+                 <div style={{ width: '100%' }}>
+                   <ActivityHeatmap submissions={profile?.submissions || []} />
+                 </div>
+              )}
+              
+              <div style={{ background: 'rgba(2, 6, 23, 0.4)', borderRadius: 24, padding: 24, border: '1px solid rgba(255,255,255,0.03)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <h3 style={{ margin: 0, color: '#fff', fontSize: 18, fontWeight: 800 }}>Live Telemetry</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#4ade80', fontWeight: 'bold' }}>
+                    <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 1.5 }} style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 10px #4ade80' }} />
+                    SYSTEMS NOMINAL
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
+                  {[
+                    { label: 'Judge0 Sandbox Engine', value: `${pings.judge}ms`, color: '#38bdf8' },
+                    { label: 'WebRTC Signal Mesh', value: `${pings.rtc}ms`, color: '#38bdf8' },
+                    { label: 'External CF Sync API', value: `${pings.cf}ms`, color: '#38bdf8' }
+                  ].map((stat, i) => (
+                    <div key={i} style={{ padding: '12px 16px', borderRadius: 12, background: 'rgba(15, 23, 42, 0.5)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#e2e8f0', fontSize: 13 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ color: stat.color }}>⚡</span> {stat.label}
+                      </span>
+                      <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontWeight: 600 }}>{stat.value}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
+
+            </div>
           </div>
         </motion.section>
 

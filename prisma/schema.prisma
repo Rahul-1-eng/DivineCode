@@ -43,6 +43,7 @@ model User {
   firstTeamSolves     TeamProblemSolve[]     
   unlockedTestcases   UnlockedTestcase[]     // NEW: Track unlocked hints/cases
   notifications Notification[]
+  battleKits          BattleKit[]
 
 }
 
@@ -858,4 +859,18 @@ enum ExtractionStatus {
   COMPLETED
   FAILED
   MANUAL
+}
+// NEW: Algorithmic Battle-Kits to store high-probability templates
+model BattleKit {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  language  String
+  code      String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

@@ -120,10 +120,12 @@ export default function DuelPage() {
   function joinRandom() { 
     if (!socketRef.current || joined) return; 
     const name = session?.user?.name || session?.user?.email || `Player-${Math.floor(Math.random() * 1000)}`; 
-    socketRef.current.emit('duel:join', { name }); 
+    const userEmail = session?.user?.email; // Include email to fetch Elo rating
+
+    socketRef.current.emit('duel:join', { name, userEmail }); 
     setJoined(true); 
     setDuelMode('random_waiting');
-    setStatus('Searching the globe for a worthy opponent...'); 
+    setStatus('Analyzing Elo rating and searching for a worthy opponent...'); 
   }
 
   function createCustom() {
