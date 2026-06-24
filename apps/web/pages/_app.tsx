@@ -2,7 +2,6 @@ import type { AppProps } from 'next/app';
 import { SessionProvider } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import CommandPalette from '../components/CommandPalette';
-import NotificationBell from '../components/NotificationBell';
 
 export default function App({ Component, pageProps }: AppProps) {
   const [isOffline, setIsOffline] = useState(false);
@@ -33,11 +32,9 @@ export default function App({ Component, pageProps }: AppProps) {
       
       {/* Global Command Palette (Cmd+K) */}
       <CommandPalette />
-
-      {/* Global Notification Bell */}
-      <div style={{ position: 'fixed', top: 20, right: 30, zIndex: 999 }}>
-        <NotificationBell />
-      </div>
+      
+      {/* Note: NotificationBell removed from here to prevent duplicate rendering. 
+          It should be placed inside individual page Navbars like in index.tsx */}
       
       <Component {...pageProps} />
     </SessionProvider>

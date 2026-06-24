@@ -9,7 +9,7 @@ export function setupContestSockets(io: Server) {
       socket.join(`contest:${contestId}`);
     });
 
-    // STRICT PRIVATE TEAM ROOM (For Chat + Voice)
+    // STRICT PRIVATE TEAM ROOM (For Chat, Voice, and Live Code)
     socket.on('joinTeam', (teamId: string) => {
       socket.join(`team:${teamId}`);
     });
@@ -33,6 +33,15 @@ export function setupContestSockets(io: Server) {
       }
     });
 
+    // 👉 ADDED: Live Collaborative Editor Synchronization
+    socket.on('sync_code', (data: { teamId: string, code: string, senderId: string }) => {
+      // Broadcast to everyone in the team EXCEPT the sender
+      socket.to(`team:${data.teamId}`).emit('code_updated', {
+        code: data.code,
+        senderId: data.senderId
+      });
+    });
+
     // Notify team of a teammate's success
     socket.on('broadcastTeamSolve', (data: { teamId: string, solverName: string, problemLabel: string }) => {
       io.to(`team:${data.teamId}`).emit('team_problem_solved', {
@@ -41,15 +50,18 @@ export function setupContestSockets(io: Server) {
       });
     });
 
-    // WebRTC Signaling
+    // WebRTC Signaling Relay
     socket.on('join-voice', (teamId) => {
       socket.join(`voice:${teamId}`);
+      // Tell everyone currently in the room that a new peer wants to connect
       socket.to(`voice:${teamId}`).emit('user-joined-voice', socket.id);
     });
 
+    // Relay P2P WebRTC Handshakes strictly to the target socket
     socket.on('voice-offer', ({ to, offer }) => { io.to(to).emit('voice-offer', { from: socket.id, offer }); });
     socket.on('voice-answer', ({ to, answer }) => { io.to(to).emit('voice-answer', { from: socket.id, answer }); });
     socket.on('voice-ice-candidate', ({ to, candidate }) => { io.to(to).emit('voice-ice-candidate', { from: socket.id, candidate }); });
+    
     socket.on('leave-voice', (teamId) => {
       socket.leave(`voice:${teamId}`);
       socket.to(`voice:${teamId}`).emit('user-left-voice', socket.id);

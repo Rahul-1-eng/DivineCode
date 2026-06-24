@@ -201,17 +201,19 @@ interviewRouter.post('/questions', async (req, res) => {
   }
 });
 
-// NEW: AI Mock Interview Engine Endpoint
+// NEW: AI Mock Interview Engine Endpoint (With Live Code Support)
 interviewRouter.post('/questions/:id/mock', async (req, res) => {
   try {
-    const { userResponse, history } = req.body;
+    // 👉 ADDED: Destructuring `code` from the request body
+    const { userResponse, history, code } = req.body;
     const question = await prisma.interviewQuestion.findUnique({
       where: { id: req.params.id }
     });
 
     if (!question) return res.status(404).json({ error: 'Question not found' });
 
-    const aiEvaluation = await conductAiInterview(question.prompt, userResponse, history || []);
+    // 👉 ADDED: Passing the live code into the AI Engine
+    const aiEvaluation = await conductAiInterview(question.prompt, userResponse, history || [], code);
     
     // Auto-update to MASTERED if the AI grades them successfully
     if (aiEvaluation.isPassed) {

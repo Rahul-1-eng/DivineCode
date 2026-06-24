@@ -3,6 +3,7 @@ import { useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
+import { io } from 'socket.io-client';
 import ActivityHeatmap from '../components/ActivityHeatmap';
 import NotificationBell from '../components/NotificationBell';
 
@@ -35,15 +36,6 @@ const DAILY_QUOTES = [
   "It’s not about how fast you type. It’s about how deeply you understand the problem before you touch the keyboard."
 ];
 
-// Mock data for the live ticker
-const LIVE_EVENTS = [
-  "🔥 User_Alpha just solved 'Div2 C' in 12 mins!",
-  "⚔️ 1v1 Duel starting: Neo vs Trinity (Rating ~1800)",
-  "🏆 IICPC Global Prelims Mashup is now LIVE. 142 participants.",
-  "⚡ System: Judge0 nodes scaled up to handle peak traffic.",
-  "💼 New Interview Track added: 'Advanced Graph Theory'."
-];
-
 export default function Home() {
   const { data: session, status } = useSession();
   const [profile, setProfile] = useState<any>(null);
@@ -58,13 +50,17 @@ export default function Home() {
     { role: 'ai', text: 'Welcome to DivineCode Pro. I am configured to handle algorithmic breakdowns, testcase overrides, and platform navigation. How can I assist you today?' }
   ]);
 
-  const [pings, setPings] = useState({ judge: 18, rtc: 24, cf: 45 });
+  // LIVE TICKER STATE (Replacing Mock Data)
+  const [liveEvents, setLiveEvents] = useState<string[]>([
+    "⚡ System: DivineCode Judge0 nodes initialized and scaling.",
+    "🏆 IICPC Global Prelims Mashup is open for registration.",
+  ]);
 
   const navLinks = [
     ['Practice Hub', '/practice'], 
     ['Duel Arena', '/duel'], 
     ['Contests', '/contests'], 
-    ['Leaderboard', '/leaderboard'], 
+    ['Community', '/community'], // Added Community to Navigation
     ['Create Room', '/contests/create']
   ];
 
@@ -73,15 +69,13 @@ export default function Home() {
     return DAILY_QUOTES[dayOfYear % DAILY_QUOTES.length];
   }, []);
 
+  // WebSockets for Real-time Ticker Updates
   useEffect(() => {
-    const interval = setInterval(() => {
-      setPings({
-        judge: 15 + Math.floor(Math.random() * 8),
-        rtc: 20 + Math.floor(Math.random() * 12),
-        cf: 40 + Math.floor(Math.random() * 15),
-      });
-    }, 2500);
-    return () => clearInterval(interval);
+    const socket = io(API_BASE_URL, { transports: ['websocket'] });
+    socket.on('global_ticker', (newEvent: string) => {
+      setLiveEvents(prev => [newEvent, ...prev].slice(0, 10)); // Keep last 10
+    });
+    return () => { socket.disconnect(); };
   }, []);
 
   useEffect(() => {
@@ -206,7 +200,7 @@ export default function Home() {
           </div>
           <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
             <div className="live-ticker">
-              {LIVE_EVENTS.map((event, i) => (
+              {liveEvents.map((event, i) => (
                 <span key={i} style={{ display: 'inline-block', padding: '10px 30px', color: '#cbd5e1', fontSize: 14, fontWeight: 500 }}>
                   {event}
                 </span>
@@ -234,7 +228,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Dashboard Telemetry & Heatmap Integration */}
+            {/* Dashboard Telemetry & Radar Integration */}
             <div style={{ flex: '1 1 350px', display: 'flex', flexDirection: 'column', gap: 20 }}>
                {/* Display the heatmap prominently if a user is logged in */}
               {session && (
@@ -243,29 +237,20 @@ export default function Home() {
                  </div>
               )}
               
-              <div style={{ background: 'rgba(2, 6, 23, 0.4)', borderRadius: 24, padding: 24, border: '1px solid rgba(255,255,255,0.03)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <h3 style={{ margin: 0, color: '#fff', fontSize: 18, fontWeight: 800 }}>Live Telemetry</h3>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#4ade80', fontWeight: 'bold' }}>
-                    <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 1.5 }} style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 10px #4ade80' }} />
-                    SYSTEMS NOMINAL
+              {/* Active Matchmaking Radar */}
+              <div style={{ background: 'rgba(2, 6, 23, 0.4)', borderRadius: 24, padding: 32, border: '1px solid rgba(255,255,255,0.03)', display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'radial-gradient(circle at center, rgba(34, 211, 238, 0.08) 0%, transparent 60%)' }} />
+                <h3 style={{ margin: '0 0 24px', color: '#fff', fontSize: 16, fontWeight: 800, zIndex: 1, letterSpacing: '1px', textTransform: 'uppercase' }}>Active Matchmaking</h3>
+                
+                <div style={{ position: 'relative', width: 140, height: 140, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                  <motion.div animate={{ scale: [1, 2.5], opacity: [0.6, 0] }} transition={{ repeat: Infinity, duration: 2.5, ease: "easeOut" }} style={{ position: 'absolute', width: 60, height: 60, borderRadius: '50%', border: '2px solid #38bdf8' }} />
+                  <motion.div animate={{ scale: [1, 2.5], opacity: [0.6, 0] }} transition={{ repeat: Infinity, duration: 2.5, ease: "easeOut", delay: 1.25 }} style={{ position: 'absolute', width: 60, height: 60, borderRadius: '50%', border: '2px solid #818cf8' }} />
+                  <div style={{ width: 50, height: 50, borderRadius: '50%', background: 'linear-gradient(135deg, #38bdf8, #818cf8)', zIndex: 2, display: 'grid', placeItems: 'center', fontSize: 20, boxShadow: '0 0 25px rgba(56, 189, 248, 0.4)' }}>
+                    ⚔️
                   </div>
                 </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
-                  {[
-                    { label: 'Judge0 Sandbox Engine', value: `${pings.judge}ms`, color: '#38bdf8' },
-                    { label: 'WebRTC Signal Mesh', value: `${pings.rtc}ms`, color: '#38bdf8' },
-                    { label: 'External CF Sync API', value: `${pings.cf}ms`, color: '#38bdf8' }
-                  ].map((stat, i) => (
-                    <div key={i} style={{ padding: '12px 16px', borderRadius: 12, background: 'rgba(15, 23, 42, 0.5)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#e2e8f0', fontSize: 13 }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ color: stat.color }}>⚡</span> {stat.label}
-                      </span>
-                      <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontWeight: 600 }}>{stat.value}</span>
-                    </div>
-                  ))}
-                </div>
+                
+                <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 24, zIndex: 1, fontWeight: 500 }}>Scanning global arena for 1v1 Duels...</p>
               </div>
 
             </div>

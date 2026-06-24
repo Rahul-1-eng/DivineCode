@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
+import VoiceInterviewer from '../../components/VoiceInterviewer';
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -18,7 +19,8 @@ export default function ProblemWorkspace() {
   const [running, setRunning] = useState(false);
   const [isKitsMenuOpen, setIsKitsMenuOpen] = useState(false);
   
-  const [workspaceTab, setWorkspaceTab] = useState<'problem' | 'video' | 'discuss'>('problem');
+  // Added 'voice' to workspace tabs
+  const [workspaceTab, setWorkspaceTab] = useState<'problem' | 'video' | 'discuss' | 'voice'>('problem');
   const [consoleTab, setConsoleTab] = useState<'output' | 'mentor'>('output');
 
   const [aiAnalysis, setAiAnalysis] = useState('');
@@ -26,7 +28,7 @@ export default function ProblemWorkspace() {
 
   const [discussionInput, setDiscussionInput] = useState('');
   const [posts, setPosts] = useState([
-    { author: 'RKS_Rider', message: 'If executing in O(N), ensure the sparse initialization bounds are checked properly to avoid segment errors.', timestamp: '1 hour ago' }
+    { author: 'System_Admin', message: 'If executing in O(N), ensure the sparse initialization bounds are checked properly to avoid segment errors.', timestamp: '1 hour ago' }
   ]);
 
   // Pre-loaded Battle-Kits tailored for high-speed contest environments
@@ -143,8 +145,8 @@ export default function ProblemWorkspace() {
         </div>
         
         <div style={{ display: 'flex', background: '#020617', borderBottom: '1px solid #1e293b' }}>
-          {[['problem', 'Problem Details'], ['video', '🎬 Video Solution'], ['discuss', '💬 Discussion Threads']].map(([tId, title]) => (
-            <button key={tId} onClick={() => setWorkspaceTab(tId as any)} style={{ flex: 1, padding: 14, background: workspaceTab === tId ? '#0f172a' : 'transparent', color: workspaceTab === tId ? '#22d3ee' : '#64748b', border: 'none', cursor: 'pointer', fontWeight: 700 }}>{title}</button>
+          {[['problem', 'Problem Details'], ['video', '🎬 Video Solution'], ['discuss', '💬 Discussion Threads'], ['voice', '🎙️ Voice AI']].map(([tId, title]) => (
+            <button key={tId} onClick={() => setWorkspaceTab(tId as any)} style={{ flex: 1, padding: 14, background: workspaceTab === tId ? '#0f172a' : 'transparent', color: workspaceTab === tId ? '#22d3ee' : '#64748b', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, letterSpacing: 0.5 }}>{title}</button>
           ))}
         </div>
 
@@ -214,6 +216,16 @@ export default function ProblemWorkspace() {
               </div>
             </div>
           )}
+
+          {/* Voice AI Workspace embedded */}
+          {workspaceTab === 'voice' && (
+             <VoiceInterviewer 
+                currentQuestion={problem} 
+                code={code} 
+                onSuccess={() => playSuccessAudio()} 
+             />
+          )}
+
         </div>
       </section>
 

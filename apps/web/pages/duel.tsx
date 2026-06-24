@@ -2,10 +2,12 @@ import { CSSProperties, useEffect, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/router';
 import { io, Socket } from 'socket.io-client';
+import { motion, AnimatePresence } from 'framer-motion';
 import { fetchApi } from '../lib/api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || API_BASE_URL;
+const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
 type DuelMode = 'menu' | 'custom_menu' | 'random_waiting' | 'custom_host_waiting' | 'playing';
 
@@ -29,14 +31,22 @@ export default function DuelPage() {
   const [customRoomCode, setCustomRoomCode] = useState<string>('');
   const [joinInputCode, setJoinInputCode] = useState<string>('');
 
-  // States for Custom Question Selection
   const [availableQuestions, setAvailableQuestions] = useState<any[]>([]);
   const [useCustomQuestions, setUseCustomQuestions] = useState(false);
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>(Array(7).fill(''));
   
-  // States for Attempt Tracking & UI Locking
   const [myAttempts, setMyAttempts] = useState(0);
   const [lockedOptions, setLockedOptions] = useState<number[]>([]);
+
+  // 👉 ADDED: Chat and Voice States
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [messages, setMessages] = useState<any[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  const [voiceStatus, setVoiceStatus] = useState<'disconnected'|'connecting'|'connected'>('disconnected');
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const peersRef = useRef<{ [socketId: string]: RTCPeerConnection }>({});
 
   useEffect(() => {
     if (router.query.mode === 'custom') setDuelMode('custom_menu');
@@ -47,6 +57,17 @@ export default function DuelPage() {
         .catch(console.error);
     }
   }, [router.query, session]);
+
+  // 👉 ADDED: Helper to clean up audio DOM elements
+  const cleanupAudioElement = (socketId: string) => {
+    const audio = document.getElementById(`audio-${socketId}`) as HTMLAudioElement;
+    if (audio) {
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      audio.remove();
+    }
+  };
 
   useEffect(() => {
     const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
@@ -101,9 +122,79 @@ export default function DuelPage() {
       }
       setFeedback(`${data.playerName} answered ${data.correct ? 'correctly ✅' : 'wrong ❌'} (${data.attemptsLeft || 0} chances left)`); 
     });
+
+    // 👉 ADDED: Chat Listeners
+    socket.on('chat:message', (msg) => {
+      setMessages(prev => [...prev, { ...msg, type: 'text' }]);
+    });
+
+    socket.on('chat:image', (msg) => {
+      setMessages(prev => [...prev, { ...msg, type: 'image' }]);
+    });
+
+    // 👉 ADDED: WebRTC Listeners for Voice
+    socket.on('webrtc:offer', async ({ senderId, offer }) => {
+      if (!localStreamRef.current) return; // Ignore if user hasn't enabled voice
+
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      peersRef.current[senderId] = pc;
+      localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) socket.emit('webrtc:ice-candidate', { roomId: stateRoomIdRef.current, candidate: e.candidate });
+      };
+
+      pc.ontrack = (e) => {
+        let audio = document.getElementById(`audio-${senderId}`) as HTMLAudioElement;
+        if (!audio) {
+          audio = document.createElement('audio');
+          audio.id = `audio-${senderId}`;
+          audio.autoplay = true;
+          document.body.appendChild(audio);
+        }
+        audio.srcObject = e.streams[0];
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit('webrtc:answer', { roomId: stateRoomIdRef.current, answer });
+    });
+
+    socket.on('webrtc:answer', async ({ senderId, answer }) => {
+      const pc = peersRef.current[senderId];
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
+    socket.on('webrtc:ice-candidate', async ({ senderId, candidate }) => {
+      const pc = peersRef.current[senderId];
+      if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    });
+
+    socket.on('webrtc:leave', ({ senderId }) => {
+      if (peersRef.current[senderId]) {
+        peersRef.current[senderId].close();
+        delete peersRef.current[senderId];
+      }
+      cleanupAudioElement(senderId);
+    });
     
-    return () => { socket.disconnect(); };
+    return () => { 
+      socket.disconnect(); 
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      Object.entries(peersRef.current).forEach(([id, pc]) => {
+        pc.close();
+        cleanupAudioElement(id);
+      });
+    };
   }, []);
+
+  // Hack to allow socket listeners inside useEffect to read current roomId
+  const stateRoomIdRef = useRef(roomId);
+  useEffect(() => { stateRoomIdRef.current = roomId; }, [roomId]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   function answer(index: number) { 
     if (!socketRef.current || !roomId || !question || myAttempts >= 2 || lockedOptions.includes(index)) return; 
@@ -120,7 +211,7 @@ export default function DuelPage() {
   function joinRandom() { 
     if (!socketRef.current || joined) return; 
     const name = session?.user?.name || session?.user?.email || `Player-${Math.floor(Math.random() * 1000)}`; 
-    const userEmail = session?.user?.email; // Include email to fetch Elo rating
+    const userEmail = session?.user?.email; 
 
     socketRef.current.emit('duel:join', { name, userEmail }); 
     setJoined(true); 
@@ -151,6 +242,85 @@ export default function DuelPage() {
     socketRef.current.emit('duel:joinCustom', { name, roomCode: joinInputCode });
     setJoined(true);
   }
+
+  // 👉 ADDED: Chat Send Handler
+  const handleSendMessage = () => {
+    if (!chatInput.trim() || !socketRef.current || !roomId) return;
+    socketRef.current.emit('chat:message', { roomId, message: chatInput.trim() });
+    setChatInput('');
+  };
+
+  // 👉 ADDED: Image Upload Handler
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !socketRef.current || !roomId) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      socketRef.current!.emit('chat:image', { roomId, imageUrl: base64 });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // 👉 ADDED: Voice Toggle Handler (Gapless communication)
+  const toggleVoice = async () => {
+    if (!socketRef.current || !roomId) return alert("Must be in a duel to connect voice.");
+
+    if (voiceStatus === 'connected' || voiceStatus === 'connecting') {
+      setVoiceStatus('disconnected');
+      socketRef.current.emit('webrtc:leave', { roomId });
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      Object.entries(peersRef.current).forEach(([socketId, pc]) => {
+        pc.close();
+        cleanupAudioElement(socketId);
+      });
+      peersRef.current = {};
+    } else {
+      setVoiceStatus('connecting');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        localStreamRef.current = stream;
+        setVoiceStatus('connected');
+        
+        // As the initiator, we create an offer and send it to the room. 
+        // The opponent will hear it if they have already pressed 'Join Voice'.
+        const pc = new RTCPeerConnection(ICE_SERVERS);
+        
+        // Track the single opponent. Since it's a duel, any answer we get will map to them.
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+        pc.onicecandidate = (e) => {
+          if (e.candidate) socketRef.current!.emit('webrtc:ice-candidate', { roomId, candidate: e.candidate });
+        };
+
+        pc.ontrack = (e) => {
+          let audio = document.getElementById('opponent-audio') as HTMLAudioElement;
+          if (!audio) {
+            audio = document.createElement('audio');
+            audio.id = 'opponent-audio';
+            audio.autoplay = true;
+            document.body.appendChild(audio);
+          }
+          audio.srcObject = e.streams[0];
+        };
+        
+        // Note: For simplicity in 1v1, we bind the opponent's PC to "opponent"
+        peersRef.current['opponent'] = pc;
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socketRef.current.emit('webrtc:offer', { roomId, offer });
+
+      } catch (err: any) {
+        setVoiceStatus('disconnected');
+        alert("Microphone access denied or unavailable.");
+      }
+    }
+  };
 
   const leader = [...players].sort((a, b) => b.score - a.score)[0];
 
@@ -337,6 +507,65 @@ export default function DuelPage() {
           </section>
         )}
       </section>
+
+      {/* 👉 ADDED: Floating Chat & Voice Panel (Only available when playing) */}
+      {duelMode === 'playing' && (
+        <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
+          {isChatOpen ? (
+            <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+              
+              <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
+                <strong style={{ color: '#a5b4fc' }}>Duel Comm Link</strong>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)', color: voiceStatus === 'connected' ? '#4ade80' : '#fff', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
+                    {voiceStatus === 'connected' ? '🟢 Voice On' : voiceStatus === 'connecting' ? '⏳ Connecting...' : '🎤 Join Voice'}
+                  </button>
+                  <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>
+                </div>
+              </div>
+
+              <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
+                {messages.length === 0 ? (
+                  <p style={{ textAlign: 'center', marginTop: '40%', color: '#64748b' }}>No messages yet. Say hi! 👋</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {messages.map((msg: any, i) => {
+                      const isMe = msg.senderId === socketRef.current?.id;
+                      return (
+                        <motion.div initial={{ opacity: 0, x: isMe ? 10 : -10 }} animate={{ opacity: 1, x: 0 }} key={i} style={{ alignSelf: isMe ? 'flex-end' : 'flex-start', background: isMe ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.05)', border: isMe ? '1px solid rgba(99,102,241,0.4)' : 'none', padding: '8px 12px', borderRadius: 8, maxWidth: '85%' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 11, gap: 10 }}>
+                            <strong style={{ color: isMe ? '#a5b4fc' : '#67e8f9' }}>{isMe ? 'You' : msg.senderName}</strong>
+                            <span style={{ color: '#64748b' }}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
+                          
+                          {msg.type === 'text' ? (
+                            <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.message}</div>
+                          ) : (
+                            <img src={msg.imageUrl} alt="Shared" style={{ maxWidth: '100%', borderRadius: 6, marginTop: 4 }} />
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                    <div ref={messagesEndRef} />
+                  </div>
+                )}
+              </div>
+              
+              <div style={{ padding: 12, borderTop: '1px solid #334155', display: 'flex', gap: 8, alignItems: 'center' }}>
+                <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, background: 'rgba(2,6,23,0.5)', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', fontSize: 16 }}>
+                  📷<input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageUpload} />
+                </label>
+                <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendMessage()} placeholder="Type message..." style={{ flex: 1, padding: '8px 10px', borderRadius: 6, background: '#1e293b', color: '#fff', border: '1px solid #334155', outline: 'none' }} />
+                <button onClick={handleSendMessage} style={{ background: '#6366f1', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 6, cursor: 'pointer' }}>↑</button>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setIsChatOpen(true)} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: '50%', width: 56, height: 56, cursor: 'pointer', boxShadow: '0 4px 12px rgba(99,102,241,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+            </motion.button>
+          )}
+        </div>
+      )}
     </main>
   );
 }

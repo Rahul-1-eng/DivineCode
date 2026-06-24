@@ -11,6 +11,7 @@ communityRouter.get('/problems', async (req, res) => {
         isCommunity: true,
         approved: true,
       },
+      include: { author: true }, // 👉 ADDED: Fetch the author to display their name
       orderBy: { createdAt: 'desc' },
       take: 50
     });
@@ -43,26 +44,27 @@ communityRouter.post('/upload', async (req, res) => {
         isCommunity: true,
         approved: true,
         problemCode: `COMM-${Date.now()}`
-      }
+      },
+      include: { author: true }
     });
 
-    // Save notification to DB
     const notification = await prisma.notification.create({
       data: {
         userId: 'ALL',
         title: "New Community Tutorial! 🎬",
         message: `${user.name || user.username} just uploaded: ${title}.`,
-        link: `/practice/${newPost.id}`,
+        link: '/community',
         type: "INFO",
         isRead: false
       }
     });
 
-    // Emit via WebSocket
+    // 👉 ADDED: Full Gapless Broadcast (Updates ticker, notifications, and feed)
     const io = req.app.get('io');
     if (io) {
       io.emit('new_notification', notification);
-      io.emit('new_community_post', newPost); // Real-time feed update
+      io.emit('new_community_post', newPost);
+      io.emit('global_ticker', `🎬 ${user.username || user.name} published a new tutorial: ${title}`);
     }
 
     res.status(201).json({ success: true, post: newPost });

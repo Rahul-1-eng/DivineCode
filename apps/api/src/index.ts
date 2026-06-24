@@ -15,12 +15,11 @@ const app = express();
 
 const allowedOrigins = [
   process.env.CLIENT_ORIGIN || 'http://localhost:3000',
-  'https://your-production-domain.com' // Replace with your actual domain later
+  'https://your-production-domain.com' 
 ];
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else {
@@ -46,12 +45,10 @@ app.use((req: any, res, next) => {
     try {
       const decoded: any = jwt.verify(token, process.env.NEXTAUTH_SECRET || '');
       req.user = decoded; 
-      
       if (decoded.email) req.headers['x-user-email'] = decoded.email;
       if (decoded.name) req.headers['x-user-name'] = decoded.name;
-      
     } catch (err) {
-      console.warn('Invalid or expired API token rejected.');
+      console.warn('Invalid API token rejected.');
     }
   }
   next();
@@ -60,24 +57,20 @@ app.use((req: any, res, next) => {
 const server = http.createServer(app);
 
 const io = new Server(server, { 
-  cors: { 
-    origin: allowedOrigins, 
-    methods: ['GET', 'POST'], 
-    credentials: true 
-  } 
+  cors: { origin: allowedOrigins, methods: ['GET', 'POST'], credentials: true } 
 });
 
-// ==========================================
-// 🚀 ATTACH SOCKET SERVER TO EXPRESS APP
-// This allows other route files to broadcast events using req.app.get('io')
-// ==========================================
 app.set('io', io);
 
-// --- MODULE INITIALIZATION ---
+// 👉 ADDED: Personal Notification Rooms
+io.on('connection', (socket) => {
+  socket.on('join-personal-notifications', (email) => {
+    socket.join(`user:${email}`);
+  });
+});
+
 startQueueWorkers(io);
 setupDuelSockets(io);
-
-// --- ROUTES ---
 mountV2Routes(app, io);
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
@@ -93,11 +86,9 @@ app.post('/api/auth/login', async (req, res) => {
     const result = await loginUser(req.body);
     return res.json(result);
   } catch (err: any) {
-    console.error('[Auth] Login error:', err.message);
     return res.status(401).json({ error: 'Invalid username or password.' });
   }
 });
 
-// --- STARTUP ---
 const PORT = Number(process.env.PORT) || 4000;
 server.listen(PORT, () => console.log(`🚀 DivineCode API online at ${PORT} (PostgreSQL/Prisma Foundation Active)`));

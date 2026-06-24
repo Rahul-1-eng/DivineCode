@@ -423,6 +423,7 @@ export function mountV2Routes(app: Express, io: Server) {
 
     const payload = { ...req.body, ownerUserId: viewer.userId };
     const contest = await createContestV2(payload);
+    req.app.get('io')?.emit('global_ticker', `⚡ Mashup Room Created: "${contest.title}" by ${viewer.name}`);
     res.status(201).json(sanitizeContestForViewer(contest, viewer));
   }));
 

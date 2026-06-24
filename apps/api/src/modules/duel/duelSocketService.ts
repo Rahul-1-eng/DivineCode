@@ -21,14 +21,12 @@ export function setupDuelSockets(io: Server) {
     if (matchmakingQueue.length < 2) return;
 
     const now = Date.now();
-    // Sort queue by wait time (longest waiting first)
     matchmakingQueue.sort((a, b) => a.queuedAt - b.queuedAt);
 
     for (let i = 0; i < matchmakingQueue.length; i++) {
       const p1 = matchmakingQueue[i];
       if (!p1) continue;
 
-      // Expand rating bounds based on how long they've waited (+/- 50 Elo per second waited)
       const waitTimeSecs = (now - p1.queuedAt) / 1000;
       const acceptableDelta = Math.max(100, waitTimeSecs * 50);
 
@@ -121,14 +119,10 @@ export function setupDuelSockets(io: Server) {
 
   io.on('connection', (socket: Socket) => {
     
-    // --- ADVANCED MATCHMAKING EVENT ---
     socket.on('duel:join', async ({ name, userEmail }) => {
-      // Prevent duplicate queueing
       if (matchmakingQueue.some(p => p.id === socket.id)) return;
 
-      let playerRating = 1200; // Default Elo
-
-      // Fetch actual Elo rating from database if email is provided
+      let playerRating = 1200;
       if (userEmail) {
         try {
           const user = await prisma.user.findUnique({ where: { email: userEmail } });
@@ -248,8 +242,12 @@ export function setupDuelSockets(io: Server) {
       socket.to(roomId).emit('webrtc:ice-candidate', { senderId: socket.id, candidate });
     });
 
+    // 👉 ADDED: Cleanup routing for Voice
+    socket.on('webrtc:leave', ({ roomId }) => {
+      socket.to(roomId).emit('webrtc:leave', { senderId: socket.id });
+    });
+
     socket.on('disconnect', () => {
-      // Remove from matchmaking queue
       matchmakingQueue = matchmakingQueue.filter(p => p.id !== socket.id);
 
       for (const [code, room] of customWaitingRooms.entries()) {

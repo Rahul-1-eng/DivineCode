@@ -12,6 +12,7 @@ export async function getServerSideProps() { return { props: {} }; }
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
 type TestCase = { id: string; input: string; expectedOutput: string; output: string; status: 'idle' | 'running' | 'passed' | 'failed' | 'error'; isPublic?: boolean };
 
@@ -114,7 +115,6 @@ export default function ContestProblemWorkspace() {
         setSelectedOptions([]);
       })
       .catch((err) => {
-        console.error('[Contest Load Error]', err);
         setIsLoading(false);
       });
   }, [id, session]);
@@ -174,7 +174,6 @@ export default function ContestProblemWorkspace() {
         setProblemType(data?.type || (problem?.isMCQ ? 'MCQ' : (problem?.externalUrl ? 'EXTERNAL' : 'INTERNAL')));
       })
       .catch((err) => {
-        console.warn('[Problem Redirect Fetch Error]', err);
         setProblemType(problem?.isMCQ ? 'MCQ' : (problem?.externalUrl ? 'EXTERNAL' : 'INTERNAL'));
       });
 
@@ -202,6 +201,17 @@ export default function ContestProblemWorkspace() {
     }
   }, [isMCQ, problem, redirectInfo, problemIdStr]);
 
+  // 👉 ADDED: Helper to clean up audio DOM elements
+  const cleanupAudioElement = (socketId: string) => {
+    const audio = document.getElementById(`audio-${socketId}`) as HTMLAudioElement;
+    if (audio) {
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      audio.remove();
+    }
+  };
+
   const toggleVoice = async () => {
     if (!contest?.viewerMember?.teamId) {
       toast.error("You must be in a team to use voice chat.");
@@ -218,7 +228,10 @@ export default function ContestProblemWorkspace() {
         localStreamRef.current.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
       }
-      Object.values(peersRef.current).forEach(pc => pc.close());
+      Object.entries(peersRef.current).forEach(([socketId, pc]) => {
+        pc.close();
+        cleanupAudioElement(socketId);
+      });
       peersRef.current = {};
       toast.success("Voice disconnected.");
     } else {
@@ -237,9 +250,7 @@ export default function ContestProblemWorkspace() {
   };
 
   useEffect(() => {
-    if (!id || !session?.user?.email || !contest?.viewerMember?.teamId) {
-      return;
-    }
+    if (!id || !session?.user?.email || !contest?.viewerMember?.teamId) return;
     
     try {
       socketRef.current = io(API_BASE_URL, { 
@@ -269,11 +280,94 @@ export default function ContestProblemWorkspace() {
         });
       });
 
+      // 👉 ADDED: Live Editor Sync Receiver
+      socket.on('code_updated', (data: { code: string, senderId: string }) => {
+         const currentUser = session.user?.email || session.user?.name;
+         // Prevent overwriting if we are the ones who just sent it
+         if (data.senderId !== currentUser) {
+            setCode(data.code);
+         }
+      });
+
       socket.on('team_problem_solved', (data: any) => {
         if (data?.userId !== (session.user?.name || session.user?.email)) {
           toast.success(`🎉 A teammate just solved a problem!`, { duration: 5000, icon: '🚀' });
           playSuccessSound();
         }
+      });
+
+      // 👉 FIXED: FULL WebRTC IMPLEMENTATION FOR VOICE
+      socket.on('user-joined-voice', async (remoteSocketId: string) => {
+        if (!localStreamRef.current) return;
+        
+        const pc = new RTCPeerConnection(ICE_SERVERS);
+        peersRef.current[remoteSocketId] = pc;
+        localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
+
+        pc.onicecandidate = (e) => {
+          if (e.candidate) socket.emit('voice-ice-candidate', { to: remoteSocketId, candidate: e.candidate });
+        };
+
+        pc.ontrack = (e) => {
+          let audio = document.getElementById(`audio-${remoteSocketId}`) as HTMLAudioElement;
+          if (!audio) {
+            audio = document.createElement('audio');
+            audio.id = `audio-${remoteSocketId}`;
+            audio.autoplay = true;
+            document.body.appendChild(audio);
+          }
+          audio.srcObject = e.streams[0];
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit('voice-offer', { to: remoteSocketId, offer });
+      });
+
+      socket.on('voice-offer', async ({ from, offer }) => {
+        if (!localStreamRef.current) return;
+
+        const pc = new RTCPeerConnection(ICE_SERVERS);
+        peersRef.current[from] = pc;
+        localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
+
+        pc.onicecandidate = (e) => {
+          if (e.candidate) socket.emit('voice-ice-candidate', { to: from, candidate: e.candidate });
+        };
+
+        pc.ontrack = (e) => {
+          let audio = document.getElementById(`audio-${from}`) as HTMLAudioElement;
+          if (!audio) {
+            audio = document.createElement('audio');
+            audio.id = `audio-${from}`;
+            audio.autoplay = true;
+            document.body.appendChild(audio);
+          }
+          audio.srcObject = e.streams[0];
+        };
+
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('voice-answer', { to: from, answer });
+      });
+
+      socket.on('voice-answer', async ({ from, answer }) => {
+        const pc = peersRef.current[from];
+        if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      });
+
+      socket.on('voice-ice-candidate', async ({ from, candidate }) => {
+        const pc = peersRef.current[from];
+        if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      });
+
+      socket.on('user-left-voice', (remoteId: string) => {
+        if (peersRef.current[remoteId]) {
+          peersRef.current[remoteId].close();
+          delete peersRef.current[remoteId];
+        }
+        cleanupAudioElement(remoteId);
       });
 
       return () => { 
@@ -282,7 +376,10 @@ export default function ContestProblemWorkspace() {
         if (localStreamRef.current) {
           localStreamRef.current.getTracks().forEach(track => track.stop());
         }
-        Object.values(peersRef.current).forEach(pc => pc.close());
+        Object.entries(peersRef.current).forEach(([socketId, pc]) => {
+          pc.close();
+          cleanupAudioElement(socketId);
+        });
         peersRef.current = {};
       };
     } catch (err) {
@@ -291,6 +388,20 @@ export default function ContestProblemWorkspace() {
   }, [id, session?.user?.email, contest?.viewerMember?.teamId, contest?.viewerMember]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  // 👉 ADDED: Collaborative Keystroke Sync Function
+  const handleCodeChange = (val: string | undefined) => {
+    const updatedCode = val || '';
+    setCode(updatedCode);
+    
+    if (socketRef.current && contest?.viewerMember?.teamId) {
+       socketRef.current.emit('sync_code', {
+          teamId: contest.viewerMember.teamId,
+          code: updatedCode,
+          senderId: session?.user?.email || session?.user?.name
+       });
+    }
+  };
 
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
@@ -647,17 +758,6 @@ export default function ContestProblemWorkspace() {
       ) : (
         <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
           <section style={{ width: '40%', overflowY: 'auto', background: '#0f172a', padding: 20 }}>
-            {/* NEW VIDEO EXPLANATION BLOCK */}
-            {(problem?.videoUrl || problem?.problem?.videoUrl) && (
-              <div style={{ marginBottom: 20, padding: 15, background: '#020617', borderRadius: 12, border: '1px solid #38bdf8' }}>
-                <strong style={{ color: '#38bdf8', display: 'block', marginBottom: 10 }}>🎥 Video Explanation</strong>
-                <iframe 
-                  src={problem.videoUrl || problem.problem.videoUrl} 
-                  style={{ width: '100%', height: 250, borderRadius: 8, border: 'none' }} 
-                  allowFullScreen 
-                />
-              </div>
-            )}
             {problemType === 'EXTERNAL' && externalUrl && (
               <div style={{ marginBottom: 20, padding: 20, borderRadius: 14, background: '#081327', border: '1px solid #334155' }}>
                 <strong style={{ display: 'block', color: '#38bdf8', marginBottom: 10, fontSize: 16 }}>External problem detected</strong>
@@ -669,18 +769,20 @@ export default function ContestProblemWorkspace() {
                 </a>
               </div>
             )}
+            
             {/* Video Explanation Section */}
-{(problem?.videoUrl || problem?.problem?.videoUrl) && (
-  <div style={{ marginBottom: 20, padding: 15, background: '#020617', borderRadius: 12, border: '1px solid #38bdf8' }}>
-    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: 10 }}>🎥 Video Explanation</strong>
-    <iframe 
-      src={problem.videoUrl || problem.problem.videoUrl} 
-      style={{ width: '100%', height: 250, borderRadius: 8, border: 'none' }} 
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-      allowFullScreen 
-    />
-  </div>
-)}
+            {(problem?.videoUrl || problem?.problem?.videoUrl) && (
+              <div style={{ marginBottom: 20, padding: 15, background: '#020617', borderRadius: 12, border: '1px solid #38bdf8' }}>
+                <strong style={{ color: '#38bdf8', display: 'block', marginBottom: 10 }}>🎥 Video Explanation</strong>
+                <iframe 
+                  src={problem.videoUrl || problem.problem.videoUrl} 
+                  style={{ width: '100%', height: 250, borderRadius: 8, border: 'none' }} 
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen 
+                />
+              </div>
+            )}
+            
             {problemDescriptionHtml && problemDescriptionHtml.length > 10 ? (
               <div 
                 className="problem-statement-html" 
@@ -697,7 +799,7 @@ export default function ContestProblemWorkspace() {
             )}
           </section>
           <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
-            <Editor height="65%" theme="vs-dark" language={monacoLanguage} value={code} onChange={(val) => setCode(val || '')} />
+            <Editor height="65%" theme="vs-dark" language={monacoLanguage} value={code} onChange={handleCodeChange} />
             <div style={{ height: '35%', background: '#1e1e1e', borderTop: '1px solid #333' }}>
               <div style={tabsHeader}>
                 <button onClick={() => setActiveTab('cph')} style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle}>TEST CASES</button>

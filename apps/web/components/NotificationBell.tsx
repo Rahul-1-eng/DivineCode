@@ -30,7 +30,17 @@ export default function NotificationBell() {
         headers: { 'x-user-email': session.user.email }
       });
       if (res.ok) {
-        const data = await res.json();
+        let data = await res.json();
+        
+        // 👉 ADDED: Filter global 'ALL' notifications against LocalStorage 
+        const readGlobals = JSON.parse(localStorage.getItem('read_global_notifs') || '[]');
+        data = data.map((n: any) => {
+          if (n.userId === 'ALL' && readGlobals.includes(n.id)) {
+            return { ...n, isRead: true };
+          }
+          return n;
+        });
+
         setNotifications(data);
         setUnreadCount(data.filter((n: any) => !n.isRead).length);
       }
@@ -51,7 +61,7 @@ export default function NotificationBell() {
        socket.on('new_notification', (newNotif) => {
          setNotifications(prev => [newNotif, ...prev]);
          setUnreadCount(prev => prev + 1);
-         toast.success(newNotif.title);
+         toast.success(newNotif.title, { icon: newNotif.type === 'SUCCESS' ? '🏆' : '🔵' });
        });
     }
 
@@ -61,12 +71,20 @@ export default function NotificationBell() {
     };
   }, [session]);
 
-  const markAsRead = async (id: string, link: string | null) => {
+  const markAsRead = async (id: string, link: string | null, userId: string) => {
     try {
-      await fetch(`${API_BASE_URL}/api/v2/notifications/${id}/read`, {
-        method: 'PUT',
-        headers: { 'x-user-email': session?.user?.email || '' }
-      });
+      // 👉 FIXED: Separate Global reads vs Personal reads
+      if (userId === 'ALL') {
+        const readGlobals = JSON.parse(localStorage.getItem('read_global_notifs') || '[]');
+        readGlobals.push(id);
+        localStorage.setItem('read_global_notifs', JSON.stringify(readGlobals));
+      } else {
+        await fetch(`${API_BASE_URL}/api/v2/notifications/${id}/read`, {
+          method: 'PUT',
+          headers: { 'x-user-email': session?.user?.email || '' }
+        });
+      }
+
       setUnreadCount(prev => Math.max(0, prev - 1));
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
       setIsOpen(false);
@@ -76,6 +94,11 @@ export default function NotificationBell() {
 
   const markAllRead = async () => {
     try {
+      // Store ALL global IDs currently unread
+      const globalIds = notifications.filter(n => n.userId === 'ALL' && !n.isRead).map(n => n.id);
+      const readGlobals = JSON.parse(localStorage.getItem('read_global_notifs') || '[]');
+      localStorage.setItem('read_global_notifs', JSON.stringify([...readGlobals, ...globalIds]));
+
       await fetch(`${API_BASE_URL}/api/v2/notifications/read-all`, {
         method: 'PUT',
         headers: { 'x-user-email': session?.user?.email || '' }
@@ -95,9 +118,7 @@ export default function NotificationBell() {
           70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
           100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
-        .has-notifications {
-          animation: bell-pulse 2s infinite;
-        }
+        .has-notifications { animation: bell-pulse 2s infinite; }
       `}</style>
       
       <button 
@@ -134,7 +155,7 @@ export default function NotificationBell() {
                 notifications.map(notif => (
                   <div 
                     key={notif.id} 
-                    onClick={() => markAsRead(notif.id, notif.link)}
+                    onClick={() => markAsRead(notif.id, notif.link, notif.userId)}
                     style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', background: notif.isRead ? 'transparent' : 'rgba(56, 189, 248, 0.05)', display: 'flex', gap: 12, alignItems: 'flex-start', transition: '0.2s' }}
                     onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(30, 41, 59, 0.8)'}
                     onMouseLeave={(e) => e.currentTarget.style.background = notif.isRead ? 'transparent' : 'rgba(56, 189, 248, 0.05)'}
