@@ -20,9 +20,16 @@ export default function CommunityHubPage() {
 
     // Gapless Real-Time Updates
     const socket = io(API_BASE_URL, { transports: ['websocket'] });
+    
     socket.on('new_community_post', (post) => {
       setPosts(prev => [post, ...prev]);
     });
+    
+    // 👉 ADDED: Listen for post deletions and remove them instantly
+    socket.on('post_deleted', ({ id }) => {
+      setPosts(prev => prev.filter(p => p.id !== id));
+    });
+
     return () => { socket.disconnect(); };
   }, []);
 
@@ -45,7 +52,6 @@ export default function CommunityHubPage() {
     
     setUploading(true);
     try {
-      // 👉 FIXED: Sending only the required fields. The backend securely identifies the user via the header.
       const payload = {
         title: newPost.title,
         videoUrl: newPost.videoUrl,
@@ -63,7 +69,6 @@ export default function CommunityHubPage() {
 
       const data = await uploadRes.json();
 
-      // 👉 FIXED: Capture and display the exact error message from the backend if it fails
       if (!uploadRes.ok) {
         throw new Error(data.error || "Upload failed on server.");
       }
@@ -75,6 +80,26 @@ export default function CommunityHubPage() {
       toast.error(err.message || "Upload failed.");
     } finally {
       setUploading(false);
+    }
+  };
+
+  // 👉 ADDED: Delete function
+  const handleDeletePost = async (postId: string) => {
+    if (!confirm("Are you sure you want to delete this tutorial? This cannot be undone.")) return;
+    if (!session?.user?.email) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v2/community/problems/${postId}`, {
+        method: 'DELETE',
+        headers: { 'x-user-email': session.user.email }
+      });
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.error || "Failed to delete post.");
+      toast.success("Tutorial deleted.");
+      // Note: State is updated by the socket automatically!
+    } catch (err: any) {
+      toast.error(err.message);
     }
   };
 
@@ -113,40 +138,55 @@ export default function CommunityHubPage() {
           </div>
         ) : (
           <div style={grid}>
-            {posts.map(post => (
-              <div key={post.id} style={card}>
-                {post.videoUrl ? (
-                  <div style={videoContainer}>
-                    <iframe 
-                      src={getYouTubeEmbedUrl(post.videoUrl)} 
-                      title={post.title}
-                      frameBorder="0" 
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                      allowFullScreen
-                      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', borderRadius: '16px 16px 0 0' }}
-                    />
-                  </div>
-                ) : (
-                  <div style={{ ...videoContainer, background: '#1e293b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <span style={{ color: '#64748b' }}>No Video Attached</span>
-                  </div>
-                )}
-                
-                <div style={{ padding: 20 }}>
-                  <h3 style={{ margin: '0 0 4px 0', color: '#eef2ff', fontSize: 18 }}>{post.title}</h3>
-                  <div style={{ color: '#38bdf8', fontSize: 12, marginBottom: 8, fontWeight: 'bold' }}>
-                    By {post.author?.username || post.author?.name || 'Community'}
-                  </div>
-                  <p style={{ color: '#94a3b8', fontSize: 14, margin: '0 0 16px 0', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {post.description}
-                  </p>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={tag}>Tutorial</span>
-                    <a href={`/practice/${post.id}`} style={ghostBtn}>Open Workspace →</a>
+            {posts.map(post => {
+              const isAuthor = session?.user?.email && post.author?.email && session.user.email === post.author.email;
+              return (
+                <div key={post.id} style={{ ...card, position: 'relative' }}>
+                  
+                  {/* 👉 ADDED: Delete button conditionally rendered for the author */}
+                  {isAuthor && (
+                    <button 
+                      onClick={() => handleDeletePost(post.id)}
+                      style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, background: 'rgba(2, 6, 23, 0.7)', border: '1px solid rgba(248, 113, 113, 0.5)', color: '#f87171', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', backdropFilter: 'blur(4px)' }}
+                      title="Delete Tutorial"
+                    >
+                      🗑️ Delete
+                    </button>
+                  )}
+                  
+                  {post.videoUrl ? (
+                    <div style={videoContainer}>
+                      <iframe 
+                        src={getYouTubeEmbedUrl(post.videoUrl)} 
+                        title={post.title}
+                        frameBorder="0" 
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                        allowFullScreen
+                        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', borderRadius: '16px 16px 0 0' }}
+                      />
+                    </div>
+                  ) : (
+                    <div style={{ ...videoContainer, background: '#1e293b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ color: '#64748b' }}>No Video Attached</span>
+                    </div>
+                  )}
+                  
+                  <div style={{ padding: 20 }}>
+                    <h3 style={{ margin: '0 0 4px 0', color: '#eef2ff', fontSize: 18 }}>{post.title}</h3>
+                    <div style={{ color: '#38bdf8', fontSize: 12, marginBottom: 8, fontWeight: 'bold' }}>
+                      By {post.author?.username || post.author?.name || 'Community'}
+                    </div>
+                    <p style={{ color: '#94a3b8', fontSize: 14, margin: '0 0 16px 0', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {post.description}
+                    </p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={tag}>Tutorial</span>
+                      <a href={`/practice/${post.id}`} style={ghostBtn}>Open Workspace →</a>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

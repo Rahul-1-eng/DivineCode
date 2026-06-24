@@ -54,7 +54,7 @@ communityRouter.post('/upload', async (req, res) => {
       include: { author: true }
     });
 
-    // 👉 THE FIX: Ensure a "System" user exists to satisfy Prisma's Foreign Key constraint
+    // Ensure a "System" user exists to satisfy Prisma's Foreign Key constraint
     let systemUser = await prisma.user.findUnique({ where: { id: 'ALL' } });
     if (!systemUser) {
       systemUser = await prisma.user.create({
@@ -67,7 +67,6 @@ communityRouter.post('/upload', async (req, res) => {
       });
     }
 
-    // Now this will safely execute without violating the database relations!
     const notification = await prisma.notification.create({
       data: {
         userId: 'ALL',
@@ -90,6 +89,45 @@ communityRouter.post('/upload', async (req, res) => {
   } catch (error: any) {
     console.error("[Community Upload Error]:", error);
     res.status(500).json({ error: error.message || "Failed to upload community post." });
+  }
+});
+
+// 👉 ADDED: DELETE /api/v2/community/problems/:id
+communityRouter.delete('/problems/:id', async (req, res) => {
+  try {
+    const email = req.headers['x-user-email'] as string;
+    if (!email) return res.status(401).json({ error: "Unauthorized. Missing email header." });
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const problemId = req.params.id;
+    const problem = await prisma.problem.findUnique({
+      where: { id: problemId },
+      include: { author: true }
+    });
+
+    if (!problem) return res.status(404).json({ error: "Post not found." });
+
+    // Verify the requester is the author (or an admin)
+    if (problem.authorId !== user.id && user.role !== 'ADMIN') {
+      return res.status(403).json({ error: "You can only delete your own posts." });
+    }
+
+    await prisma.problem.delete({
+      where: { id: problemId }
+    });
+
+    // Broadcast the deletion so all connected clients remove it instantly
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('post_deleted', { id: problemId });
+    }
+
+    res.json({ success: true, message: "Post deleted successfully." });
+  } catch (error: any) {
+    console.error("[Community Delete Error]:", error);
+    res.status(500).json({ error: error.message || "Failed to delete post." });
   }
 });
 

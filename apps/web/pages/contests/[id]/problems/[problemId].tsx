@@ -1,4 +1,4 @@
-import { CSSProperties, useEffect, useMemo, useState, useRef } from 'react';
+import { CSSProperties, useEffect, useMemo, useState, useRef, Fragment } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
@@ -6,19 +6,44 @@ import { io, Socket } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../../../../lib/api';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
 export async function getServerSideProps() { return { props: {} }; }
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }] };
 
 type TestCase = { id: string; input: string; expectedOutput: string; output: string; status: 'idle' | 'running' | 'passed' | 'failed' | 'error'; isPublic?: boolean };
 
+// Custom Chat Formatter for Markdown, Code Blocks, and Symbols
+const renderChatMessage = (text: string) => {
+  if (!text) return null;
+  const codeBlockRegex = /```([\s\S]*?)```/g;
+  const parts = text.split(codeBlockRegex);
+
+  return parts.map((part, index) => {
+    if (index % 2 === 1) { // This is a code block
+      return (
+        <pre key={index} style={{ background: '#020617', padding: '8px', borderRadius: '6px', overflowX: 'auto', border: '1px solid #334155', margin: '4px 0', fontSize: '12px', color: '#38bdf8' }}>
+          <code>{part}</code>
+        </pre>
+      );
+    }
+    // Handle inline bold and basic text formatting
+    const inlineBold = part.split(/\*\*(.*?)\*\*/g);
+    return (
+      <span key={index} style={{ whiteSpace: 'pre-wrap' }}>
+        {inlineBold.map((str, i) => i % 2 === 1 ? <strong key={i} style={{ color: '#eef2ff' }}>{str}</strong> : str)}
+      </span>
+    );
+  });
+};
+
 function useContestTimer(startTime?: string | Date, endTime?: string | Date) {
   const [timeLeft, setTimeLeft] = useState({ state: 'loading', text: 'Syncing chronometer...' });
-  
   useEffect(() => {
     if (!startTime || !endTime) return;
     const start = new Date(startTime).getTime();
@@ -37,10 +62,8 @@ function useContestTimer(startTime?: string | Date, endTime?: string | Date) {
         setTimeLeft({ state: 'running', text: `Time left: ${Math.floor(diff/3600)}h ${Math.floor((diff%3600)/60)}m ${diff%60}s` });
       }
     }, 1000);
-    
     return () => clearInterval(interval);
   }, [startTime, endTime]);
-  
   return timeLeft;
 }
 
@@ -98,7 +121,6 @@ export default function ContestProblemWorkspace() {
 
   useEffect(() => {
     if (!id || !session?.user?.email) return;
-    
     fetchApi(`/api/v2/contests/${id}?viewerEmail=${session.user.email}`)
       .then(data => {
         const cData = data.data || data;
@@ -236,14 +258,17 @@ export default function ContestProblemWorkspace() {
     } else {
       setVoiceStatus('connecting');
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: { echoCancellation: true, noiseSuppression: true }, 
+          video: false 
+        });
         localStreamRef.current = stream;
         setVoiceStatus('connected');
         socketRef.current?.emit('join-voice', contest.viewerMember.teamId);
         toast.success("Voice channel joined!");
       } catch (err: any) {
         setVoiceStatus('disconnected');
-        toast.error(err?.message?.includes('Permission') ? "Microphone access denied by user." : "Could not access microphone. Check permissions.");
+        toast.error(err?.message?.includes('Permission') ? "Microphone access denied by user." : "Could not access microphone. Ensure you are on HTTPS or localhost.");
       }
     }
   };
@@ -280,13 +305,6 @@ export default function ContestProblemWorkspace() {
         });
       });
 
-      socket.on('code_updated', (data: { code: string, senderId: string }) => {
-         const currentUser = session.user?.email || session.user?.name;
-         if (data.senderId !== currentUser) {
-            setCode(data.code);
-         }
-      });
-
       socket.on('team_problem_solved', (data: any) => {
         if (data?.userId !== (session.user?.name || session.user?.email)) {
           toast.success(`🎉 A teammate just solved a problem!`, { duration: 5000, icon: '🚀' });
@@ -311,6 +329,7 @@ export default function ContestProblemWorkspace() {
             audio = document.createElement('audio');
             audio.id = `audio-${remoteSocketId}`;
             audio.autoplay = true;
+            (audio as any).playsInline = true;
             document.body.appendChild(audio);
           }
           audio.srcObject = e.streams[0];
@@ -321,6 +340,9 @@ export default function ContestProblemWorkspace() {
         socket.emit('voice-offer', { to: remoteSocketId, offer });
       });
 
+      // FIX 1: Removed stray `audio.autoplay` line that was here.
+      // FIX 2: Added missing `});` at the end to properly close this handler.
+      // FIX 3: Added full SDP handshake (setRemoteDescription, createAnswer, setLocalDescription, emit voice-answer).
       socket.on('voice-offer', async ({ from, offer }) => {
         if (!localStreamRef.current) return;
 
@@ -338,6 +360,7 @@ export default function ContestProblemWorkspace() {
             audio = document.createElement('audio');
             audio.id = `audio-${from}`;
             audio.autoplay = true;
+            (audio as any).playsInline = true;
             document.body.appendChild(audio);
           }
           audio.srcObject = e.streams[0];
@@ -384,7 +407,7 @@ export default function ContestProblemWorkspace() {
     }
   }, [id, session?.user?.email, contest?.viewerMember?.teamId, contest?.viewerMember]);
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isChatOpen]);
 
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
@@ -393,7 +416,7 @@ export default function ContestProblemWorkspace() {
       return;
     }
     try {
-      const senderIdentifier = session?.user?.email || session?.user?.name || 'Anonymous';
+      const senderIdentifier = contest?.viewerMember?.userId || session?.user?.email || 'Anonymous';
       
       socketRef.current.emit('sendTeamMessage', {
         contestId: id, 
@@ -613,11 +636,8 @@ export default function ContestProblemWorkspace() {
  return (
     <main style={{...page, minHeight: '100vh', height: '100vh', overflow: 'hidden'}}>
       
-      {/* 👉 YJS Cursor Custom Styles */}
       <style>{`
-        .yRemoteSelection {
-          background-color: rgba(250, 128, 114, 0.2);
-        }
+        .yRemoteSelection { background-color: rgba(250, 128, 114, 0.2); }
         .yRemoteSelectionHead {
           position: absolute;
           border-left: 2px solid orange;
@@ -780,7 +800,6 @@ export default function ContestProblemWorkspace() {
               </div>
             )}
             
-            {/* Video Explanation Section */}
             {(problem?.videoUrl || problem?.problem?.videoUrl) && (
               <div style={{ marginBottom: 20, padding: 15, background: '#020617', borderRadius: 12, border: '1px solid #38bdf8' }}>
                 <strong style={{ color: '#38bdf8', display: 'block', marginBottom: 10 }}>🎥 Video Explanation</strong>
@@ -817,7 +836,6 @@ export default function ContestProblemWorkspace() {
                 language={monacoLanguage} 
                 options={{ fontSize: 15, minimap: { enabled: false }, padding: { top: 16 } }} 
                 onMount={async (editor, monaco) => {
-                  // 👉 FIX: Dynamically import YJS libraries only on the client side
                   const Y = await import('yjs');
                   const { WebrtcProvider } = await import('y-webrtc');
                   const { MonacoBinding } = await import('y-monaco');
@@ -846,7 +864,6 @@ export default function ContestProblemWorkspace() {
                     ytext.insert(0, code);
                   }
 
-                  // Keep local state in sync for submissions
                   editor.onDidChangeModelContent(() => {
                     setCode(editor.getValue());
                   });
@@ -910,10 +927,10 @@ export default function ContestProblemWorkspace() {
         </div>
       )}
 
-      {/* Chat element */}
+      {/* Global / Team Chat Component */}
       <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
         {isChatOpen ? (
-          <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+          <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 340, height: 480, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
             
             <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
               <strong style={{ color: '#a5b4fc' }}>{contest?.viewerMember?.teamId ? 'Team Chat' : 'Global Chat'}</strong>
@@ -926,7 +943,6 @@ export default function ContestProblemWorkspace() {
                 <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>
               </div>
             </div>
-
             <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
               {messages.length === 0 ? (
                 <p style={{ textAlign: 'center', marginTop: '40%', color: '#64748b' }}>No messages yet. Say hi! 👋</p>

@@ -8,25 +8,44 @@ export function setupContestSockets(io: Server) {
       socket.join(`contest:${contestId}`);
     });
 
-    // Fallback logic: If teamId is empty, they join the Global Contest chat room instead.
     socket.on('joinTeam', (roomId: string) => {
       socket.join(`chatRoom:${roomId}`);
     });
 
-    socket.on('sendTeamMessage', async (data) => {
+    socket.on('sendTeamMessage', async (data: { contestId: string, teamId: string, senderId: string, content: string }) => {
       try {
         const roomTarget = data.teamId ? `chatRoom:${data.teamId}` : `chatRoom:contest_global_${data.contestId}`;
         
         if (data.teamId) {
+           // 👉 FIX: If senderId is an email, find the actual User UUID so Prisma doesn't crash!
+           let finalSenderId = data.senderId;
+           if (finalSenderId.includes('@')) {
+             const user = await prisma.user.findUnique({ where: { email: finalSenderId } });
+             if (user) finalSenderId = user.id;
+           }
+
            const message = await prisma.teamMessage.create({
-             data: { contestId: data.contestId, teamId: data.teamId, senderId: data.senderId, content: data.content },
-             include: { sender: { select: { id: true, username: true, avatarUrl: true } } }
+             data: {
+               contestId: data.contestId,
+               teamId: data.teamId,
+               senderId: finalSenderId, // Now safely a UUID
+               content: data.content
+             },
+             include: { sender: { select: { id: true, username: true, avatarUrl: true, name: true } } }
            });
            io.to(roomTarget).emit('teamMessage', message);
         } else {
-           io.to(roomTarget).emit('teamMessage', { id: Date.now().toString(), content: data.content, sender: { username: data.senderId }, createdAt: new Date() });
+           // Global chat for solos (Not saved to DB, just ephemeral)
+           io.to(roomTarget).emit('teamMessage', { 
+             id: Date.now().toString(), 
+             content: data.content, 
+             sender: { username: data.senderId },
+             createdAt: new Date() 
+           });
         }
-      } catch (err) { console.error('[Socket] Failed to route team message', err); }
+      } catch (err) {
+        console.error('[Socket] Failed to route team message:', err);
+      }
     });
 
     socket.on('sync_code', (data: { teamId: string, code: string, senderId: string }) => {
@@ -47,6 +66,7 @@ export function setupContestSockets(io: Server) {
       }
     });
 
+    // --- WebRTC Voice Signaling ---
     socket.on('join-voice', (roomId) => {
       socket.join(`voice:${roomId}`);
       socket.to(`voice:${roomId}`).emit('user-joined-voice', socket.id);
