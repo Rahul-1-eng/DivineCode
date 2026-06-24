@@ -18,7 +18,7 @@ export default function CommunityHubPage() {
   useEffect(() => {
     loadCommunityPosts();
 
-    // 👉 ADDED: Gapless Real-Time Updates
+    // Gapless Real-Time Updates
     const socket = io(API_BASE_URL, { transports: ['websocket'] });
     socket.on('new_community_post', (post) => {
       setPosts(prev => [post, ...prev]);
@@ -45,14 +45,8 @@ export default function CommunityHubPage() {
     
     setUploading(true);
     try {
-      // 👉 FIXED: Explicit headers passed to fetch profile
-      const profileRes = await fetch(`${API_BASE_URL}/api/v2/profile/me`, { 
-        headers: { 'x-user-email': session.user.email } 
-      });
-      const profile = await profileRes.json();
-      
+      // 👉 FIXED: Sending only the required fields. The backend securely identifies the user via the header.
       const payload = {
-        userId: profile.id,
         title: newPost.title,
         videoUrl: newPost.videoUrl,
         description: newPost.description
@@ -60,11 +54,19 @@ export default function CommunityHubPage() {
 
       const uploadRes = await fetch(`${API_BASE_URL}/api/v2/community/upload`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-email': session.user.email },
+        headers: { 
+          'Content-Type': 'application/json', 
+          'x-user-email': session.user.email 
+        },
         body: JSON.stringify(payload)
       });
 
-      if (!uploadRes.ok) throw new Error("Upload failed on server.");
+      const data = await uploadRes.json();
+
+      // 👉 FIXED: Capture and display the exact error message from the backend if it fails
+      if (!uploadRes.ok) {
+        throw new Error(data.error || "Upload failed on server.");
+      }
       
       toast.success("Tutorial Published! Global notification sent.");
       setShowUploadModal(false);
