@@ -3,14 +3,16 @@ import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
 import { io, Socket } from 'socket.io-client';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../../../../lib/api';
+import * as Y from 'yjs';
+import { WebrtcProvider } from 'y-webrtc';
+import { MonacoBinding } from 'y-monaco';
 
 export async function getServerSideProps() { return { props: {} }; }
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
-
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -201,7 +203,6 @@ export default function ContestProblemWorkspace() {
     }
   }, [isMCQ, problem, redirectInfo, problemIdStr]);
 
-  // 👉 ADDED: Helper to clean up audio DOM elements
   const cleanupAudioElement = (socketId: string) => {
     const audio = document.getElementById(`audio-${socketId}`) as HTMLAudioElement;
     if (audio) {
@@ -214,7 +215,7 @@ export default function ContestProblemWorkspace() {
 
   const toggleVoice = async () => {
     if (!contest?.viewerMember?.teamId) {
-      toast.error("You must be in a team to use voice chat.");
+      toast.error("You must be in a team to use voice chat. Solos can only use Text Chat.");
       return;
     }
     if (!socketRef.current) {
@@ -250,7 +251,8 @@ export default function ContestProblemWorkspace() {
   };
 
   useEffect(() => {
-    if (!id || !session?.user?.email || !contest?.viewerMember?.teamId) return;
+    // 👉 FIX: Removed !contest?.viewerMember?.teamId from here so Solos can connect!
+    if (!id || !session?.user?.email) return; 
     
     try {
       socketRef.current = io(API_BASE_URL, { 
@@ -264,7 +266,9 @@ export default function ContestProblemWorkspace() {
       
       socket.on('connect', () => {
         socket.emit('joinContest', id); 
-        socket.emit('joinTeam', contest.viewerMember.teamId);
+        // 👉 FIX: Fallback to global room if not in a team
+        const chatRoomId = contest?.viewerMember?.teamId || `contest_global_${id}`;
+        socket.emit('joinTeam', chatRoomId);
       });
 
       socket.on('connect_error', (error: any) => {
@@ -280,10 +284,8 @@ export default function ContestProblemWorkspace() {
         });
       });
 
-      // 👉 ADDED: Live Editor Sync Receiver
       socket.on('code_updated', (data: { code: string, senderId: string }) => {
          const currentUser = session.user?.email || session.user?.name;
-         // Prevent overwriting if we are the ones who just sent it
          if (data.senderId !== currentUser) {
             setCode(data.code);
          }
@@ -296,7 +298,6 @@ export default function ContestProblemWorkspace() {
         }
       });
 
-      // 👉 FIXED: FULL WebRTC IMPLEMENTATION FOR VOICE
       socket.on('user-joined-voice', async (remoteSocketId: string) => {
         if (!localStreamRef.current) return;
         
@@ -389,7 +390,6 @@ export default function ContestProblemWorkspace() {
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // 👉 ADDED: Collaborative Keystroke Sync Function
   const handleCodeChange = (val: string | undefined) => {
     const updatedCode = val || '';
     setCode(updatedCode);
@@ -405,19 +405,17 @@ export default function ContestProblemWorkspace() {
 
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
-    if (!contest?.viewerMember?.teamId) {
-      toast.error("You must be in a team to send messages.");
-      return;
-    }
     if (!socketRef.current) {
       toast.error("Chat not connected. Please wait...");
       return;
     }
     try {
       const senderIdentifier = session?.user?.email || session?.user?.name || 'Anonymous';
+      
+      // 👉 FIX: Empty string will route to global room in backend
       socketRef.current.emit('sendTeamMessage', {
         contestId: id, 
-        teamId: contest.viewerMember.teamId,
+        teamId: contest?.viewerMember?.teamId || '', 
         senderId: senderIdentifier,
         content: chatInput.trim()
       });
@@ -799,7 +797,23 @@ export default function ContestProblemWorkspace() {
             )}
           </section>
           <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
-            <Editor height="65%" theme="vs-dark" language={monacoLanguage} value={code} onChange={handleCodeChange} />
+         <Editor 
+  height="65%" theme="vs-dark" language={monacoLanguage} 
+  onMount={(editor, monaco) => {
+    const ydoc = new Y.Doc();
+    const roomName = `divinecode-${contest?.viewerMember?.teamId || id}-${problemIdStr}`;
+    const provider = new WebrtcProvider(roomName, ydoc, { 
+      signaling: ['wss://signaling.yjs.dev'] 
+    });
+    const ytext = ydoc.getText('monaco');
+    const awareness = provider.awareness;
+    const binding = new MonacoBinding(ytext, editor.getModel()!, new Set([editor]), awareness);
+    if (ytext.toString().length === 0) ytext.insert(0, code);
+    
+    // Cleanup
+    return () => { binding.destroy(); provider.disconnect(); ydoc.destroy(); };
+  }}
+/>
             <div style={{ height: '35%', background: '#1e1e1e', borderTop: '1px solid #333' }}>
               <div style={tabsHeader}>
                 <button onClick={() => setActiveTab('cph')} style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle}>TEST CASES</button>
@@ -854,56 +868,57 @@ export default function ContestProblemWorkspace() {
         </div>
       )}
 
-      {contest?.viewerMember?.teamId && (
-        <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
-          {isChatOpen ? (
-            <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
-              
-              <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
-                <strong style={{ color: '#a5b4fc' }}>Team Chat</strong>
-                <div style={{ display: 'flex', gap: 8 }}>
+      {/* 👉 FIX: Chat element always renders, handles Solo Global vs Team automatically */}
+      <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
+        {isChatOpen ? (
+          <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+            
+            <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
+              <strong style={{ color: '#a5b4fc' }}>{contest?.viewerMember?.teamId ? 'Team Chat' : 'Global Chat'}</strong>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {contest?.viewerMember?.teamId && (
                   <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)', color: voiceStatus === 'connected' ? '#4ade80' : '#fff', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
                     {voiceStatus === 'connected' ? '🟢 Voice On' : voiceStatus === 'connecting' ? '⏳ Connecting...' : '🎤 Join Voice'}
                   </button>
-                  <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>
-                </div>
-              </div>
-
-              <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
-                {messages.length === 0 ? (
-                  <p style={{ textAlign: 'center', marginTop: '40%', color: '#64748b' }}>No messages yet. Say hi! 👋</p>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {messages.map((msg: any) => {
-                      if (!msg || !msg.id) return null;
-                      const username = msg.sender?.username || msg.sender?.name || msg.senderId || 'Teammate';
-                      const timestamp = new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                      return (
-                        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}>
-                            <strong style={{ color: '#67e8f9' }}>{username}</strong>
-                            <span style={{ color: '#64748b' }}>{timestamp}</span>
-                          </div>
-                          <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.content || '(empty message)'}</div>
-                        </motion.div>
-                      );
-                    })}
-                    <div ref={messagesEndRef} />
-                  </div>
                 )}
+                <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>
               </div>
-              <div style={{ padding: 12, borderTop: '1px solid #334155', display: 'flex', gap: 8 }}>
-                <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ width: '100%', padding: 8, borderRadius: 6, background: '#1e293b', color: '#fff', border: '1px solid #334155' }} />
-                <button onClick={handleSendMessage} style={{ background: '#6366f1', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 6, cursor: 'pointer' }}>Send</button>
-              </div>
-            </motion.div>
-          ) : (
-            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setIsChatOpen(true)} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: '50%', width: 56, height: 56, cursor: 'pointer', boxShadow: '0 4px 12px rgba(99,102,241,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
-            </motion.button>
-          )}
-        </div>
-      )}
+            </div>
+
+            <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
+              {messages.length === 0 ? (
+                <p style={{ textAlign: 'center', marginTop: '40%', color: '#64748b' }}>No messages yet. Say hi! 👋</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {messages.map((msg: any) => {
+                    if (!msg || !msg.id) return null;
+                    const username = msg.sender?.username || msg.sender?.name || msg.senderId || 'Participant';
+                    const timestamp = new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    return (
+                      <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}>
+                          <strong style={{ color: '#67e8f9' }}>{username}</strong>
+                          <span style={{ color: '#64748b' }}>{timestamp}</span>
+                        </div>
+                        <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.content || '(empty message)'}</div>
+                      </motion.div>
+                    );
+                  })}
+                  <div ref={messagesEndRef} />
+                </div>
+              )}
+            </div>
+            <div style={{ padding: 12, borderTop: '1px solid #334155', display: 'flex', gap: 8 }}>
+              <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ width: '100%', padding: 8, borderRadius: 6, background: '#1e293b', color: '#fff', border: '1px solid #334155' }} />
+              <button onClick={handleSendMessage} style={{ background: '#6366f1', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 6, cursor: 'pointer' }}>Send</button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setIsChatOpen(true)} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: '50%', width: 56, height: 56, cursor: 'pointer', boxShadow: '0 4px 12px rgba(99,102,241,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+          </motion.button>
+        )}
+      </div>
     </main>
   );
 }

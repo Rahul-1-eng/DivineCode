@@ -39,6 +39,7 @@ const DAILY_QUOTES = [
 export default function Home() {
   const { data: session, status } = useSession();
   const [profile, setProfile] = useState<any>(null);
+  const [topUsers, setTopUsers] = useState<any[]>([]);
   const router = useRouter();
 
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -50,17 +51,17 @@ export default function Home() {
     { role: 'ai', text: 'Welcome to DivineCode Pro. I am configured to handle algorithmic breakdowns, testcase overrides, and platform navigation. How can I assist you today?' }
   ]);
 
-  // LIVE TICKER STATE (Replacing Mock Data)
+  // LIVE TICKER STATE - Cleaned up to remove mock spam. Starts with a baseline status.
   const [liveEvents, setLiveEvents] = useState<string[]>([
     "⚡ System: DivineCode Judge0 nodes initialized and scaling.",
-    "🏆 IICPC Global Prelims Mashup is open for registration.",
+    "🌐 Platform: Real-time WebSocket connection established."
   ]);
 
   const navLinks = [
     ['Practice Hub', '/practice'], 
     ['Duel Arena', '/duel'], 
     ['Contests', '/contests'], 
-    ['Community', '/community'], // Added Community to Navigation
+    ['Community', '/community'], 
     ['Create Room', '/contests/create']
   ];
 
@@ -78,7 +79,17 @@ export default function Home() {
     return () => { socket.disconnect(); };
   }, []);
 
+  // Fetch Profile and Real Leaderboard Data
   useEffect(() => {
+    // 1. Fetch Real Hall of Fame
+    fetch(`${API_BASE_URL}/api/v2/leaderboard/global`)
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) setTopUsers(data.slice(0, 5));
+      })
+      .catch(() => null);
+
+    // 2. Fetch User Profile Data
     if (session?.user?.email) {
       fetch(`${API_BASE_URL}/api/v2/profile/me`, { headers: { 'x-user-email': session.user.email } })
       .then(r => r.json())
@@ -195,7 +206,8 @@ export default function Home() {
 
         {/* Live Matchmaking Carousel / Ticker */}
         <div style={{ maxWidth: 1200, margin: '0 auto 40px', background: 'rgba(2, 6, 23, 0.4)', border: '1px solid rgba(34, 211, 238, 0.1)', borderRadius: 12, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
-          <div style={{ padding: '10px 16px', background: 'linear-gradient(90deg, #1e293b, rgba(30,41,59,0))', fontWeight: 'bold', color: '#38bdf8', fontSize: 14, zIndex: 2, borderRight: '1px solid rgba(255,255,255,0.05)' }}>
+          <div style={{ padding: '10px 16px', background: 'linear-gradient(90deg, #1e293b, rgba(30,41,59,0))', fontWeight: 'bold', color: '#38bdf8', fontSize: 14, zIndex: 2, borderRight: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 1.5 }} style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', boxShadow: '0 0 10px #ef4444' }} />
             LIVE
           </div>
           <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
@@ -224,33 +236,48 @@ export default function Home() {
 
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                 <motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} href="/contests/create" style={{ display: 'inline-block', color: '#020617', textDecoration: 'none', padding: '14px 28px', borderRadius: 999, fontWeight: 800, background: 'linear-gradient(135deg,#818cf8,#22d3ee)', boxShadow: '0 10px 30px rgba(34,211,238,0.3)' }}>Deploy Mashup Room</motion.a>
-                <motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} href="/practice" style={{ display: 'inline-block', color: '#fff', textDecoration: 'none', padding: '14px 28px', borderRadius: 999, fontWeight: 800, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.03)' }}>Open Practice Hub</motion.a>
+                <motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} href="/duel" style={{ display: 'inline-block', color: '#fff', textDecoration: 'none', padding: '14px 28px', borderRadius: 999, fontWeight: 800, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.03)' }}>Enter Duel Arena ⚔️</motion.a>
               </div>
             </div>
 
-            {/* Dashboard Telemetry & Radar Integration */}
+            {/* Dashboard Telemetry & Leaderboard Integration */}
             <div style={{ flex: '1 1 350px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-               {/* Display the heatmap prominently if a user is logged in */}
               {session && (
                  <div style={{ width: '100%' }}>
                    <ActivityHeatmap submissions={profile?.submissions || []} />
                  </div>
               )}
               
-              {/* Active Matchmaking Radar */}
-              <div style={{ background: 'rgba(2, 6, 23, 0.4)', borderRadius: 24, padding: 32, border: '1px solid rgba(255,255,255,0.03)', display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', overflow: 'hidden' }}>
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'radial-gradient(circle at center, rgba(34, 211, 238, 0.08) 0%, transparent 60%)' }} />
-                <h3 style={{ margin: '0 0 24px', color: '#fff', fontSize: 16, fontWeight: 800, zIndex: 1, letterSpacing: '1px', textTransform: 'uppercase' }}>Active Matchmaking</h3>
+              {/* REAL Global Hall of Fame */}
+              <div style={{ background: 'rgba(2, 6, 23, 0.6)', borderRadius: 24, padding: 24, border: '1px solid rgba(34, 211, 238, 0.2)', position: 'relative', overflow: 'hidden' }}>
+                <h3 style={{ margin: '0 0 16px', color: '#fff', fontSize: 16, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ color: '#fbbf24' }}>★</span> Global Hall of Fame
+                </h3>
                 
-                <div style={{ position: 'relative', width: 140, height: 140, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                  <motion.div animate={{ scale: [1, 2.5], opacity: [0.6, 0] }} transition={{ repeat: Infinity, duration: 2.5, ease: "easeOut" }} style={{ position: 'absolute', width: 60, height: 60, borderRadius: '50%', border: '2px solid #38bdf8' }} />
-                  <motion.div animate={{ scale: [1, 2.5], opacity: [0.6, 0] }} transition={{ repeat: Infinity, duration: 2.5, ease: "easeOut", delay: 1.25 }} style={{ position: 'absolute', width: 60, height: 60, borderRadius: '50%', border: '2px solid #818cf8' }} />
-                  <div style={{ width: 50, height: 50, borderRadius: '50%', background: 'linear-gradient(135deg, #38bdf8, #818cf8)', zIndex: 2, display: 'grid', placeItems: 'center', fontSize: 20, boxShadow: '0 0 25px rgba(56, 189, 248, 0.4)' }}>
-                    ⚔️
+                {topUsers.length === 0 ? (
+                  <p style={{ color: '#64748b', fontSize: 14 }}>Loading leaderboard data...</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {topUsers.map((u, i) => (
+                      <motion.div 
+                        key={i} 
+                        whileHover={{ scale: 1.02, backgroundColor: 'rgba(34, 211, 238, 0.1)' }}
+                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', transition: '0.2s' }}
+                        onClick={() => router.push(`/u/${u.username}`)}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <strong style={{ color: i === 0 ? '#fbbf24' : i === 1 ? '#cbd5e1' : i === 2 ? '#b45309' : '#64748b' }}>#{i + 1}</strong>
+                          <span style={{ color: '#eef2ff', fontWeight: 600 }}>{u.username || u.name}</span>
+                        </div>
+                        <span style={{ color: '#38bdf8', fontWeight: 800 }}>{u.rating || 1200}</span>
+                      </motion.div>
+                    ))}
                   </div>
-                </div>
+                )}
                 
-                <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 24, zIndex: 1, fontWeight: 500 }}>Scanning global arena for 1v1 Duels...</p>
+                <div style={{ marginTop: 16, textAlign: 'center' }}>
+                  <a href="/leaderboard" style={{ color: '#94a3b8', fontSize: 13, textDecoration: 'none', fontWeight: 'bold' }}>View Full Leaderboard →</a>
+                </div>
               </div>
 
             </div>

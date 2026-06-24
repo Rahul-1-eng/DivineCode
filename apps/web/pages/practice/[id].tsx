@@ -19,7 +19,7 @@ export default function ProblemWorkspace() {
   const [running, setRunning] = useState(false);
   const [isKitsMenuOpen, setIsKitsMenuOpen] = useState(false);
   
-  // Added 'voice' to workspace tabs
+  // 👉 ADDED: The new 'voice' tab state
   const [workspaceTab, setWorkspaceTab] = useState<'problem' | 'video' | 'discuss' | 'voice'>('problem');
   const [consoleTab, setConsoleTab] = useState<'output' | 'mentor'>('output');
 
@@ -31,7 +31,6 @@ export default function ProblemWorkspace() {
     { author: 'System_Admin', message: 'If executing in O(N), ensure the sparse initialization bounds are checked properly to avoid segment errors.', timestamp: '1 hour ago' }
   ]);
 
-  // Pre-loaded Battle-Kits tailored for high-speed contest environments
   const battleKits = [
     { name: 'IICPC Standard IO Boilerplate', code: '#include <bits/stdc++.h>\nusing namespace std;\n\nvoid solve() {\n    // Implementation here\n}\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n    int t; cin >> t;\n    while(t--) solve();\n    return 0;\n}' },
     { name: 'Segment Tree Template', code: '// Segment Tree (Point Update, Range Query)\nconst int N = 1e5+5;\nint tree[4*N];\n\nvoid build(int node, int start, int end) {\n    if(start == end) return;\n    int mid = (start + end) / 2;\n    build(2*node, start, mid);\n    build(2*node+1, mid+1, end);\n    tree[node] = tree[2*node] + tree[2*node+1];\n}' },
@@ -42,7 +41,7 @@ export default function ProblemWorkspace() {
     try {
       const audio = new Audio('/accepted.mp3');
       audio.volume = 0.6;
-      audio.play().catch(() => {}); // Catch prevents browser auto-play block errors
+      audio.play().catch(() => {});
     } catch (e) {}
   };
 
@@ -86,7 +85,6 @@ export default function ProblemWorkspace() {
       const data = await res.json();
       setOutputs(data.results || []);
 
-      // Trigger Audio Gamification if all tests pass
       const allAccepted = data.results?.length > 0 && data.results.every((r: any) => r.verdict === 'ACCEPTED');
       if (allAccepted) {
         playSuccessAudio();
@@ -217,7 +215,7 @@ export default function ProblemWorkspace() {
             </div>
           )}
 
-          {/* Voice AI Workspace embedded */}
+          {/* 👉 ADDED: Voice AI Interactive Window explicitly passing the code state */}
           {workspaceTab === 'voice' && (
              <VoiceInterviewer 
                 currentQuestion={problem} 

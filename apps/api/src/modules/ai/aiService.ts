@@ -213,28 +213,27 @@ export async function conductAiInterview(problemPrompt: string, userResponse: st
 
   const historyString = chatHistory.map(msg => `${msg.role.toUpperCase()}: ${msg.text}`).join('\n');
 
-  // 👉 ADDED: Contextualizes the prompt if code is present
-  const codeContext = currentCode && currentCode.trim() !== '' && currentCode.trim() !== '// Implementation source framework entry' && currentCode.trim() !== '// Write your solution here...'
-    ? `\nCandidate's Current Editor Code:\n\`\`\`\n${currentCode}\n\`\`\`\n\nCross-reference their spoken response with the code they have written. Does their spoken logic align with their actual code implementation? Point out discrepancies if any.`
+  const codeContext = currentCode && currentCode.trim() !== '' && !currentCode.includes('// Implementation source framework entry')
+    ? `\nCandidate's Current Editor Code:\n\`\`\`\n${currentCode}\n\`\`\`\n\nCross-reference their spoken response with the code they have written. Does their spoken logic align with their actual code implementation?`
     : '';
 
-  const prompt = `You are a senior FAANG technical interviewer. 
-  The candidate is answering the following question: "${problemPrompt}"
+  const prompt = `You are a senior FAANG technical interviewer conducting a mock interview.
+  The candidate is answering: "${problemPrompt}"
   
   Previous Conversation:
   ${historyString}
 
   Candidate's Latest Spoken Response: "${userResponse}"${codeContext}
 
-  Evaluate the candidate's latest response. 
-  1. Provide constructive, conversational feedback.
-  2. If their answer is incomplete or mathematically unoptimized, ask a follow-up question to guide them.
-  3. If they fully solved it (both spoken logic and any provided code), congratulate them.
-  4. Assign a current progress score from 0 to 100.
-  5. Set "isPassed" to true ONLY if they have thoroughly answered the core concept optimally AND their code logic matches.
+  Evaluate the candidate's latest response on TWO fronts: Technical and Communication.
+  1. Technical: Provide constructive feedback on their algorithm, complexity, and code accuracy.
+  2. Communication & Fluency: Evaluate their English speaking structure. Are there grammatical errors in their transcribed text? How fluent and professional does their explanation sound?
+  3. If their answer is incomplete, ask a guiding follow-up question.
+  4. Assign a technical score (0-100) and an English fluency score (0-100).
+  5. Set "isPassed" to true ONLY if they thoroughly answered the core concept optimally.
 
-  Respond strictly with a JSON object. Format: 
-  {"feedback": "...", "followUpQuestion": "...", "score": 85, "isPassed": false}`;
+  Respond strictly with JSON. Format: 
+  {"feedback": "...", "followUpQuestion": "...", "technicalScore": 85, "fluencyScore": 90, "pronunciationTips": "...", "isPassed": false}`;
 
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;

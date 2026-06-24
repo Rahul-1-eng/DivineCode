@@ -4,11 +4,11 @@ import toast from 'react-hot-toast';
 
 export default function VoiceInterviewer({ 
   currentQuestion, 
-  code,              // Received exact code snapshot
+  code,              // 👉 ADDED: Capture exact code snapshot
   onSuccess 
 }: { 
   currentQuestion: any, 
-  code?: string,     // Type added
+  code?: string,     // 👉 ADDED: Add typing
   onSuccess: () => void 
 }) {
   const [isListening, setIsListening] = useState(false);
@@ -17,15 +17,21 @@ export default function VoiceInterviewer({
   const [chatLog, setChatLog] = useState<{role: string, text: string}[]>([]);
   const [isSupported, setIsSupported] = useState(true);
   
+  // New State for English Fluency Metrics
+  const [metrics, setMetrics] = useState<{tech: number, fluency: number, tips: string} | null>(null);
+  
   const recognitionRef = useRef<any>(null);
   const synthesisRef = useRef<SpeechSynthesis | null>(null);
-  
-  // Ref buffer to prevent stale state closures inside the onend event
   const transcriptBuffer = useRef('');
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       synthesisRef.current = window.speechSynthesis;
+      // Preload voices
+      window.speechSynthesis.onvoiceschanged = () => {
+        synthesisRef.current?.getVoices(); 
+      };
+
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       
       if (!SpeechRecognition) {
@@ -34,10 +40,8 @@ export default function VoiceInterviewer({
       }
 
       recognitionRef.current = new SpeechRecognition();
-      // Keep listening even if the user pauses to think
       recognitionRef.current.continuous = true; 
       recognitionRef.current.interimResults = true;
-      // Optimized for precise English pronunciation and fluency tracking
       recognitionRef.current.lang = 'en-IN'; 
       
       recognitionRef.current.onresult = (event: any) => {
@@ -50,7 +54,6 @@ export default function VoiceInterviewer({
       };
 
       recognitionRef.current.onerror = (event: any) => {
-        console.error("Speech Rec Error:", event.error);
         setIsListening(false);
         if (event.error === 'not-allowed') {
           toast.error("Microphone access denied. Please allow permissions in your browser.");
@@ -63,7 +66,6 @@ export default function VoiceInterviewer({
         setIsListening(false);
         const finalBuffer = transcriptBuffer.current.trim();
         
-        // Only trigger AI if the user actually said a meaningful sentence
         if (finalBuffer.length > 10) {
           processAudioToAi(finalBuffer);
         } else if (finalBuffer.length > 0) {
@@ -74,7 +76,6 @@ export default function VoiceInterviewer({
       };
     }
 
-    // Cleanup to prevent memory leaks or ghost audio when navigating away
     return () => {
       if (recognitionRef.current) recognitionRef.current.abort();
       if (synthesisRef.current) synthesisRef.current.cancel();
@@ -91,7 +92,7 @@ export default function VoiceInterviewer({
       const res = await fetch(`/api/v2/interview/questions/${currentQuestion.id}/mock`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // Passing the code explicitly here along with the voice input
+        // 👉 ADDED: Pass the live code explicitly to the AI
         body: JSON.stringify({ userResponse: userText, history: chatLog, code })
       });
       const data = await res.json();
@@ -100,6 +101,13 @@ export default function VoiceInterviewer({
         const aiResponseText = data.evaluation.feedback + " " + (data.evaluation.followUpQuestion || "");
         setChatLog(prev => [...prev, { role: 'interviewer', text: aiResponseText }]);
         
+        // Render the Fluency & Technical scores returned from our backend
+        setMetrics({
+          tech: data.evaluation.technicalScore || 0,
+          fluency: data.evaluation.fluencyScore || 0,
+          tips: data.evaluation.pronunciationTips || "Clear speaking."
+        });
+
         if (data.evaluation.isPassed) {
           toast.success("Module Passed!", { icon: '🏆' });
           setTimeout(() => onSuccess(), 2000);
@@ -108,7 +116,6 @@ export default function VoiceInterviewer({
         speakText(aiResponseText);
       }
     } catch (err) {
-      console.error("Voice AI Error", err);
       toast.error("Failed to reach Interviewer AI.");
       setIsAiSpeaking(false);
     }
@@ -116,32 +123,30 @@ export default function VoiceInterviewer({
 
   const speakText = (text: string) => {
     if (!synthesisRef.current) return;
-    
-    // Explicitly abort any active microphone streams to absolutely prevent Echo feedback
     if (recognitionRef.current) recognitionRef.current.abort();
 
     const utterance = new SpeechSynthesisUtterance(text);
     const voices = synthesisRef.current.getVoices();
-    const proVoice = voices.find(v => v.lang === 'en-US' && (v.name.includes('Google') || v.name.includes('Samantha'))) || voices[0];
     
-    if (proVoice) utterance.voice = proVoice;
+    // Proactively fetch premium conversational voices instead of the robotic default
+    let premiumVoice = voices.find(v => v.name.includes('Google UK English') || v.name.includes('Microsoft Ava') || v.name.includes('Samantha'));
+    if (!premiumVoice && voices.length > 0) {
+      premiumVoice = voices.find(v => v.lang.startsWith('en')) || voices[0];
+    }
     
-    utterance.rate = 1.05; 
-    utterance.pitch = 0.95; 
+    if (premiumVoice) utterance.voice = premiumVoice;
     
-    utterance.onend = () => {
-      setIsAiSpeaking(false);
-    };
-
+    utterance.rate = 1.0; 
+    utterance.pitch = 1.05; 
+    
+    utterance.onend = () => setIsAiSpeaking(false);
     synthesisRef.current.speak(utterance);
   };
 
   const toggleMic = () => {
     if (isListening) {
-      // Manually stopping triggers the onend event which processes the buffer
       recognitionRef.current?.stop();
     } else {
-      // Force kill any residual AI voice before opening the mic to prevent Echo
       if (synthesisRef.current) synthesisRef.current.cancel();
       setIsAiSpeaking(false);
       
@@ -151,7 +156,6 @@ export default function VoiceInterviewer({
         recognitionRef.current?.start();
         setIsListening(true);
       } catch (e) {
-        // Fallback if SpeechRecognition engine is already starting
         console.warn(e);
       }
     }
@@ -169,7 +173,6 @@ export default function VoiceInterviewer({
   return (
     <div style={{ background: '#020617', borderRadius: 24, padding: 30, border: '1px solid #1e293b', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
       
-      {/* Background glow when listening */}
       <AnimatePresence>
         {isListening && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'radial-gradient(circle at center, rgba(239,68,68,0.1) 0%, transparent 70%)', pointerEvents: 'none' }} />
@@ -209,7 +212,24 @@ export default function VoiceInterviewer({
         {isListening ? '🛑 Stop & Submit Answer' : '🎤 Start Speaking'}
       </button>
 
-      <div style={{ marginTop: 40, textAlign: 'left', maxHeight: 300, overflowY: 'auto', background: 'rgba(15,23,42,0.6)', padding: 20, borderRadius: 16, border: '1px solid #1e293b', position: 'relative', zIndex: 2 }}>
+      {/* The Dynamic Score Matrix */}
+      {metrics && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 30, position: 'relative', zIndex: 2 }}>
+          <div style={{ background: 'rgba(34,211,238,0.1)', padding: 15, borderRadius: 12, border: '1px solid rgba(34,211,238,0.3)' }}>
+            <div style={{ fontSize: 12, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>Technical Logic</div>
+            <div style={{ fontSize: 28, color: '#22d3ee', fontWeight: 'bold' }}>{metrics.tech}/100</div>
+          </div>
+          <div style={{ background: 'rgba(168,85,247,0.1)', padding: 15, borderRadius: 12, border: '1px solid rgba(168,85,247,0.3)' }}>
+            <div style={{ fontSize: 12, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>English Fluency</div>
+            <div style={{ fontSize: 28, color: '#a855f7', fontWeight: 'bold' }}>{metrics.fluency}/100</div>
+          </div>
+          <div style={{ gridColumn: '1 / -1', background: 'rgba(255,255,255,0.05)', padding: 12, borderRadius: 12, fontSize: 13, color: '#cbd5e1', textAlign: 'left' }}>
+            <strong style={{ color: '#a855f7' }}>Pronunciation & Grammar:</strong> {metrics.tips}
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 25, textAlign: 'left', maxHeight: 300, overflowY: 'auto', background: 'rgba(15,23,42,0.6)', padding: 20, borderRadius: 16, border: '1px solid #1e293b', position: 'relative', zIndex: 2 }}>
         {chatLog.length === 0 && <div style={{ color: '#64748b', textAlign: 'center', fontStyle: 'italic', padding: '20px 0' }}>Conversation transcript will appear here. The system will evaluate your technical logic and communication clarity.</div>}
         {chatLog.map((log, i) => (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} key={i} style={{ marginBottom: 20, color: log.role === 'interviewer' ? '#38bdf8' : '#e2e8f0', lineHeight: 1.6, background: log.role === 'interviewer' ? 'transparent' : 'rgba(255,255,255,0.03)', padding: log.role === 'interviewer' ? 0 : '12px 16px', borderRadius: 12 }}>

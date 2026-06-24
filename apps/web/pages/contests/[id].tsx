@@ -404,7 +404,6 @@ export default function ContestRoomPage() {
     }
   }
 
-  // --- CORE CHAT LOGIC ---
   const handleSendMessage = () => {
     if (!chatInput.trim() || !socketRef.current) return;
     
@@ -466,139 +465,139 @@ export default function ContestRoomPage() {
   }, [id, session, status]);
   
   useEffect(() => {
-    if (!id || !session || isFinal || !contest) return;
-    
-    socketRef.current = io(API_BASE_URL, { transports: ['websocket'], reconnection: true });
-    const socket = socketRef.current;
-    
-    socket.on('connect', () => { 
-      socket.emit('joinContest', id); 
-      if (contest.viewerMember?.teamId) socket.emit('joinTeam', contest.viewerMember.teamId);
-    });
+      if (!id || !contest || isFinal) return; 
+      
+      socketRef.current = io(API_BASE_URL, { transports: ['websocket'], reconnection: true });
+      const socket = socketRef.current;
+      
+      socket.on('connect', () => { 
+        socket.emit('joinContest', id); 
+        if (contest.viewerMember?.teamId) socket.emit('joinTeam', contest.viewerMember.teamId);
+      });
 
-    socket.on('lobbyMessage', (msg) => { setLobbyMessages(prev => [...prev, msg]); });
-    
-    socket.on('standings:update', () => { 
-        loadContest(); 
+      socket.on('lobbyMessage', (msg) => { setLobbyMessages(prev => [...prev, msg]); });
+      
+      socket.on('standings:update', () => { 
+          loadContest(); 
+          loadSubmissions();
+      });
+      
+      socket.on('submission:judged', (sub) => { 
         loadSubmissions();
-    });
-    
-    socket.on('submission:judged', (sub) => { 
-      loadSubmissions();
-      if (sub.verdict === 'ACCEPTED' && sub.userId === (session?.user?.name || session?.user?.email)) playSuccessSound();
-    });
-
-    socket.on('teamMessage', (incomingMessage) => {
-      setMessages((prev) => {
-        if (prev.some(m => m.id === incomingMessage.id)) return prev;
-        return [...prev, incomingMessage];
+        if (sub.verdict === 'ACCEPTED' && sub.userId === (session?.user?.name || session?.user?.email)) playSuccessSound();
       });
-    });
 
-    socket.on('team_problem_solved', (data) => {
-      if (data.userId !== (session.user?.name || session.user?.email)) {
-        toast.success(`🎉 A teammate just solved a problem!`, { duration: 5000, icon: '🚀' }); playSuccessSound();
-      }
-      loadSubmissions();
-    });
-
-    // Fortified WebRTC Architecture
-    socket.on('user-joined-voice', async (peerId) => {
-      if (!localStreamRef.current) return;
-      const pc = new RTCPeerConnection({ 
-          iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' }, 
-              { urls: 'stun:global.stun.twilio.com:3478' }
-          ] 
+      socket.on('teamMessage', (incomingMessage) => {
+        setMessages((prev) => {
+          if (prev.some(m => m.id === incomingMessage.id)) return prev;
+          return [...prev, incomingMessage];
+        });
       });
-      peersRef.current[peerId] = pc;
-      
-      localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
-      
-      pc.ontrack = (event) => { 
-          const globalAudioNode = document.createElement('audio');
-          globalAudioNode.srcObject = event.streams[0];
-          globalAudioNode.autoplay = true;
-          document.body.appendChild(globalAudioNode);
-      };
-      
-      pc.onicecandidate = (event) => { 
-          if (event.candidate) socket.emit('voice-ice-candidate', { to: peerId, candidate: event.candidate }); 
-      };
-      
-      pc.oniceconnectionstatechange = () => {
-          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-              pc.close();
-              delete peersRef.current[peerId];
-          }
-      };
 
-      const offer = await pc.createOffer(); 
-      await pc.setLocalDescription(offer); 
-      socket.emit('voice-offer', { to: peerId, offer });
-    });
-
-    socket.on('voice-offer', async ({ from, offer }) => {
-      if (!localStreamRef.current) return;
-      const pc = new RTCPeerConnection({ 
-          iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:global.stun.twilio.com:3478' }
-          ] 
+      socket.on('team_problem_solved', (data) => {
+        if (data.userId !== (session.user?.name || session.user?.email)) {
+          toast.success(`🎉 A teammate just solved a problem!`, { duration: 5000, icon: '🚀' }); playSuccessSound();
+        }
+        loadSubmissions();
       });
-      peersRef.current[from] = pc;
-      
-      localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
-      
-      pc.ontrack = (event) => { 
-          const globalAudioNode = document.createElement('audio');
-          globalAudioNode.srcObject = event.streams[0];
-          globalAudioNode.autoplay = true;
-          document.body.appendChild(globalAudioNode);
-      };
-      
-      pc.onicecandidate = (event) => { 
-          if (event.candidate) socket.emit('voice-ice-candidate', { to: from, candidate: event.candidate }); 
-      };
-      
-      pc.oniceconnectionstatechange = () => {
-          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-              pc.close();
-              delete peersRef.current[from];
-          }
-      };
 
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer(); 
-      await pc.setLocalDescription(answer); 
-      socket.emit('voice-answer', { to: from, answer });
-    });
+      // Fortified WebRTC Architecture
+      socket.on('user-joined-voice', async (peerId) => {
+        if (!localStreamRef.current) return;
+        const pc = new RTCPeerConnection({ 
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' }, 
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ] 
+        });
+        peersRef.current[peerId] = pc;
+        
+        localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
+        
+        pc.ontrack = (event) => { 
+            const globalAudioNode = document.createElement('audio');
+            globalAudioNode.srcObject = event.streams[0];
+            globalAudioNode.autoplay = true;
+            document.body.appendChild(globalAudioNode);
+        };
+        
+        pc.onicecandidate = (event) => { 
+            if (event.candidate) socket.emit('voice-ice-candidate', { to: peerId, candidate: event.candidate }); 
+        };
+        
+        pc.oniceconnectionstatechange = () => {
+            if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+                pc.close();
+                delete peersRef.current[peerId];
+            }
+        };
 
-    socket.on('voice-answer', async ({ from, answer }) => { 
-        const pc = peersRef.current[from]; 
-        if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer)); 
-    });
-    
-    socket.on('voice-ice-candidate', async ({ from, candidate }) => { 
-        const pc = peersRef.current[from]; 
-        if (pc && pc.remoteDescription) { 
-            try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } 
-            catch(e){} 
-        } 
-    });
-    
-    socket.on('user-left-voice', (peerId) => { 
-        if (peersRef.current[peerId]) { 
-            peersRef.current[peerId].close(); 
-            delete peersRef.current[peerId]; 
-        } 
-    });
+        const offer = await pc.createOffer(); 
+        await pc.setLocalDescription(offer); 
+        socket.emit('voice-offer', { to: peerId, offer });
+      });
 
-    return () => { 
-      socket.disconnect(); socketRef.current = null;
-      if (localStreamRef.current) localStreamRef.current.getTracks().forEach(track => track.stop());
-      Object.values(peersRef.current).forEach(pc => pc.close());
-    };
+      socket.on('voice-offer', async ({ from, offer }) => {
+        if (!localStreamRef.current) return;
+        const pc = new RTCPeerConnection({ 
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ] 
+        });
+        peersRef.current[from] = pc;
+        
+        localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
+        
+        pc.ontrack = (event) => { 
+            const globalAudioNode = document.createElement('audio');
+            globalAudioNode.srcObject = event.streams[0];
+            globalAudioNode.autoplay = true;
+            document.body.appendChild(globalAudioNode);
+        };
+        
+        pc.onicecandidate = (event) => { 
+            if (event.candidate) socket.emit('voice-ice-candidate', { to: from, candidate: event.candidate }); 
+        };
+        
+        pc.oniceconnectionstatechange = () => {
+            if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+                pc.close();
+                delete peersRef.current[from];
+            }
+        };
+
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer(); 
+        await pc.setLocalDescription(answer); 
+        socket.emit('voice-answer', { to: from, answer });
+      });
+
+      socket.on('voice-answer', async ({ from, answer }) => { 
+          const pc = peersRef.current[from]; 
+          if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer)); 
+      });
+      
+      socket.on('voice-ice-candidate', async ({ from, candidate }) => { 
+          const pc = peersRef.current[from]; 
+          if (pc && pc.remoteDescription) { 
+              try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } 
+              catch(e){} 
+          } 
+      });
+      
+      socket.on('user-left-voice', (peerId) => { 
+          if (peersRef.current[peerId]) { 
+              peersRef.current[peerId].close(); 
+              delete peersRef.current[peerId]; 
+          } 
+      });
+
+      return () => { 
+        socket.disconnect(); socketRef.current = null;
+        if (localStreamRef.current) localStreamRef.current.getTracks().forEach(track => track.stop());
+        Object.values(peersRef.current).forEach(pc => pc.close());
+      };
   }, [id, session, isFinal, contest?.viewerMember?.teamId]);
   
   // Scrolls the chat window to the bottom when new messages arrive or when chat is opened
@@ -834,6 +833,23 @@ export default function ContestRoomPage() {
             <strong>{displayStatus === 'ENDED' || isFinal ? 'FINAL' : isScheduledLockScreen ? 'WAITING' : `${Math.floor(timeLeft / 60)}:${String(timeLeft % 60).padStart(2, '0')}`}</strong>
             <span>{displayStatus === 'ENDED' || isFinal ? 'standings' : isScheduledLockScreen ? 'to start' : 'remaining'}</span>
           </div>
+        </div>
+
+        {/* 👉 ADDED: Finalize & Distribute Ratings UI */}
+        <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+          {isOwner && displayStatus !== 'ENDED' && !isFinal && (
+            <button 
+              onClick={async () => {
+                if (confirm('Are you sure? This will distribute Ratings & Coins and close the contest.')) {
+                  await fetch(`${API_BASE_URL}/api/v2/contests/${contest.id}/finalize`, { method: 'POST', headers: { 'x-user-email': session?.user?.email || '' } });
+                  window.location.reload();
+                }
+              }} 
+              style={{ padding: '12px 24px', background: '#fbbf24', color: '#000', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer' }}
+            >
+              Finalize & Distribute Ratings
+            </button>
+          )}
         </div>
 
         {displayStatus === 'ENDED' && !isActuallyOwnerMode && (
@@ -1315,9 +1331,9 @@ export default function ContestRoomPage() {
             <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
               
               <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
-                <strong style={{ color: '#a5b4fc' }}>{viewerMember?.teamId ? 'Team Chat' : 'Global Contest Chat'}</strong>
+                <strong style={{ color: '#a5b4fc' }}>{contest?.viewerMember?.teamId ? 'Team Chat' : 'Global Contest Chat'}</strong>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  {viewerMember?.teamId && (
+                  {contest?.viewerMember?.teamId && (
                     <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)', color: voiceStatus === 'connected' ? '#4ade80' : '#fff', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
                       {voiceStatus === 'connected' ? '🟢 Voice On' : voiceStatus === 'connecting' ? '⏳ Connecting...' : '🎤 Join Voice'}
                     </button>
@@ -1360,7 +1376,7 @@ export default function ContestRoomPage() {
             </motion.div>
           ) : (
             <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setIsChatOpen(true)} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: '50%', width: 56, height: 56, cursor: 'pointer', boxShadow: '0 4px 12px rgba(99,102,241,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
             </motion.button>
           )}
         </div>

@@ -446,28 +446,25 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
-  router.post('/contests/:id/finalize', asyncRoute(async (req, res) => {
+router.post('/contests/:id/finalize', asyncRoute(async (req, res) => {
     const viewer = await requireContestOwner(req);
     
     const contest = await prisma.contest.findUnique({ where: { id: req.params.id } });
     if (!contest) throw new Error('Contest not found');
 
-    let rewards = null;
-    if (contest.status !== ContestStatus.ENDED) {
-        await prisma.contest.update({ 
-            where: { id: req.params.id }, 
-            data: { status: ContestStatus.ENDED } 
-        });
-        await recomputeContestStandings(req.params.id);
-        rewards = await processContestRewards(req.params.id);
-    }
-
+    // Force finalize even if previously ended
+    await prisma.contest.update({ 
+        where: { id: req.params.id }, 
+        data: { status: ContestStatus.ENDED } 
+    });
+    await recomputeContestStandings(req.params.id);
+    const rewards = await processContestRewards(req.params.id);
     const updatedContest = await loadContestForViewer(req.params.id);
-    io.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id });
+    req.app.get('io')?.to(`contest:${req.params.id}`).emit('standings:update', { contestId: req.params.id });
     
     res.json({ 
       success: true, 
-      message: 'Contest finalized.', 
+      message: 'Contest finalized. Ratings and Coins forcefully synced.', 
       rewards, 
       contest: sanitizeContestForViewer(updatedContest!, viewer) 
     });
