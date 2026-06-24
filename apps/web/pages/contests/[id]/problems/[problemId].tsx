@@ -6,13 +6,11 @@ import { io, Socket } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../../../../lib/api';
-import * as Y from 'yjs';
-import { WebrtcProvider } from 'y-webrtc';
-import { MonacoBinding } from 'y-monaco';
 
 export async function getServerSideProps() { return { props: {} }; }
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -251,7 +249,6 @@ export default function ContestProblemWorkspace() {
   };
 
   useEffect(() => {
-    // 👉 FIX: Removed !contest?.viewerMember?.teamId from here so Solos can connect!
     if (!id || !session?.user?.email) return; 
     
     try {
@@ -266,7 +263,6 @@ export default function ContestProblemWorkspace() {
       
       socket.on('connect', () => {
         socket.emit('joinContest', id); 
-        // 👉 FIX: Fallback to global room if not in a team
         const chatRoomId = contest?.viewerMember?.teamId || `contest_global_${id}`;
         socket.emit('joinTeam', chatRoomId);
       });
@@ -390,19 +386,6 @@ export default function ContestProblemWorkspace() {
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  const handleCodeChange = (val: string | undefined) => {
-    const updatedCode = val || '';
-    setCode(updatedCode);
-    
-    if (socketRef.current && contest?.viewerMember?.teamId) {
-       socketRef.current.emit('sync_code', {
-          teamId: contest.viewerMember.teamId,
-          code: updatedCode,
-          senderId: session?.user?.email || session?.user?.name
-       });
-    }
-  };
-
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
     if (!socketRef.current) {
@@ -412,7 +395,6 @@ export default function ContestProblemWorkspace() {
     try {
       const senderIdentifier = session?.user?.email || session?.user?.name || 'Anonymous';
       
-      // 👉 FIX: Empty string will route to global room in backend
       socketRef.current.emit('sendTeamMessage', {
         contestId: id, 
         teamId: contest?.viewerMember?.teamId || '', 
@@ -630,6 +612,36 @@ export default function ContestProblemWorkspace() {
 
  return (
     <main style={{...page, minHeight: '100vh', height: '100vh', overflow: 'hidden'}}>
+      
+      {/* 👉 YJS Cursor Custom Styles */}
+      <style>{`
+        .yRemoteSelection {
+          background-color: rgba(250, 128, 114, 0.2);
+        }
+        .yRemoteSelectionHead {
+          position: absolute;
+          border-left: 2px solid orange;
+          border-top: 2px solid orange;
+          border-bottom: 2px solid orange;
+          height: 100%;
+          box-sizing: border-box;
+        }
+        .yRemoteSelectionHead::after {
+          position: absolute;
+          content: attr(data-client-name); 
+          top: -18px;
+          left: -2px;
+          background-color: orange;
+          color: #000;
+          font-family: Inter, sans-serif;
+          font-size: 10px;
+          font-weight: bold;
+          padding: 2px 6px;
+          border-radius: 4px;
+          white-space: nowrap;
+        }
+      `}</style>
+
       <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
       
       {submitting && (
@@ -796,24 +808,54 @@ export default function ContestProblemWorkspace() {
               </div>
             )}
           </section>
+          
           <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
-         <Editor 
-  height="65%" theme="vs-dark" language={monacoLanguage} 
-  onMount={(editor, monaco) => {
-    const ydoc = new Y.Doc();
-    const roomName = `divinecode-${contest?.viewerMember?.teamId || id}-${problemIdStr}`;
-    const provider = new WebrtcProvider(roomName, ydoc, { 
-      signaling: ['wss://signaling.yjs.dev'] 
-    });
-    const ytext = ydoc.getText('monaco');
-    const awareness = provider.awareness;
-    const binding = new MonacoBinding(ytext, editor.getModel()!, new Set([editor]), awareness);
-    if (ytext.toString().length === 0) ytext.insert(0, code);
-    
-    // Cleanup
-    return () => { binding.destroy(); provider.disconnect(); ydoc.destroy(); };
-  }}
-/>
+            <div style={{ height: '65%' }}>
+              <Editor 
+                height="100%" 
+                theme="vs-dark" 
+                language={monacoLanguage} 
+                options={{ fontSize: 15, minimap: { enabled: false }, padding: { top: 16 } }} 
+                onMount={async (editor, monaco) => {
+                  // 👉 FIX: Dynamically import YJS libraries only on the client side
+                  const Y = await import('yjs');
+                  const { WebrtcProvider } = await import('y-webrtc');
+                  const { MonacoBinding } = await import('y-monaco');
+
+                  const ydoc = new Y.Doc();
+                  const roomName = `divinecode-${contest?.viewerMember?.teamId || id}-${problemIdStr}`;
+                  
+                  const provider = new WebrtcProvider(roomName, ydoc, { 
+                    signaling: ['wss://signaling.yjs.dev'] 
+                  });
+                  
+                  const ytext = ydoc.getText('monaco');
+                  const awareness = provider.awareness;
+                  
+                  const cursorColors = ['#f87171', '#38bdf8', '#4ade80', '#fbbf24', '#a855f7'];
+                  const myColor = cursorColors[Math.floor(Math.random() * cursorColors.length)];
+                  
+                  awareness.setLocalStateField('user', {
+                    name: session?.user?.name || session?.user?.email?.split('@')[0] || 'Teammate',
+                    color: myColor
+                  });
+
+                  const binding = new MonacoBinding(ytext, editor.getModel()!, new Set([editor]), awareness);
+                  
+                  if (ytext.toString().length === 0) {
+                    ytext.insert(0, code);
+                  }
+
+                  // Keep local state in sync for submissions
+                  editor.onDidChangeModelContent(() => {
+                    setCode(editor.getValue());
+                  });
+
+                  return () => { binding.destroy(); provider.disconnect(); ydoc.destroy(); };
+                }}
+              />
+            </div>
+            
             <div style={{ height: '35%', background: '#1e1e1e', borderTop: '1px solid #333' }}>
               <div style={tabsHeader}>
                 <button onClick={() => setActiveTab('cph')} style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle}>TEST CASES</button>
@@ -868,7 +910,7 @@ export default function ContestProblemWorkspace() {
         </div>
       )}
 
-      {/* 👉 FIX: Chat element always renders, handles Solo Global vs Team automatically */}
+      {/* Chat element */}
       <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
         {isChatOpen ? (
           <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
