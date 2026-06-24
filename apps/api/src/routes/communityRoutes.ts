@@ -1,8 +1,5 @@
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
-// Note: Depending on your exact project structure, you can access the socket io instance 
-// directly via the Express app (req.app.get('io')) if you attached it during server setup.
-// If you export it from index.ts, you can import it here.
 
 export const communityRouter = Router();
 
@@ -12,12 +9,10 @@ communityRouter.get('/problems', async (req, res) => {
     const communityProblems = await prisma.problem.findMany({
       where: {
         isCommunity: true,
-        approved: true, // Only fetch problems an admin has approved
+        approved: true,
       },
-      orderBy: {
-        createdAt: 'desc'
-      },
-      take: 50 // Limit to keep the UI snappy
+      orderBy: { createdAt: 'desc' },
+      take: 50
     });
     
     res.json(communityProblems);
@@ -32,43 +27,43 @@ communityRouter.post('/upload', async (req, res) => {
   try {
     const { userId, title, videoUrl, description } = req.body;
     
-    // 1. Validate user and save the community post to the database
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
+    if (!userId || !title || !videoUrl) {
+      return res.status(400).json({ error: "Missing required fields." });
     }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: "User not found" });
 
     const newPost = await prisma.problem.create({
       data: {
-        title: title,
+        title,
         description: description || "Community submitted video tutorial.",
-        videoUrl: videoUrl,
+        videoUrl,
         authorId: userId,
         isCommunity: true,
-        approved: true, // In a real app, you might want this to be false for admin review
-        problemCode: `COMM-${Date.now()}` // Generate a unique code
+        approved: true,
+        problemCode: `COMM-${Date.now()}`
       }
     });
 
-    // 2. TRIGGER THE GLOBAL NOTIFICATION
-    const notificationPayload = {
-      id: `notif_${Date.now()}`,
-      title: "New Community Tutorial! 🎬",
-      message: `${user.name || user.username} just uploaded: ${title}.`,
-      type: "INFO",
-      link: `/practice/${newPost.id}`, // Link directly to the new problem/video
-      createdAt: new Date(),
-      isRead: false
-    };
+    // Save notification to DB
+    const notification = await prisma.notification.create({
+      data: {
+        userId: 'ALL',
+        title: "New Community Tutorial! 🎬",
+        message: `${user.name || user.username} just uploaded: ${title}.`,
+        link: `/practice/${newPost.id}`,
+        type: "INFO",
+        isRead: false
+      }
+    });
 
-    // Grab the socket instance attached to the express app to emit globally
+    // Emit via WebSocket
     const io = req.app.get('io');
     if (io) {
-      io.emit('new_notification', notificationPayload);
+      io.emit('new_notification', notification);
+      io.emit('new_community_post', newPost); // Real-time feed update
     }
-
-    // Optional: Save notification strictly into the DB for all active users
-    // This can be heavily optimized using background workers/Redis in production.
 
     res.status(201).json({ success: true, post: newPost });
   } catch (error) {
