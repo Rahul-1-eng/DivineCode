@@ -19,14 +19,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 
-  const apiToken = jwt.sign(
+const apiToken = jwt.sign(
     { 
       id: sessionToken.sub,
       email: sessionToken.email,
-      name: sessionToken.name
+      name: sessionToken.name,
+      // Add these to match your backend's expected verification payload
+      handle: (sessionToken as any).handle,
+      accessToken: (sessionToken as any).accessToken 
     }, 
     apiSecret, 
-    { expiresIn: '2h' } // Short-lived for security
+    { expiresIn: '2h' }
   );
 
   return res.status(200).json({ token: apiToken });

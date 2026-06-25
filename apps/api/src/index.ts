@@ -60,20 +60,16 @@ app.use(express.json({ limit: '10mb' }));
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
-  console.log('🔑 [AUTH] Checking header:', authHeader ? 'Present' : 'Missing');
-  
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
     try {
       const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET || '') as jwt.JwtPayload;
       req.user = decoded; 
       req.headers['x-user-email'] = decoded.email;
-      console.log('✅ [AUTH] Token verified for:', decoded.email);
+      // ...
     } catch (err) {
       console.error('❌ [AUTH] Token verification failed:', err);
     }
-  } else {
-    console.warn('⚠️ [AUTH] No valid Bearer token provided in request');
   }
   next();
 });
