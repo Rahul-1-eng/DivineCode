@@ -4,11 +4,12 @@ import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
 import { io, Socket } from 'socket.io-client';
 import VoiceInterviewer from '../../components/VoiceInterviewer';
+// 👉 ADDED: Import the fetchApi wrapper
+import { fetchApi } from '../../lib/api'; 
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
-// 👉 ADDED: Strict Type Safety
 interface Problem {
   id?: string;
   title: string;
@@ -57,7 +58,6 @@ export default function ProblemWorkspace() {
     { author: 'System_Admin', message: 'If executing in O(N), ensure the sparse initialization bounds are checked properly to avoid segment errors.', timestamp: '1 hour ago' }
   ]);
 
-  // 👉 ADDED: Multiplayer Collaboration Groundwork
   const [socket, setSocket] = useState<Socket | null>(null);
 
   const battleKits = [
@@ -74,11 +74,9 @@ export default function ProblemWorkspace() {
     } catch (e) {}
   };
 
-  // ✅ FIXED: Fetch problem from correct endpoint that handles all problem types
   useEffect(() => {
     if (!id) return;
     
-    // Initialize Collaborative Socket connection
     const newSocket = io(API_BASE_URL, { transports: ['websocket'] });
     setSocket(newSocket);
     newSocket.emit('join-workspace', id);
@@ -87,15 +85,8 @@ export default function ProblemWorkspace() {
       setCode(newCode);
     });
 
-    // ✅ CORRECT ENDPOINT: /api/v2/problems/:id/redirect
-    // This handles MCQ, custom, external, and regular problems
-    fetch(`${API_BASE_URL}/api/v2/problems/${id}/redirect`, { 
-      headers: { 'x-user-email': session?.user?.email || '' } 
-    })
-      .then(r => {
-        if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
-        return r.json();
-      })
+    // 👉 FIXED: Using fetchApi to properly authenticate and handle the request
+    fetchApi(`/api/v2/problems/${id}/redirect`)
       .then(data => {
         if (data && data.title) {
           setProblem({
@@ -138,24 +129,17 @@ export default function ProblemWorkspace() {
     return { input: '', output: '' };
   }, [problem]);
 
-  // ✅ FIXED: Use correct endpoint for running code
+  // 👉 FIXED: Using fetchApi to authenticate the judge execution request
   async function runCode() {
     if (!problem || problem.error) return;
     setRunning(true);
     setConsoleTab('output');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v2/submissions/run-samples`, {
+      const data = await fetchApi('/api/v2/submissions/run-samples', {
         method: 'POST', 
-        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ problemId: problem.id, code, language })
       });
       
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || `Server error: ${res.status}`);
-      }
-      
-      const data = await res.json();
       setOutputs(data.results || []);
 
       const allAccepted = data.results?.length > 0 && data.results.every((r: ExecutionResult) => r.verdict === 'ACCEPTED');
@@ -169,24 +153,18 @@ export default function ProblemWorkspace() {
     }
   }
 
-  // ✅ FIXED: Use correct AI chat endpoint
+  // 👉 FIXED: Using fetchApi to authenticate the AI explainer request
   const invokeAIProfiler = async () => {
     if (!problem || problem.error) return;
     setAnalyzing(true);
     setConsoleTab('mentor');
     try {
       const prompt = `Please explain the optimal approach for this problem step-by-step and provide deep optimization hints.\n\nTitle: ${problem.title}\n\nMy Code:\n${code}`;
-      const response = await fetch(`${API_BASE_URL}/api/v2/ai/chat`, {
+      const resData = await fetchApi('/api/v2/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ message: prompt, history: [] })
       });
       
-      if (!response.ok) {
-        throw new Error(`AI service returned ${response.status}`);
-      }
-      
-      const resData = await response.json();
       setAiAnalysis(resData.reply || 'No response from AI');
     } catch (err: any) { 
       setAiAnalysis(`Error: ${err.message}. Please check your API configuration.`); 
@@ -204,7 +182,6 @@ export default function ProblemWorkspace() {
   const handleEditorChange = (value: string | undefined) => {
     const val = value || '';
     setCode(val);
-    // Broadcast code to peers in the room
     if (socket) socket.emit('local-code-update', { roomId: id, code: val });
   };
 
@@ -347,7 +324,6 @@ export default function ProblemWorkspace() {
             </div>
           </div>
 
-          {/* ✅ FIXED: Buttons now enabled when problem loads successfully */}
           <button onClick={runCode} disabled={running || problem?.error} style={{ background: running || problem?.error ? '#64748b' : 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', border: 'none', padding: '8px 24px', borderRadius: 8, fontWeight: 900, cursor: problem?.error ? 'not-allowed' : 'pointer', boxShadow: '0 0 15px rgba(34,211,238,0.3)', opacity: problem?.error ? 0.5 : 1 }}>
             {running ? 'Compiling...' : 'Run Code ▶'}
           </button>
@@ -361,7 +337,6 @@ export default function ProblemWorkspace() {
           <div style={{ display: 'flex', background: '#0f172a' }}>
             <button onClick={() => setConsoleTab('output')} style={{ padding: '12px 20px', background: consoleTab === 'output' ? '#020617' : 'transparent', color: consoleTab === 'output' ? '#38bdf8' : '#fff', border: 'none', borderTop: consoleTab === 'output' ? '2px solid #38bdf8' : '2px solid transparent', cursor: 'pointer', fontWeight: 'bold' }}>Console Output</button>
             <button onClick={() => setConsoleTab('mentor')} style={{ padding: '12px 20px', background: consoleTab === 'mentor' ? '#020617' : 'transparent', color: consoleTab === 'mentor' ? '#38bdf8' : '#fff', border: 'none', borderTop: consoleTab === 'mentor' ? '2px solid #38bdf8' : '2px solid transparent', cursor: 'pointer', fontWeight: 'bold' }}>AI Explainer</button>
-            {/* ✅ FIXED: Button enabled when problem loads successfully */}
             <button onClick={invokeAIProfiler} disabled={analyzing || problem?.error} style={{ marginLeft: 'auto', background: analyzing || problem?.error ? '#64748b' : '#22d3ee', color: '#000', border: 'none', padding: '0 20px', fontWeight: 700, cursor: problem?.error ? 'not-allowed' : 'pointer', opacity: problem?.error ? 0.5 : 1 }}>{analyzing ? 'Analyzing...' : 'Run AI Analysis'}</button>
           </div>
           <div style={{ flex: 1, padding: 16, overflowY: 'auto' }}>

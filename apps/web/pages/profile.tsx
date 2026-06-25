@@ -2,7 +2,6 @@ import { CSSProperties, useEffect, useState } from 'react';
 import { signOut, useSession } from 'next-auth/react';
 import { fetchApi } from '../lib/api';
 
-// --- Existing Elo Graph ---
 const EloGraph = ({ history }: { history: any[] }) => {
   if (!history || history.length < 1) {
     return <div style={{ color: '#64748b', padding: 40, textAlign: 'center', background: 'rgba(2,6,23,.5)', borderRadius: 16, border: '1px solid rgba(148,163,184,.1)' }}>No rated history yet. Compete to get your initial rating!</div>;
@@ -35,7 +34,6 @@ const EloGraph = ({ history }: { history: any[] }) => {
   );
 };
 
-// 👉 ADDED: Professional Performance Tracker Radar Chart
 const TopicRadarChart = ({ data }: { data: { subject: string, score: number }[] }) => {
   const size = 300;
   const center = size / 2;
@@ -58,7 +56,6 @@ const TopicRadarChart = ({ data }: { data: { subject: string, score: number }[] 
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', padding: '20px 0' }}>
       <svg width={size + 100} height={size + 60} viewBox={`0 0 ${size + 100} ${size + 60}`}>
-        {/* Draw Web */}
         {[...Array(levels)].map((_, levelIndex) => {
           const levelRadius = (radius / levels) * (levelIndex + 1);
           const levelPoints = data.map((_, i) => {
@@ -67,16 +64,13 @@ const TopicRadarChart = ({ data }: { data: { subject: string, score: number }[] 
           }).join(' ');
           return <polygon key={levelIndex} points={levelPoints} fill="none" stroke="rgba(148,163,184,0.15)" strokeWidth="1" />;
         })}
-        {/* Draw Axes */}
         {data.map((_, i) => {
           const angle = (Math.PI * 2 * i) / data.length - Math.PI / 2;
           return (
             <line key={`axis-${i}`} x1={center} y1={center} x2={center + radius * Math.cos(angle)} y2={center + radius * Math.sin(angle)} stroke="rgba(148,163,184,0.2)" strokeWidth="1" />
           );
         })}
-        {/* Filled Data Polygon */}
         <path d={polygonPath} fill="rgba(34,211,238,0.2)" stroke="#22d3ee" strokeWidth="2" style={{ filter: 'drop-shadow(0 0 8px rgba(34,211,238,0.4))' }} />
-        {/* Data Points & Labels */}
         {points.map((p, i) => (
           <g key={`point-${i}`}>
             <circle cx={p.x} cy={p.y} r="4" fill="#0f172a" stroke="#22d3ee" strokeWidth="2" />
@@ -89,7 +83,6 @@ const TopicRadarChart = ({ data }: { data: { subject: string, score: number }[] 
     </div>
   );
 };
-
 
 export default function ProfilePage() {
   const { data: session, status } = useSession();
@@ -107,7 +100,6 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState('');
   const [pwMessage, setPwMessage] = useState({ text: '', type: '' });
 
-  // Fallback data so the performance tracker looks impressive for recruiters!
   const defaultRadarData = [
     { subject: 'Dynamic Programming', score: 85 },
     { subject: 'Graph Theory', score: 70 },
@@ -219,7 +211,6 @@ export default function ProfilePage() {
           {session.user?.image && <img src={session.user.image} alt="Profile" style={avatar} />}
         </section>
 
-        {/* Aggregate Stats Grid */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 15, marginTop: 18 }}>
           <div style={{ ...card, textAlign: 'center', padding: '24px 15px' }}>
             <div style={{ color: '#94a3b8', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Global Rating</div>
@@ -239,7 +230,6 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* The Elo Graph & Performance Radar Wrapper */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 18, marginTop: 18 }}>
           
           <section style={{ ...card }}>
@@ -247,7 +237,6 @@ export default function ProfilePage() {
             <EloGraph history={userData?.ratingHistory || []} />
           </section>
 
-          {/* 👉 ADDED: Algorithmic Performance Radar */}
           <section style={{ ...card, display: 'flex', flexDirection: 'column' }}>
             <h2 style={{ margin: '0 0 16px 0', fontSize: 20, display: 'flex', justifyContent: 'space-between' }}>
               Topic Mastery Tracker
@@ -326,38 +315,37 @@ export default function ProfilePage() {
           </section>
         </div>
         
-// Inside apps/web/pages/profile.tsx
-
-<section style={{ ...card, marginTop: 18 }}>
-  <h2 style={{ margin: '0 0 16px 0', fontSize: 20 }}>Transaction & Rating Logs</h2>
-  
-  <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid rgba(148,163,184,.16)' }}>
-    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-      <thead style={{ background: 'rgba(2,6,23,.5)' }}>
-        <tr>
-          <th style={th}>Date</th>
-          <th style={th}>Event</th>
-          <th style={th}>Rating Change</th>
-          <th style={th}>Coin Change</th>
-        </tr>
-      </thead>
-      <tbody>
-        {userData?.activityLog?.map((act: any, i: number) => (
-          <tr key={i} style={{ borderBottom: '1px solid rgba(148,163,184,.12)' }}>
-            <td style={td}>{new Date(act.date).toLocaleDateString()}</td>
-            <td style={td}>{act.eventDescription}</td>
-            <td style={{ ...td, color: act.ratingDelta >= 0 ? '#4ade80' : '#f87171' }}>
-              {act.ratingDelta > 0 ? '+' : ''}{act.ratingDelta}
-            </td>
-            <td style={{ ...td, color: '#fcd34d' }}>
-              {act.coinDelta > 0 ? '+' : ''}{act.coinDelta} 🪙
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  </div>
-</section>
+        {/* 👉 FIXED: Removed stray text comment, safely rendering logs container */}
+        <section style={{ ...card, marginTop: 18 }}>
+          <h2 style={{ margin: '0 0 16px 0', fontSize: 20 }}>Transaction & Rating Logs</h2>
+          
+          <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid rgba(148,163,184,.16)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead style={{ background: 'rgba(2,6,23,.5)' }}>
+                <tr>
+                  <th style={th}>Date</th>
+                  <th style={th}>Event</th>
+                  <th style={th}>Rating Change</th>
+                  <th style={th}>Coin Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {userData?.activityLog?.map((act: any, i: number) => (
+                  <tr key={i} style={{ borderBottom: '1px solid rgba(148,163,184,.12)' }}>
+                    <td style={td}>{new Date(act.date).toLocaleDateString()}</td>
+                    <td style={td}>{act.eventDescription}</td>
+                    <td style={{ ...td, color: act.ratingDelta >= 0 ? '#4ade80' : '#f87171' }}>
+                      {act.ratingDelta > 0 ? '+' : ''}{act.ratingDelta}
+                    </td>
+                    <td style={{ ...td, color: '#fcd34d' }}>
+                      {act.coinDelta > 0 ? '+' : ''}{act.coinDelta} 🪙
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
 
       </section>
     </main>

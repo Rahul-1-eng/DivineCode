@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
+// 👉 ADDED: Import the fetchApi wrapper
+import { fetchApi } from '../lib/api';
 
 export default function VoiceInterviewer({ 
   currentQuestion, 
@@ -86,12 +88,11 @@ export default function VoiceInterviewer({
     setIsAiSpeaking(true);
 
     try {
-      const res = await fetch(`/api/v2/interview/questions/${currentQuestion.id}/mock`, {
+      // 👉 FIXED: Using fetchApi to properly pass the auth token
+      const data = await fetchApi(`/api/v2/interview/questions/${currentQuestion.id}/mock`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userResponse: userText, history: chatLog, code })
       });
-      const data = await res.json();
       
       if (data.evaluation) {
         const aiResponseText = data.evaluation.feedback + " " + (data.evaluation.followUpQuestion || "");
@@ -153,7 +154,6 @@ export default function VoiceInterviewer({
     }
   };
 
-  // 👉 ADDED: A highly professional fallback for Safari/Firefox users
   if (!isSupported) {
     return (
       <div style={{ background: '#020617', padding: 40, borderRadius: 24, textAlign: 'center', border: '1px solid rgba(248, 113, 113, 0.2)' }}>

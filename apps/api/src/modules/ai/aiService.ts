@@ -90,14 +90,11 @@ export async function askAiChatbot(query: string, history: any[] = [], imageBase
       console.log('🚀 Using Claude API for chatbot');
       const client = new Anthropic({ apiKey });
       
-      // Format history for Claude
-     //  Fixed code with literal type casting:
-const messages = history.map(m => ({
-  role: (m.role === 'ai' || m.role === 'model' ? 'assistant' : 'user') as 'user' | 'assistant',
-  content: m.text
-}));
+      const messages = history.map(m => ({
+        role: (m.role === 'ai' || m.role === 'model' ? 'assistant' : 'user') as 'user' | 'assistant',
+        content: m.text
+      }));
       
-      // Add current query
       messages.push({
         role: 'user',
         content: imageBase64 
@@ -116,7 +113,6 @@ const messages = history.map(m => ({
 
       const reply = response.content[0].type === 'text' ? response.content[0].text : 'No response';
       
-      // Cache the response
       if (!imageBase64) {
         setCachedResponse(query, reply);
       }
@@ -124,7 +120,7 @@ const messages = history.map(m => ({
       return reply;
     }
 
-    // ✅ GEMINI API PATH (Original)
+    // ✅ GEMINI API PATH
     console.log('🚀 Using Gemini API for chatbot');
     const historyContext = history.length > 0
       ? `\n--- Previous Conversation ---\n${history.map(m => `${m.role === 'model' || m.role === 'ai' ? 'AI Guide' : 'User'}: ${m.text}`).join('\n')}\n---------------------------\n`
@@ -151,7 +147,6 @@ const messages = history.map(m => ({
     
     const reply = data.candidates[0].content.parts[0].text.trim();
     
-    // Cache the response
     if (!imageBase64) {
       setCachedResponse(query, reply);
     }
@@ -163,7 +158,6 @@ const messages = history.map(m => ({
     const apiErrorDetails = err.response?.data?.error?.message || 'The model may be rate-limited or unavailable.';
     const errorMsg = `AI Service Error: ${apiErrorDetails}`;
     
-    // Check if it's a rate limit error
     if (apiErrorDetails.includes('429') || apiErrorDetails.includes('quota')) {
       return `🔴 Rate Limited: ${apiErrorDetails}. Fix: Upgrade API plan or switch to Claude API.`;
     }
@@ -235,7 +229,7 @@ export async function conductAiInterview(problemPrompt: string, userResponse: st
       return responseData;
     }
 
-    // ✅ GEMINI API PATH (Original)
+    // ✅ GEMINI API PATH
     console.log('🚀 Using Gemini API for interview');
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
     const { data } = await axios.post(url, { 
@@ -271,7 +265,6 @@ export async function conductAiInterview(problemPrompt: string, userResponse: st
   }
 }
 
-// ✅ Other existing functions (unchanged)
 export async function extractProblemFromTextOrImage(rawTextOrUrl: string) {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");

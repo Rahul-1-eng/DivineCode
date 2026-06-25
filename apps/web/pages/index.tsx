@@ -5,6 +5,8 @@ import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import { io } from 'socket.io-client';
 import NotificationBell from '../components/NotificationBell';
+// 👉 ADDED: Import the fetchApi wrapper
+import { fetchApi } from '../lib/api';
 
 const AnimatedBackground = dynamic(() => import('../components/AnimatedBackground'), { ssr: false });
 const ActivityHeatmap = dynamic(() => import('../components/ActivityHeatmap'), { ssr: false });
@@ -36,7 +38,6 @@ const DAILY_QUOTES = [
   "It's not about how fast you type. It's about how deeply you understand the problem before you touch the keyboard."
 ];
 
-// ✅ Transform raw submissions into ActivityHeatmap format
 const transformSubmissionsToHeatmap = (submissions: any[]): any[] => {
   if (!submissions || submissions.length === 0) {
     return [];
@@ -44,7 +45,6 @@ const transformSubmissionsToHeatmap = (submissions: any[]): any[] => {
 
   const submissionsByDate: { [date: string]: number } = {};
 
-  // Count submissions per day
   submissions.forEach((submission: any) => {
     if (submission.createdAt) {
       const dateStr = new Date(submission.createdAt).toISOString().split('T')[0];
@@ -52,7 +52,6 @@ const transformSubmissionsToHeatmap = (submissions: any[]): any[] => {
     }
   });
 
-  // Convert to heatmap format
   const heatmapData = Object.entries(submissionsByDate).map(([date, count]) => ({
     date,
     count,
@@ -98,7 +97,6 @@ export default function Home() {
     return DAILY_QUOTES[dayOfYear % DAILY_QUOTES.length];
   }, []);
 
-  // Fetch live contests
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/v2/proxy/live-contests`)
       .then(res => res.json())
@@ -127,13 +125,11 @@ export default function Home() {
     return () => { socket.disconnect(); };
   }, []);
 
-  // Fetch profile and leaderboard
+  // 👉 FIXED: Using fetchApi instead of standard fetch ensures the authentication token is minted and attached correctly.
   useEffect(() => {
     if (status === 'authenticated' && session?.user?.email) {
-      // Fetch leaderboard
       console.log('🔍 Fetching leaderboard...');
-      fetch(`${API_BASE_URL}/api/v2/leaderboard/global`)
-        .then(r => r.json())
+      fetchApi('/api/v2/leaderboard/global', { requireAuth: false })
         .then(data => { 
           if (Array.isArray(data)) {
             console.log('✅ Leaderboard loaded:', data.length, 'users');
@@ -142,36 +138,20 @@ export default function Home() {
         })
         .catch(err => console.error('❌ Leaderboard fetch error:', err));
 
-      // Fetch profile with detailed logging
       console.log('🔍 Fetching profile for email:', session.user.email);
       setHeatmapLoading(true);
       
-// We assume your NextAuth session is configured to include accessToken
-      const token = (session as any)?.accessToken || ''; 
-      
-      fetch(`${API_BASE_URL}/api/v2/profile/me`, { 
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'x-user-email': session.user.email, 
-          'Content-Type': 'application/json' 
-        } 
-      })
-        .then(async (r) => {
-          const data = await r.json();
-          if (!r.ok || data.error) throw new Error(data.error || 'Fetch failed');
-          return data;
-        })
+      fetchApi('/api/v2/profile/me')
         .then(data => {
           setProfile(data);
           setProfileError(null);
-          // Only transform if data exists
           const transformed = data.submissions ? transformSubmissionsToHeatmap(data.submissions) : [];
           setHeatmapData(transformed);
         })
         .catch(err => {
           console.error('❌ Profile fetch error:', err);
           setProfileError(err.message || 'Error');
-          setProfile(null); // Explicitly clear profile on error
+          setProfile(null); 
         })
         .finally(() => {
           setHeatmapLoading(false);
@@ -183,7 +163,6 @@ export default function Home() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); 
   }, [chatHistory, isAiTyping]);
 
-  // AI Chat with retry logic
   const sendToAI = async (text: string, imageBase64: string | null = null, retryCount = 0) => {
     const MAX_RETRIES = 2;
     
@@ -203,10 +182,8 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, history: payloadHistory, image: imageBase64 }),
-        signal: AbortSignal.timeout(30000) // 30 second timeout
+        signal: AbortSignal.timeout(30000) 
       });
-
-      console.log('📨 AI response status:', res.status);
 
       if (!res.ok) {
         throw new Error(`API returned ${res.status}: ${res.statusText}`);
@@ -219,7 +196,6 @@ export default function Home() {
       }
 
       if (data.reply) {
-        console.log('✅ AI replied successfully');
         setChatHistory(prev => [...prev, { role: 'ai', text: data.reply }]);
         setAiRetryCount(0);
       } else {
@@ -307,7 +283,6 @@ export default function Home() {
           animation-play-state: paused;
         }
 
-        /* MOBILE-FIRST RESPONSIVE */
         @media (max-width: 768px) {
           .nav-items { gap: 8px !important; }
           .nav-link { display: none; }
@@ -329,7 +304,6 @@ export default function Home() {
 
       <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }} style={{ minHeight: '100vh', padding: 'clamp(16px, 4vw, 32px)', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'transparent', position: 'relative', zIndex: 1 }}>
         
-        {/* Navigation */}
         <motion.nav initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} style={{ maxWidth: 1200, margin: '0 auto 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fff', textDecoration: 'none', fontWeight: 900, fontSize: 'clamp(14px, 4vw, 24px)', letterSpacing: '-0.03em', flexShrink: 0 }}>
             <span style={{ width: 'clamp(32px, 8vw, 46px)', height: 'clamp(32px, 8vw, 44px)', borderRadius: 'clamp(6px, 2vw, 14px)', display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg,#6366f1,#22d3ee)', color: '#000', fontWeight: 'bold', boxShadow: '0 0 30px rgba(34,211,238,0.4)', fontSize: 'clamp(10px, 2vw, 12px)' }}>DC</span>
@@ -365,7 +339,6 @@ export default function Home() {
           </div>
         </motion.nav>
 
-        {/* Live Ticker */}
         <div style={{ maxWidth: 1200, margin: '0 auto 24px', background: 'rgba(2, 6, 23, 0.4)', border: '1px solid rgba(34, 211, 238, 0.1)', borderRadius: 12, overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
           <div style={{ padding: 'clamp(8px, 2vw, 10px) clamp(12px, 3vw, 16px)', background: 'linear-gradient(90deg, #1e293b, rgba(30,41,59,0))', fontWeight: 'bold', color: '#38bdf8', fontSize: 'clamp(11px, 2vw, 13px)', zIndex: 2, borderRight: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
             <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 1.5 }} style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', boxShadow: '0 0 10px #ef4444' }} />
@@ -382,13 +355,11 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Hero Section */}
         <motion.section initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.4 }} style={{ maxWidth: 1200, margin: '0 auto' }}>
           <div className="glass-panel" style={{ padding: 'clamp(20px, 5vw, 48px)', borderRadius: 32, boxShadow: '0 40px 120px rgba(0,0,0,0.5)' }}>
             
             <div className="hero-container" style={{ display: 'flex', gap: 'clamp(20px, 4vw, 40px)', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' }}>
               
-              {/* Left Side */}
               <div className="hero-left" style={{ flex: '1 1 100%', minWidth: 0 }}>
                 <p style={{ color: '#22d3ee', fontWeight: 800, letterSpacing: '.15em', textTransform: 'uppercase', fontSize: 'clamp(10px, 2.5vw, 12px)', marginBottom: 16 }}>The Developer Arena</p>
                 <h1 className="hero-glow" style={{ fontSize: 'clamp(24px, 7vw, 64px)', lineHeight: 1, fontWeight: 900, letterSpacing: '-0.05em', margin: '0 0 20px', color: '#fff' }}>Code. Sync.<br />Duel. Interview.</h1>
@@ -404,14 +375,11 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Right Side - Stats & Heatmap */}
               <div className="hero-right" style={{ flex: '1 1 100%', width: '100%' }}>
                 {session && profile ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                    {/* Activity Heatmap - FIXED: Pass correct props */}
                     <ActivityHeatmap data={heatmapData} loading={heatmapLoading} />
                     
-                    {/* Leaderboard */}
                     <div style={{ background: 'rgba(2, 6, 23, 0.6)', borderRadius: 24, padding: 'clamp(16px, 3vw, 24px)', border: '1px solid rgba(34, 211, 238, 0.2)', position: 'relative', overflow: 'hidden', width: '100%' }}>
                       <h3 style={{ margin: '0 0 16px', color: '#fff', fontSize: 'clamp(13px, 2vw, 16px)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ color: '#fbbf24' }}>★</span> Global Hall of Fame
@@ -457,7 +425,6 @@ export default function Home() {
           </div>
         </motion.section>
 
-        {/* Feature Grid */}
         <motion.section initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} style={{ maxWidth: 1200, margin: '48px auto 0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(clamp(250px, 100%, 360px), 1fr))', gap: 'clamp(16px, 2vw, 24px)' }}>
           {features.map((f) => (
             <div key={f.title} className="feature-card glass-panel" style={{ padding: 'clamp(16px, 4vw, 32px)', borderRadius: 24, cursor: 'pointer', transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }} onClick={() => router.push(f.href)} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.borderColor = '#22d3ee'; }} onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'; }}>
@@ -469,7 +436,6 @@ export default function Home() {
         </motion.section>
       </motion.main>
 
-      {/* Floating AI Chat */}
       <div style={{ position: 'fixed', bottom: 'clamp(12px, 4vw, 30px)', right: 'clamp(12px, 4vw, 30px)', zIndex: 50, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
         <AnimatePresence>
           {isChatOpen && (

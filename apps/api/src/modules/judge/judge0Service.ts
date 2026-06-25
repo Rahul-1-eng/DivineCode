@@ -132,7 +132,7 @@ export async function judgeQueuedSubmission(submissionId: string) {
   if (!submission) throw new Error('Submission not found');
   
   // ==========================================
-  // STRICT MCQ GRADING LOGIC (FIXED)
+  // STRICT MCQ GRADING LOGIC
   // ==========================================
   if (submission.language === 'mcq') {
     let correctIndices: number[] = [];
@@ -156,7 +156,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
       }
       
       if (Array.isArray(submitted) && Array.isArray(correctIndices) && correctIndices.length > 0) {
-        // Safe integer casting
         const sortedSubmitted = [...submitted].map(Number).sort((a, b) => a - b);
         const sortedCorrect = [...correctIndices].map(Number).sort((a, b) => a - b);
         isCorrect = JSON.stringify(sortedSubmitted) === JSON.stringify(sortedCorrect);
@@ -192,8 +191,10 @@ export async function judgeQueuedSubmission(submissionId: string) {
      } catch (e) {}
   }
   
-  if (testcases.length === 0 && submission.problem) {
-    const descriptionForAi = submission.contestProblem?.customDescription || submission.problem.description || submission.contestProblem?.titleSnapshot || '';
+  // 👉 FIXED: Ensure AI dynamic tests generate safely for custom descriptions even if `submission.problem` is null
+  const hasDescription = submission.contestProblem?.customDescription || submission.problem?.description;
+  if (testcases.length === 0 && hasDescription) {
+    const descriptionForAi = submission.contestProblem?.customDescription || submission.problem?.description || submission.contestProblem?.titleSnapshot || '';
     if (descriptionForAi) {
       await prisma.submission.update({ where: { id: submission.id }, data: { status: 'RUNNING', judgeMessage: 'Generating dynamic test cases via AI...' } });
       const aiCases = await generateToughTestCases(descriptionForAi);
@@ -248,8 +249,9 @@ export async function judgeQueuedSubmission(submissionId: string) {
   await finalizeVerdict(judged.id, finalVerdict);
   const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
   
-  if (finalVerdict === Verdict.ACCEPTED && submission.problem) {
-    const descriptionForAi = submission.contestProblem?.customDescription || submission.problem.description || submission.contestProblem?.titleSnapshot || 'No description available.';
+  // 👉 FIXED: Safe optional chaining for AI Logic analysis on custom problems
+  if (finalVerdict === Verdict.ACCEPTED) {
+    const descriptionForAi = submission.contestProblem?.customDescription || submission.problem?.description || submission.contestProblem?.titleSnapshot || 'No description available.';
     analyzeSubmissionLogic(judged.id, descriptionForAi, submission.code)
       .catch(err => console.error("AI Analysis failed in background:", err));
   }

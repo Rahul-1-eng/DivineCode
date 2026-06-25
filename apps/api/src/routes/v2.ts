@@ -154,16 +154,14 @@ async function requireJudgeAccess(submissionId: string, req: Request) {
 export function mountV2Routes(app: Express, io: Server) {
   const router = Router();
 
-  // 👉 ADDED: Live Global Contests Proxy Endpoint (For the Homepage Ticker)
   router.get('/proxy/live-contests', asyncRoute(async (req, res) => {
     try {
-      // Using Codeforces API as it is highly stable
       const { data } = await axios.get('https://codeforces.com/api/contest.list?gym=false', { timeout: 8000 });
       if (data.status === 'OK') {
         const upcoming = data.result
           .filter((c: any) => c.phase === 'BEFORE')
           .sort((a: any, b: any) => a.startTimeSeconds - b.startTimeSeconds)
-          .slice(0, 5); // Get next 5 contests
+          .slice(0, 5);
         return res.json({ success: true, contests: upcoming });
       }
       res.json({ success: false, contests: [] });
@@ -475,7 +473,6 @@ export function mountV2Routes(app: Express, io: Server) {
     const contest = await prisma.contest.findUnique({ where: { id: req.params.id } });
     if (!contest) throw new Error('Contest not found');
 
-    // Force finalize even if previously ended
     await prisma.contest.update({ 
         where: { id: req.params.id }, 
         data: { status: ContestStatus.ENDED } 
@@ -710,13 +707,11 @@ export function mountV2Routes(app: Express, io: Server) {
         throw new Error("MCQ problem not found");
     }
 
-    // Auto-grade
     const correctIndices = contestProblem.interviewQuestion.correctIndices || [];
     const isCorrect = correctIndices.sort().toString() === (answerIndices || []).sort().toString();
     const verdict = isCorrect ? 'ACCEPTED' : 'WRONG_ANSWER';
     const points = isCorrect ? contestProblem.points : 0;
 
-    // Create submission as the user
     const submission = await prisma.submission.create({
       data: {
         contestId: req.params.id,
@@ -747,6 +742,24 @@ export function mountV2Routes(app: Express, io: Server) {
     });
 
     if (!problem) {
+      // 👉 FIXED: Fallback for Practice Hub / AI Dataset problems (removed invalid '.description' property access)
+      const aiProblem = await prisma.aiProblemDataset.findUnique({
+        where: { id: req.params.id }
+      });
+
+      if (aiProblem) {
+        return res.json({
+          id: aiProblem.id,
+          title: aiProblem.title,
+          type: 'INTERNAL',
+          isMCQ: false,
+          platform: aiProblem.platform || 'DIVINECODE',
+          externalUrl: aiProblem.originalUrl || null,
+          customDescription: aiProblem.descriptionHtml || '', 
+          customTestCases: aiProblem.testcases || []
+        });
+      }
+
       return res.status(404).json({ error: 'Problem not found' });
     }
 
@@ -802,5 +815,5 @@ export function mountV2Routes(app: Express, io: Server) {
   app.use('/api/v2/submissions', submissionRouter); 
   app.use('/api/v2/interview', interviewRouter);
   app.use('/api/v2/profile', profileRouter);
-  app.use('/api/v2', aiRouter); // Mounted the newly extracted AI router
+  app.use('/api/v2', aiRouter); 
 }

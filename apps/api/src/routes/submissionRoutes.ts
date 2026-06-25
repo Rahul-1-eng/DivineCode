@@ -3,6 +3,7 @@ import { prisma } from '../prisma/client';
 import { executeSubmission } from '../modules/judge/judge0Service';
 import { getContestSubmissions } from '../modules/contests/submissionService';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
+
 export const submissionRouter = Router();
 
 // Endpoint to fetch submissions securely based on privacy rules
