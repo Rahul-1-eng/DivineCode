@@ -5,6 +5,12 @@ import ActivityHeatmap from '../../components/ActivityHeatmap'; // 👉 ADDED Im
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
+interface ContributionDay {
+  date: string;
+  count: number;
+  level: 0 | 1 | 2 | 3 | 4;
+}
+
 function getRatingColor(rating: number) {
   if (rating < 1200) return '#94a3b8'; // Gray (Newbie)
   if (rating < 1400) return '#4ade80'; // Green (Pupil)
@@ -21,6 +27,30 @@ function getRatingTitle(rating: number) {
   if (rating < 1900) return 'Expert';
   if (rating < 2200) return 'Candidate Master';
   return 'Master';
+}
+
+function transformSubmissionsToHeatmap(submissions: any[]): ContributionDay[] {
+  if (!submissions || submissions.length === 0) {
+    return [];
+  }
+
+  // Group submissions by date
+  const submissionsByDate: Record<string, number> = {};
+  
+  submissions.forEach(submission => {
+    const date = new Date(submission.timestamp || submission.date).toISOString().split('T')[0];
+    submissionsByDate[date] = (submissionsByDate[date] || 0) + 1;
+  });
+
+  // Convert counts to levels (0-4)
+  const counts = Object.values(submissionsByDate);
+  const maxCount = Math.max(...counts, 1);
+  
+  return Object.entries(submissionsByDate).map(([date, count]) => ({
+    date,
+    count,
+    level: Math.min(4, Math.floor((count / maxCount) * 4)) as 0 | 1 | 2 | 3 | 4
+  }));
 }
 
 export default function PublicProfile() {
@@ -133,8 +163,8 @@ export default function PublicProfile() {
           {/* Right Main Column: Activity Heatmap & Contest History */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
             
-            {/* 👉 ADDED: Activity Heatmap injected into the wide right column */}
-            <ActivityHeatmap submissions={profile.submissions || []} />
+            {/* 👉 FIXED: ActivityHeatmap now receives 'data' prop with transformed submissions */}
+            <ActivityHeatmap data={transformSubmissionsToHeatmap(profile.submissions || [])} />
 
             <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, padding: 24 }}>
               <h2 style={{ margin: '0 0 20px', fontSize: 20 }}>Contest History</h2>
