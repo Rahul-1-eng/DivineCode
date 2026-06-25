@@ -3,6 +3,7 @@ import { prisma } from '../prisma/client';
 import { Platform } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
+
 export const profileRouter = Router();
 
 profileRouter.get('/me', async (req, res) => {
@@ -16,7 +17,7 @@ profileRouter.get('/me', async (req, res) => {
       include: { 
         externalHandles: true,
         ratingHistory: { orderBy: { createdAt: 'asc' }, include: { contest: { select: { title: true } } } },
-        // 👉 ADDED createdAt to power the Activity Heatmap
+        // Keeping select to power Activity Heatmap on the frontend
         submissions: { select: { verdict: true, createdAt: true } },
         contestParticipants: {
           where: { standing: { isNot: null } },
@@ -28,8 +29,12 @@ profileRouter.get('/me', async (req, res) => {
     
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const totalAttempts = user.submissions.length;
-    const totalAccepted = user.submissions.filter(s => s.verdict === 'ACCEPTED' || String(s.verdict) === 'OK').length;
+    // 🔥 Database Aggregation Optimization
+    const [totalAttempts, totalAccepted] = await Promise.all([
+      prisma.submission.count({ where: { userId: user.id } }),
+      prisma.submission.count({ where: { userId: user.id, verdict: 'ACCEPTED' } })
+    ]);
+
     const accuracy = totalAttempts > 0 ? Math.round((totalAccepted / totalAttempts) * 100) : 0;
 
     const matchHistory = user.contestParticipants.map(p => {
@@ -48,7 +53,6 @@ profileRouter.get('/me', async (req, res) => {
   }
 });
 
-// Absolute Bulletproof UPSERT logic
 profileRouter.post('/claim-username', async (req, res) => {
   try {
     const viewer = await resolvedViewerFromRequest(req, true);
@@ -177,7 +181,6 @@ profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
   } catch (err: any) { return res.status(500).json({ error: err.message }); }
 });
 
-// Endpoint to fetch a PUBLIC profile by username
 profileRouter.get('/u/:username', async (req, res) => {
   try {
     const { username } = req.params;
@@ -186,7 +189,6 @@ profileRouter.get('/u/:username', async (req, res) => {
       where: { username: { equals: username, mode: 'insensitive' } },
       include: { 
         externalHandles: true,
-        // 👉 ADDED createdAt to power the Activity Heatmap
         submissions: { select: { verdict: true, createdAt: true } },
         contestParticipants: {
           where: { standing: { isNot: null } },
@@ -201,8 +203,12 @@ profileRouter.get('/u/:username', async (req, res) => {
     
     if (!user) return res.status(404).json({ error: 'Coder not found in the DivineCode database.' });
 
-    const totalAttempts = user.submissions.length;
-    const totalAccepted = user.submissions.filter(s => s.verdict === 'ACCEPTED' || String(s.verdict) === 'OK').length;
+    // 🔥 Database Aggregation Optimization
+    const [totalAttempts, totalAccepted] = await Promise.all([
+      prisma.submission.count({ where: { userId: user.id } }),
+      prisma.submission.count({ where: { userId: user.id, verdict: 'ACCEPTED' } })
+    ]);
+
     const accuracy = totalAttempts > 0 ? Math.round((totalAccepted / totalAttempts) * 100) : 0;
 
     const matchHistory = user.contestParticipants.map(p => {

@@ -51,7 +51,6 @@ export default function Home() {
     { role: 'ai', text: 'Welcome to DivineCode Pro. I am configured to handle algorithmic breakdowns, testcase overrides, and platform navigation. How can I assist you today?' }
   ]);
 
-  // 👉 UPDATED: State for Live External Contests
   const [liveEvents, setLiveEvents] = useState<string[]>([
     "⚡ System: Fetching global contest schedules..."
   ]);
@@ -69,7 +68,6 @@ export default function Home() {
     return DAILY_QUOTES[dayOfYear % DAILY_QUOTES.length];
   }, []);
 
-  // 👉 UPDATED: Fetch Real Codeforces Schedule on Mount
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/v2/proxy/live-contests`)
       .then(res => res.json())
@@ -88,7 +86,6 @@ export default function Home() {
       })
       .catch(() => setLiveEvents(["🌐 System: Operating in standalone mode."]));
 
-    // Keep WebSocket for internal platform notifications
     const socket = io(API_BASE_URL, { transports: ['websocket'] });
     socket.on('global_ticker', (newEvent: string) => {
       setLiveEvents(prev => [newEvent, ...prev].slice(0, 10));

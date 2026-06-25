@@ -11,6 +11,18 @@ jobs:
     name: Build & Verify
     runs-on: ubuntu-latest
 
+    # 👉 FIX: Spin up a temporary Redis container strictly for the GitHub Actions runner
+    services:
+      redis:
+        image: redis:latest
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     strategy:
       matrix:
         node-version: [18.x, 20.x]
@@ -42,4 +54,7 @@ jobs:
 
     - name: Verify BullMQ Worker Build
       working-directory: ./apps/api
+      # 👉 FIX: Explicitly point the worker to the temporary Redis container we spun up above
+      env:
+        REDIS_URL: redis://localhost:6379
       run: node dist/workers/index.js --dry-run || echo "Worker compiled successfully."

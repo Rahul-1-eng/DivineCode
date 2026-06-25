@@ -43,7 +43,9 @@ export default function SignInPage() {
             password: cleanPassword
           })
         });
-        const data = await res.json();
+        
+        const data = await res.json().catch(() => ({ error: 'Server returned an invalid response.' }));
+        
         if (!res.ok) {
           setLoading(false);
           return setError(data.error || 'Registration failed.');
@@ -54,6 +56,7 @@ export default function SignInPage() {
       }
     }
 
+    // Attempt to sign in via NextAuth credentials provider
     const res = await signIn('credentials', {
       redirect: false,
       handle: cleanHandle,
@@ -61,19 +64,19 @@ export default function SignInPage() {
     });
 
     setLoading(false);
+    
     if (res?.error) {
-      setError('Invalid credentials combination.');
+      setError(res.error === 'CredentialsSignin' ? 'Invalid credentials combination.' : res.error);
     } else {
       router.push('/contests'); 
     }
   }
 
-  // 👉 ADDED: One-Click Recruiter Guest Login
   async function handleGuestLogin() {
     setLoading(true);
     setError('');
     try {
-      // 1. Silently attempt to register the guest account (fails gracefully if it already exists)
+      // 1. Silently attempt to register the guest account
       await fetch(`${apiBase}/api/v2/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -114,7 +117,6 @@ export default function SignInPage() {
             <h1 style={{ fontSize: 'clamp(44px,7vw,82px)', lineHeight: .95, margin: '12px 0', letterSpacing: '-.07em' }}>Enter the coding arena.</h1>
             <p style={{ color: '#a8b3c7', fontSize: 18, lineHeight: 1.75 }}>Use Google login for instant profile synchronization, or deploy a localized secure credential layout.</p>
             
-            {/* 👉 ADDED: Guest Context Info for Recruiters */}
             <div style={{ marginTop: 30, padding: 20, background: 'rgba(34,211,238,0.05)', borderLeft: '4px solid #22d3ee', borderRadius: '0 12px 12px 0' }}>
               <h3 style={{ color: '#22d3ee', margin: '0 0 8px 0', fontSize: 16 }}>👋 Here for a portfolio review?</h3>
               <p style={{ color: '#94a3b8', margin: 0, fontSize: 14, lineHeight: 1.5 }}>
@@ -135,7 +137,6 @@ export default function SignInPage() {
               Continue with Google
             </button>
             
-            {/* 👉 ADDED: Recruiter Test Drive Button */}
             <button onClick={handleGuestLogin} disabled={loading} style={{ width: '100%', padding: 14, borderRadius: 16, border: 'none', background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', fontWeight: 900, cursor: 'pointer', marginBottom: 18, opacity: loading ? 0.7 : 1 }}>
               🚀 Recruiter Test Drive (Guest Mode)
             </button>

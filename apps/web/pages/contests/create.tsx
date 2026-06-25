@@ -1,6 +1,7 @@
 import { CSSProperties, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../../lib/api';
 
@@ -9,6 +10,9 @@ export default function GlobalNavigationAndMashupCreator() {
   const { data: session } = useSession();
   
   const [navTab, setNavTab] = useState<'mashup' | 'duel' | 'interview'>('mashup');
+  
+  // 🔥 FIX: Multi-step UI Tracker
+  const [step, setStep] = useState(1);
 
   const [contestMode, setContestMode] = useState<'SOLO' | 'GROUP'>('GROUP');
   const [activeTab, setActiveTab] = useState<'URL' | 'CUSTOM' | 'MCQ'>('URL');
@@ -238,154 +242,163 @@ export default function GlobalNavigationAndMashupCreator() {
       </nav>
 
       {navTab === 'mashup' && (
-        <div style={{ display: 'flex', gap: '30px', padding: 40, maxWidth: 1300, margin: '0 auto', flexWrap: 'wrap' }}>
+        <div style={{ maxWidth: 1000, margin: '40px auto', background: '#0f172a', borderRadius: 16, border: '1px solid #1e293b', overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
           
-          <div style={{ flex: '1 1 600px' }}>
-            <h1 style={{ color: '#38bdf8', marginTop: 0 }}>Create Live Practice Contest</h1>
-            
-            <div style={{ display: 'flex', gap: 10, marginBottom: 25, background: '#0f172a', padding: 10, borderRadius: 8, border: '1px solid #334155' }}>
-              <button onClick={() => setContestMode('SOLO')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'SOLO' ? '#38bdf8' : 'transparent', color: contestMode === 'SOLO' ? '#000' : '#94a3b8' }}>👤 Solo Standings</button>
-              <button onClick={() => setContestMode('GROUP')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'GROUP' ? '#38bdf8' : 'transparent', color: contestMode === 'GROUP' ? '#000' : '#94a3b8' }}>👥 Group & Team Mode</button>
-            </div>
-
-            <div style={{ display: 'flex', gap: 20, marginBottom: 20 }}>
-              <div style={{ flex: 1 }}><label>Contest Title</label><input value={title} onChange={e => setTitle(e.target.value)} style={inputBox} /></div>
-              <div style={{ flex: 0.5 }}><label>Duration (mins)</label><input type="number" value={duration} onChange={e => setDuration(Number(e.target.value))} style={inputBox} /></div>
-            </div>
-
-            <div style={{ marginBottom: 25 }}>
-              <label style={{ display: 'block', marginBottom: 8, fontWeight: 'bold' }}>Schedule Launch Calendar Time</label>
-              <input type="datetime-local" value={startTimeStr} onChange={e => setStartTimeStr(e.target.value)} style={{ ...inputBox, colorScheme: 'dark' }} />
-            </div>
-
-            <div style={{ display: 'flex', gap: 10, marginBottom: 20, borderBottom: '1px solid #1e293b', paddingBottom: 10 }}>
-              {['URL', 'CUSTOM', 'MCQ'].map(t => (
-                <button key={t} onClick={() => setActiveTab(t as any)} style={{ padding: '8px 16px', background: activeTab === t ? '#38bdf8' : '#1e293b', color: activeTab === t ? '#000' : '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}>{t}</button>
-              ))}
-            </div>
-            <div style={{ marginBottom: 20, padding: 16, borderRadius: 10, background: '#0f172a', border: '1px solid #334155', color: '#cbd5e1' }}>
-              {activeTab === 'URL' ? 'Add an external problem via URL or Codeforces code. The contest workspace will render this as a redirect-only problem.' : activeTab === 'CUSTOM' ? 'Create a custom coding problem with description, test cases, and optional AI-generated hidden tests.' : 'Build an MCQ question that will open in its own MCQ-only workspace separate from the code editor.'}
-            </div>
-
-            {activeTab === 'URL' && (
-               <div>
-                  <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste Link or Codeforces Code (e.g. 1500A)" />
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#94a3b8', marginTop: 10 }}>
-                     <input type="checkbox" checked={generateAiTests} onChange={e => setGenerateAiTests(e.target.checked)} />
-                     🤖 Check scraped tests AND automatically generate tougher hidden system tests via AI
-                  </label>
-               </div>
-            )}
-            
-            {activeTab === 'CUSTOM' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
-                <div>
-                  <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Custom Problem Title</label>
-                  <input placeholder="e.g. Find the Missing Integer" value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Problem Description (Supports Markdown/HTML)</label>
-                  <textarea placeholder="Describe the problem, input formats, and constraints..." value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, minHeight: '150px', resize: 'vertical'}} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Optional Image Attachment</label>
-                  <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'block', marginTop: 5, color: '#fff' }} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Time Limit (Seconds, 0 for infinite)</label>
-                  <input type="number" placeholder="e.g. 120" value={customTimeLimit} onChange={e => setCustomTimeLimit(Number(e.target.value))} style={inputBox} />
-                </div>
-                
-                <h4 style={{ color: '#94a3b8', margin: '10px 0 0 0' }}>Custom Test Cases</h4>
-                {customCases.map((tc, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                        <input placeholder="Input" value={tc.input} onChange={e => {
-                            const newCases = [...customCases];
-                            newCases[i].input = e.target.value;
-                            setCustomCases(newCases);
-                        }} style={{...inputBox, flex: 1, marginTop: 0}} />
-                        <input placeholder="Expected Output" value={tc.expectedOutput} onChange={e => {
-                            const newCases = [...customCases];
-                            newCases[i].expectedOutput = e.target.value;
-                            setCustomCases(newCases);
-                        }} style={{...inputBox, flex: 1, marginTop: 0}} />
-                        
-                        <label style={{display: 'flex', alignItems: 'center', gap: 5, color: '#94a3b8', fontSize: 12, width: '120px', cursor: 'pointer'}}>
-                            <input type="checkbox" checked={tc.isPublic} onChange={e => {
-                                const newCases = [...customCases];
-                                newCases[i].isPublic = e.target.checked;
-                                setCustomCases(newCases);
-                            }} /> Public (CPH)
-                        </label>
-                        
-                        <button onClick={() => {
-                            const newCases = customCases.filter((_, idx) => idx !== i);
-                            setCustomCases(newCases.length ? newCases : [{input: '', expectedOutput: '', isPublic: true}]);
-                        }} style={{...iconBtn, color: '#f87171', borderColor: '#f87171'}}>✕</button>
-                    </div>
-                ))}
-                <button onClick={() => setCustomCases([...customCases, {input: '', expectedOutput: '', isPublic: true}])} style={{...ghostBtn, alignSelf: 'flex-start'}}>+ Add Test Case</button>
-
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#94a3b8', marginTop: 10 }}>
-                     <input type="checkbox" checked={generateAiTests} onChange={e => setGenerateAiTests(e.target.checked)} />
-                     🤖 Automatically generate tougher hidden system tests for this problem via AI
-                </label>
+          {/* STEPPER HEADER */}
+          <div style={{ display: 'flex', borderBottom: '1px solid #1e293b', background: '#020617' }}>
+            {[1, 2, 3].map(num => (
+              <div key={num} onClick={() => setStep(num)} style={{ flex: 1, padding: 20, textAlign: 'center', cursor: 'pointer', borderBottom: step === num ? '3px solid #38bdf8' : '3px solid transparent', color: step === num ? '#38bdf8' : '#64748b', fontWeight: 'bold', transition: '0.3s' }}>
+                Step {num}: {num === 1 ? 'Contest Details' : num === 2 ? 'Select Problems' : 'Review & Launch'}
               </div>
-            )}
-
-            {activeTab === 'MCQ' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <input value={mcqPrompt} onChange={e => setMcqPrompt(e.target.value)} style={inputBox} placeholder="Question Option Evaluation Prompt" />
-                <label style={{ fontSize: 12, fontWeight: 'bold' }}>Time Limit (Seconds)</label>
-                <input type="number" value={mcqTimeLimit} onChange={e => setMcqTimeLimit(Number(e.target.value))} style={inputBox} placeholder="e.g. 120" />
-                <p style={{fontSize: 12, color: '#94a3b8', margin: 0}}>Check the box next to correct options.</p>
-                {mcqOptions.map((o, idx) => (
-                  <div key={idx} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <input type="checkbox" checked={mcqCorrect.includes(idx)} onChange={() => setMcqCorrect(prev => prev.includes(idx) ? prev.filter(x => x !== idx) : [...prev, idx])} style={{transform: 'scale(1.5)', cursor: 'pointer'}} />
-                    <input value={o} onChange={e => { const n = [...mcqOptions]; n[idx] = e.target.value; setMcqOptions(n); }} style={{...inputBox, marginTop: 0}} placeholder={`Option ${String.fromCharCode(65+idx)}`} />
-                  </div>
-                ))}
-                <button onClick={() => setMcqOptions([...mcqOptions, ''])} style={{...ghostBtn, alignSelf: 'flex-start'}}>+ Add Option</button>
-              </div>
-            )}
-
-            <button onClick={queueProblem} style={{ ...primaryBtn, width: '100%', marginTop: 25, padding: 15 }}>Append Question to Dispatch Array</button>
-            <button onClick={createContest} style={{ background: '#10b981', color: '#fff', padding: 15, borderRadius: 8, width: '100%', marginTop: 15, fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>Deploy & Synchronize Mashup Suite</button>
+            ))}
           </div>
 
-          <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div style={{ background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid #1e293b' }}>
-              <h3 style={{ marginTop: 0, color: '#a5b4fc' }}>Queued Suite Batch ({compiledProblems.length})</h3>
-              {compiledProblems.length === 0 && <p style={{color: '#64748b'}}>No problems queued.</p>}
-              
-              {compiledProblems.map((p, i) => (
-                <div key={i} style={{ padding: '10px', background: '#1e293b', borderRadius: 4, margin: '8px 0', border: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{i + 1}. [{p.type}] {p.displayTitle}</span>
-                  <div style={{ display: 'flex', gap: 5, justifyContent: 'flex-end' }}>
-                    <button onClick={() => moveProblem(i, 'UP')} disabled={i === 0} style={iconBtn}>↑</button>
-                    <button onClick={() => moveProblem(i, 'DOWN')} disabled={i === compiledProblems.length - 1} style={iconBtn}>↓</button>
-                    <button onClick={() => editProblem(i)} style={{...iconBtn, color: '#38bdf8', borderColor: '#38bdf8'}}>Edit</button>
-                    <button onClick={() => removeProblem(i)} style={{...iconBtn, color: '#f87171', borderColor: '#f87171'}}>Delete</button>
+          <div style={{ padding: 40 }}>
+            <AnimatePresence mode="wait">
+              {/* STEP 1: Details */}
+              {step === 1 && (
+                <motion.div key="step1" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
+                  <h2 style={{ color: '#fff', marginTop: 0 }}>Basic Configurations</h2>
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 25, background: '#1e293b', padding: 10, borderRadius: 8 }}>
+                    <button onClick={() => setContestMode('SOLO')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'SOLO' ? '#38bdf8' : 'transparent', color: contestMode === 'SOLO' ? '#000' : '#94a3b8' }}>👤 Solo Standings</button>
+                    <button onClick={() => setContestMode('GROUP')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'GROUP' ? '#38bdf8' : 'transparent', color: contestMode === 'GROUP' ? '#000' : '#94a3b8' }}>👥 Team Mode</button>
                   </div>
-                </div>
-              ))}
-            </div>
+                  <label>Contest Title</label>
+                  <input value={title} onChange={e => setTitle(e.target.value)} style={{...inputBox, marginBottom: 20}} />
+                  
+                  <div style={{ display: 'flex', gap: 20 }}>
+                    <div style={{ flex: 1 }}><label>Duration (mins)</label><input type="number" value={duration} onChange={e => setDuration(Number(e.target.value))} style={inputBox} /></div>
+                    <div style={{ flex: 1 }}><label>Start Time</label><input type="datetime-local" value={startTimeStr} onChange={e => setStartTimeStr(e.target.value)} style={{ ...inputBox, colorScheme: 'dark' }} /></div>
+                  </div>
+                  <button onClick={() => setStep(2)} style={{ ...primaryBtn, width: '100%', marginTop: 30 }}>Next: Add Problems →</button>
+                </motion.div>
+              )}
 
-            <div style={{ background: '#0f172a', padding: 20, borderRadius: 12, border: '1px solid #1e293b', flex: 1 }}>
-              <h3 style={{ marginTop: 0, color: '#a5b4fc' }}>🤖 Global Curation Catalog</h3>
-              <div style={{display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '600px', overflowY: 'auto', paddingRight: 10}}>
-                {aiBank.map(p => (
-                  <div key={p.id} style={{ padding: 12, background: '#1e293b', borderRadius: 8, border: '1px solid #334155' }}>
-                    <span style={{ fontSize: 13, fontWeight: 'bold', display: 'block', marginBottom: 8, color: '#eef2ff' }}>{p.title}</span>
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 10, background: '#3b82f633', color: '#38bdf8', padding: '2px 6px', borderRadius: 4 }}>{p.platform}</span>
-                      <span style={{ fontSize: 10, background: '#1e293b', color: '#94a3b8', padding: '2px 6px', borderRadius: 4 }}>{p.difficulty}</span>
-                    </div>
-                    <button onClick={() => setCompiledProblems([...compiledProblems, { type: 'URL', url: p.originalUrl, title: p.title, displayTitle: p.title }])} style={{ background: '#38bdf8', color: '#000', fontWeight: 'bold', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>+ Import to Mashup</button>
+              {/* STEP 2: Add Problems */}
+              {step === 2 && (
+                <motion.div key="step2" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} style={{ display: 'flex', gap: 30, flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 500px' }}>
+                     <div style={{ display: 'flex', gap: 10, marginBottom: 20, borderBottom: '1px solid #1e293b', paddingBottom: 10 }}>
+                       {['URL', 'CUSTOM', 'MCQ'].map(t => (
+                         <button key={t} onClick={() => setActiveTab(t as any)} style={{ padding: '8px 16px', background: activeTab === t ? '#38bdf8' : '#1e293b', color: activeTab === t ? '#000' : '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}>{t}</button>
+                       ))}
+                     </div>
+                     
+                     {activeTab === 'URL' && (
+                       <div>
+                          <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste Link or Codeforces Code (e.g. 1500A)" />
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#94a3b8', marginTop: 10 }}>
+                               <input type="checkbox" checked={generateAiTests} onChange={e => setGenerateAiTests(e.target.checked)} />
+                               🤖 Check scraped tests AND automatically generate tougher hidden system tests via AI
+                          </label>
+                       </div>
+                     )}
+                     
+                     {activeTab === 'CUSTOM' && (
+                       <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
+                         <div>
+                           <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Custom Problem Title</label>
+                           <input placeholder="e.g. Find the Missing Integer" value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} />
+                         </div>
+                         <div>
+                           <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Problem Description (Supports Markdown/HTML)</label>
+                           <textarea placeholder="Describe the problem, input formats, and constraints..." value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, minHeight: '150px', resize: 'vertical'}} />
+                         </div>
+                         <div>
+                           <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Optional Image Attachment</label>
+                           <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'block', marginTop: 5, color: '#fff' }} />
+                         </div>
+                         <div>
+                           <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Time Limit (Seconds, 0 for infinite)</label>
+                           <input type="number" placeholder="e.g. 120" value={customTimeLimit} onChange={e => setCustomTimeLimit(Number(e.target.value))} style={inputBox} />
+                         </div>
+                         
+                         <h4 style={{ color: '#94a3b8', margin: '10px 0 0 0' }}>Custom Test Cases</h4>
+                         {customCases.map((tc, i) => (
+                             <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                                 <input placeholder="Input" value={tc.input} onChange={e => {
+                                     const newCases = [...customCases];
+                                     newCases[i].input = e.target.value;
+                                     setCustomCases(newCases);
+                                 }} style={{...inputBox, flex: 1, marginTop: 0}} />
+                                 <input placeholder="Expected Output" value={tc.expectedOutput} onChange={e => {
+                                     const newCases = [...customCases];
+                                     newCases[i].expectedOutput = e.target.value;
+                                     setCustomCases(newCases);
+                                 }} style={{...inputBox, flex: 1, marginTop: 0}} />
+                                 
+                                 <label style={{display: 'flex', alignItems: 'center', gap: 5, color: '#94a3b8', fontSize: 12, width: '120px', cursor: 'pointer'}}>
+                                     <input type="checkbox" checked={tc.isPublic} onChange={e => {
+                                         const newCases = [...customCases];
+                                         newCases[i].isPublic = e.target.checked;
+                                         setCustomCases(newCases);
+                                     }} /> Public (CPH)
+                                 </label>
+                                 
+                                 <button onClick={() => {
+                                     const newCases = customCases.filter((_, idx) => idx !== i);
+                                     setCustomCases(newCases.length ? newCases : [{input: '', expectedOutput: '', isPublic: true}]);
+                                 }} style={{...iconBtn, color: '#f87171', borderColor: '#f87171'}}>✕</button>
+                             </div>
+                         ))}
+                         <button onClick={() => setCustomCases([...customCases, {input: '', expectedOutput: '', isPublic: true}])} style={{...ghostBtn, alignSelf: 'flex-start'}}>+ Add Test Case</button>
+                       </div>
+                     )}
+
+                     {activeTab === 'MCQ' && (
+                       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                         <input value={mcqPrompt} onChange={e => setMcqPrompt(e.target.value)} style={inputBox} placeholder="Question Option Evaluation Prompt" />
+                         <label style={{ fontSize: 12, fontWeight: 'bold' }}>Time Limit (Seconds)</label>
+                         <input type="number" value={mcqTimeLimit} onChange={e => setMcqTimeLimit(Number(e.target.value))} style={inputBox} placeholder="e.g. 120" />
+                         <p style={{fontSize: 12, color: '#94a3b8', margin: 0}}>Check the box next to correct options.</p>
+                         {mcqOptions.map((o, idx) => (
+                           <div key={idx} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                             <input type="checkbox" checked={mcqCorrect.includes(idx)} onChange={() => setMcqCorrect(prev => prev.includes(idx) ? prev.filter(x => x !== idx) : [...prev, idx])} style={{transform: 'scale(1.5)', cursor: 'pointer'}} />
+                             <input value={o} onChange={e => { const n = [...mcqOptions]; n[idx] = e.target.value; setMcqOptions(n); }} style={{...inputBox, marginTop: 0}} placeholder={`Option ${String.fromCharCode(65+idx)}`} />
+                           </div>
+                         ))}
+                         <button onClick={() => setMcqOptions([...mcqOptions, ''])} style={{...ghostBtn, alignSelf: 'flex-start'}}>+ Add Option</button>
+                       </div>
+                     )}
+
+                     <button onClick={queueProblem} style={{ ...primaryBtn, width: '100%', marginTop: 25 }}>Append Problem</button>
+                     <button onClick={() => setStep(1)} style={{ ...ghostBtn, width: '100%', marginTop: 15, color: '#64748b', borderColor: '#334155' }}>← Back to Details</button>
                   </div>
-                ))}
-              </div>
-            </div>
+
+                  <div style={{ flex: '1 1 350px', background: '#020617', padding: 20, borderRadius: 12, border: '1px solid #1e293b' }}>
+                    <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>Queued Batch ({compiledProblems.length})</h3>
+                    {compiledProblems.map((p, i) => (
+                      <div key={i} style={{ padding: 10, background: '#1e293b', borderRadius: 6, margin: '8px 0', border: '1px solid #334155' }}>
+                        <span style={{ fontWeight: 'bold' }}>{i + 1}. {p.displayTitle}</span>
+                        <div style={{ display: 'flex', gap: 5, justifyContent: 'flex-end', marginTop: 10 }}>
+                          <button onClick={() => moveProblem(i, 'UP')} disabled={i === 0} style={iconBtn}>↑</button>
+                          <button onClick={() => moveProblem(i, 'DOWN')} disabled={i === compiledProblems.length - 1} style={iconBtn}>↓</button>
+                          <button onClick={() => editProblem(i)} style={{...iconBtn, color: '#38bdf8', borderColor: '#38bdf8'}}>Edit</button>
+                          <button onClick={() => removeProblem(i)} style={{...iconBtn, color: '#f87171', borderColor: '#f87171'}}>✕</button>
+                        </div>
+                      </div>
+                    ))}
+                    <button onClick={() => setStep(3)} style={{ ...ghostBtn, width: '100%', marginTop: 20, background: 'rgba(56,189,248,0.1)' }}>Review Mashup →</button>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* STEP 3: Review */}
+              {step === 3 && (
+                <motion.div key="step3" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} style={{ textAlign: 'center' }}>
+                  <h2 style={{ color: '#fff', marginTop: 0 }}>Final Review</h2>
+                  <div style={{ background: '#1e293b', padding: 24, borderRadius: 12, display: 'inline-block', textAlign: 'left', minWidth: 400, marginBottom: 30, border: '1px solid #334155' }}>
+                    <p style={{ margin: '8px 0' }}><strong style={{ color: '#94a3b8' }}>Title:</strong> {title}</p>
+                    <p style={{ margin: '8px 0' }}><strong style={{ color: '#94a3b8' }}>Mode:</strong> {contestMode}</p>
+                    <p style={{ margin: '8px 0' }}><strong style={{ color: '#94a3b8' }}>Duration:</strong> {duration} mins</p>
+                    <p style={{ margin: '8px 0' }}><strong style={{ color: '#94a3b8' }}>Total Problems:</strong> {compiledProblems.length}</p>
+                  </div>
+                  <br/>
+                  <button onClick={() => setStep(2)} style={{ ...ghostBtn, marginRight: 15 }}>← Go Back</button>
+                  <button onClick={createContest} style={{ background: '#10b981', color: '#fff', padding: '12px 30px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}>Deploy Mashup Room 🚀</button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       )}

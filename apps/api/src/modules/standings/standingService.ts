@@ -24,7 +24,6 @@ function isWrongAttempt(submission: any) {
 }
 
 export async function recomputeContestStandings(contestId: string) {
-  // CACHE CHECK: If cached data exists, return it immediately to reduce latency
   try {
     const cacheKey = `contest:standings:${contestId}`;
     const cached = await redis.get(cacheKey);
@@ -161,7 +160,6 @@ export async function recomputeContestStandings(contestId: string) {
       });
     }
 
-    // CACHE UPDATE: Store result in Redis for 60 seconds
     try {
       const cacheKey = `contest:standings:${contestId}`;
       await redis.set(cacheKey, JSON.stringify(standingRows), 'EX', 60);

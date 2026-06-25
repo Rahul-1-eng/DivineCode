@@ -167,7 +167,8 @@ const FAQ_RESOURCES: CachedQA[] = [
   }
 ];
 
-export async function askAiChatbot(query: string): Promise<string> {
+// 👉 FIXED: Accepts `history` and `imageBase64` from the frontend
+export async function askAiChatbot(query: string, history: any[] = [], imageBase64?: string): Promise<string> {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) return "AI Configuration key is missing from server architecture variables environment maps.";
 
@@ -186,17 +187,32 @@ export async function askAiChatbot(query: string): Promise<string> {
     }
   }
 
-  if (bestMatch) {
+  // Only use the basic cached response if there is no image context or ongoing deeper conversation
+  if (bestMatch && !imageBase64 && history.length <= 1) {
     return bestMatch.response;
   }
 
   try {
-    const prompt = `You are a helpful engineering assistant for the DivineCode platform. Provide a crisp, directly helpful answer for this query without markdown errors or unnecessary code blocks: ${query}`;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] });
+    let parts: any[] = [{ text: `You are a helpful engineering assistant for DivineCode. ${query}` }];
+
+    if (imageBase64) {
+      const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+      parts.push({
+        inlineData: { mimeType: "image/jpeg", data: cleanBase64 }
+      });
+    }
+
+    let contents = history.map(msg => ({
+      role: msg.role === 'ai' ? 'model' : 'user',
+      parts: [{ text: msg.text }]
+    }));
     
-    let aiResponse = data.candidates[0].content.parts[0].text;
-    return aiResponse.trim();
+    contents.push({ role: 'user', parts });
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
+    const { data } = await axios.post(url, { contents });
+    
+    return data.candidates[0].content.parts[0].text.trim();
   } catch (err: any) {
     console.error("AI Fallback Error:", err.response?.data || err.message);
     return "AI Service Error: Failed to generate a response. The model may be rate-limited or unavailable.";

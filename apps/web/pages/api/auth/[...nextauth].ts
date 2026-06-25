@@ -1,4 +1,3 @@
-// apps/web/pages/api/auth/[...nextauth].ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import NextAuth from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
@@ -23,7 +22,6 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
           const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
           
           try {
-            // Using the new V2 authentication route
             const res = await fetch(`${apiBase}/api/v2/auth/login`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -71,11 +69,9 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
             });
             
             const data = await res.json();
-            // Fix: The backend returns { ok: true, user: { username: "..." } }
             if (data?.user?.username) {
               (user as any).handle = data.user.username;
             } else if (data?.username) {
-              // Fallback just in case
               (user as any).handle = data.username;
             }
           } catch (error) {
@@ -93,7 +89,11 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
         }
         return session;
       },
-      async jwt({ token, user }) {
+      // 👉 FIX: Allow the JWT to accept live updates from the frontend
+      async jwt({ token, user, trigger, session }) {
+        if (trigger === "update" && session?.handle) {
+          token.handle = session.handle;
+        }
         if (user) {
           token.handle = (user as any).handle;
         }

@@ -5,7 +5,7 @@ export const communityRouter = Router();
 
 // GET /api/v2/community/problems
 communityRouter.get('/problems', async (req, res) => {
-  console.log("[Community Hub]: Request received for /problems"); // Debug log
+  console.log("[Community Hub]: Request received for /problems"); 
   try {
     const communityProblems = await prisma.problem.findMany({
       where: {
@@ -55,18 +55,17 @@ communityRouter.post('/upload', async (req, res) => {
       include: { author: true }
     });
 
-    // Ensure a "System" user exists to satisfy Prisma's Foreign Key constraint
-    let systemUser = await prisma.user.findUnique({ where: { id: 'ALL' } });
-    if (!systemUser) {
-      systemUser = await prisma.user.create({
-        data: {
-          id: 'ALL',
-          username: 'system_broadcast',
-          email: 'system@divinecode.local',
-          name: 'System Broadcast'
-        }
-      });
-    }
+    // 👉 FIX: Use upsert to prevent Unique Constraint Violation crashes if multiple users upload at once
+    const systemUser = await prisma.user.upsert({
+      where: { id: 'ALL' },
+      update: {}, 
+      create: {
+        id: 'ALL',
+        username: 'system_broadcast',
+        email: 'system@divinecode.local',
+        name: 'System Broadcast'
+      }
+    });
 
     const notification = await prisma.notification.create({
       data: {
@@ -96,7 +95,7 @@ communityRouter.post('/upload', async (req, res) => {
   }
 });
 
-// 👉 ADDED: PUT /api/v2/community/problems/:id (Edit Post Endpoint)
+// PUT /api/v2/community/problems/:id (Edit Post Endpoint)
 communityRouter.put('/problems/:id', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;
@@ -112,7 +111,6 @@ communityRouter.put('/problems/:id', async (req, res) => {
 
     if (!problem) return res.status(404).json({ error: "Post not found." });
 
-    // Verify the requester is the author (or an admin)
     if (problem.authorId !== user.id && user.role !== 'ADMIN') {
       return res.status(403).json({ error: "You can only edit your own posts." });
     }
@@ -129,10 +127,8 @@ communityRouter.put('/problems/:id', async (req, res) => {
       include: { author: true }
     });
 
-    // Broadcast the updated post to connected clients
     const io = req.app.get('io');
     if (io) {
-      // The frontend logic we updated earlier handles replacing the old post with this new one
       io.emit('new_community_post', updatedPost); 
     }
 
@@ -160,7 +156,6 @@ communityRouter.delete('/problems/:id', async (req, res) => {
 
     if (!problem) return res.status(404).json({ error: "Post not found." });
 
-    // Verify the requester is the author (or an admin)
     if (problem.authorId !== user.id && user.role !== 'ADMIN') {
       return res.status(403).json({ error: "You can only delete your own posts." });
     }
@@ -169,7 +164,6 @@ communityRouter.delete('/problems/:id', async (req, res) => {
       where: { id: problemId }
     });
 
-    // Broadcast the deletion so all connected clients remove it instantly
     const io = req.app.get('io');
     if (io) {
       io.emit('post_deleted', { id: problemId });

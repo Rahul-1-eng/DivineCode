@@ -2,7 +2,7 @@ import { CSSProperties, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { io } from 'socket.io-client';
 import toast, { Toaster } from 'react-hot-toast';
-import ReactMarkdown from 'react-markdown'; // 👉 ADDED: For rich text formatting!
+import ReactMarkdown from 'react-markdown'; 
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -15,7 +15,6 @@ export default function CommunityHubPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploading, setUploading] = useState(false);
   
-  // 👉 ADDED: Manage both New and Editing states in one form
   const [formData, setFormData] = useState({ id: '', title: '', videoUrl: '', description: '' });
   const [isEditing, setIsEditing] = useState(false);
 
@@ -26,11 +25,10 @@ export default function CommunityHubPage() {
     
     socket.on('new_community_post', (post) => {
       setPosts(prev => {
-        // If it already exists, update it (Edit case)
         if (prev.find(p => p.id === post.id)) {
             return prev.map(p => p.id === post.id ? post : p);
         }
-        return [post, ...prev]; // New post case
+        return [post, ...prev]; 
       });
     });
     
@@ -89,7 +87,7 @@ export default function CommunityHubPage() {
         
       const method = isEditing ? 'PUT' : 'POST';
 
-   console.log(`[Community Hub]: Submitting ${method} request to ${url} with data:`, payload);
+      console.log(`[Community Hub]: Submitting ${method} request to ${url} with data:`, payload);
       const res = await fetch(url, {
         method,
         headers: { 
@@ -170,7 +168,6 @@ export default function CommunityHubPage() {
               return (
                 <div key={post.id} style={{ ...card, position: 'relative' }}>
                   
-                  {/* 👉 ADDED: Action Buttons Container */}
                   {isAuthor && (
                     <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, display: 'flex', gap: 8 }}>
                       <button 
@@ -211,7 +208,6 @@ export default function CommunityHubPage() {
                       By {post.author?.username || post.author?.name || 'Community'}
                     </div>
                     
-                    {/* 👉 ADDED: Markdown renderer instead of plain <p> tag */}
                     <div className="markdown-preview" style={{ color: '#94a3b8', fontSize: 14, margin: '0 0 16px 0', lineHeight: 1.5, maxHeight: '80px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                        <ReactMarkdown>{post.description}</ReactMarkdown>
                     </div>
@@ -271,7 +267,6 @@ export default function CommunityHubPage() {
   );
 }
 
-// ... Keep existing styles (page, nav, brand, hero, etc.) ...
 const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: '#020617', boxSizing: 'border-box' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 30 };
 const brand: CSSProperties = { color: '#eef2ff', textDecoration: 'none', fontWeight: 950, fontSize: 'clamp(20px, 4vw, 28px)' };
