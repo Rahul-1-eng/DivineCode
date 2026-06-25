@@ -3,13 +3,12 @@ import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
-import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
-import jsx from 'react-syntax-highlighter/dist/cjs/languages/prism/jsx';
-import cpp from 'react-syntax-highlighter/dist/cjs/languages/prism/cpp';
-import prism from 'react-syntax-highlighter/dist/cjs/styles/prism/prism';
-import python from 'react-syntax-highlighter/dist/cjs/languages/prism/python';
-import typescript from 'react-syntax-highlighter/dist/cjs/languages/prism/typescript';
-
+// Correct: Using the default import
+import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/prism-light';
+import jsx from 'react-syntax-highlighter/dist/esm/languages/prism/jsx';
+import cpp from 'react-syntax-highlighter/dist/esm/languages/prism/cpp';
+import python from 'react-syntax-highlighter/dist/esm/languages/prism/python';
+import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
 SyntaxHighlighter.registerLanguage('jsx', jsx);
 SyntaxHighlighter.registerLanguage('cpp', cpp);
 SyntaxHighlighter.registerLanguage('python', python);
