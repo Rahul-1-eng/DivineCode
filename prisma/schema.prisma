@@ -26,7 +26,6 @@ model User {
 
   auditLogs           AuditLog[]
   createdContests     Contest[]
-  contestParticipants ContestParticipant[]
   contestProblemsAdded ContestProblem[]
   duelMatchesCreated  DuelMatch[]
   duelPlayers         DuelPlayer[]
@@ -35,7 +34,6 @@ model User {
   authoredProblems    Problem[]
   ratingHistory       RatingHistory[]
   recommendationSnapshots RecommendationSnapshot[]
-  submissions         Submission[]
   topicMastery        TopicMastery[]
   submissionReports   SubmissionReport[]
   submittedInterviewQuestions InterviewQuestion[]  
@@ -44,9 +42,20 @@ model User {
   unlockedTestcases   UnlockedTestcase[]     // NEW: Track unlocked hints/cases
   notifications Notification[]
   battleKits          BattleKit[]
-
+  submissions          Submission[]
+  contestParticipants  ContestParticipant[]
+  activityLog          ActivityLog[]
 }
 
+model ActivityLog {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  eventDescription String
+  ratingDelta      Int      @default(0)
+  coinDelta        Int      @default(0)
+  date             DateTime @default(now())
+}
 model ExternalHandle {
   id                 String                  @id @default(cuid())
   userId             String
