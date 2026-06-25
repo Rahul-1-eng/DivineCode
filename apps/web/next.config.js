@@ -5,7 +5,13 @@ const withPWA = require('next-pwa')({
   register: true,
   skipWaiting: true,
 });
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  transpilePackages: ['react-syntax-highlighter', 'refractor'],
+  // ... rest of your config
+}
 
+module.exports = nextConfig
 module.exports = withPWA({
   reactStrictMode: true,
   transpilePackages: ["ui"],
