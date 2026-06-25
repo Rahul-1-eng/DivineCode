@@ -67,37 +67,28 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
                 googleId: account?.providerAccountId
               })
             });
-            
             const data = await res.json();
-            if (data?.user?.username) {
-              (user as any).handle = data.user.username;
-            } else if (data?.username) {
-              (user as any).handle = data.username;
-            }
-          } catch (error) {
-            console.error('Could not sync Google user with API', error);
-          }
+            if (data?.user?.username) (user as any).handle = data.user.username;
+            else if (data?.username) (user as any).handle = data.username;
+          } catch (error) { console.error('Google sync error', error); }
         }
         return true;
+      },
+      async jwt({ token, user, trigger, session }) {
+        if (trigger === "update" && session?.handle) token.handle = session.handle;
+        if (user) {
+          token.handle = (user as any).handle;
+          token.accessToken = (user as any).accessToken; // Capture token from authorize()
+        }
+        return token;
       },
       async session({ session, token }) {
         if (session.user) {
           (session.user as any).id = token.sub;
-          if (token.handle) {
-            (session.user as any).handle = token.handle;
-          }
+          (session.user as any).handle = token.handle;
+          (session as any).accessToken = token.accessToken; // Expose to frontend
         }
         return session;
-      },
-      // 👉 FIX: Allow the JWT to accept live updates from the frontend
-      async jwt({ token, user, trigger, session }) {
-        if (trigger === "update" && session?.handle) {
-          token.handle = session.handle;
-        }
-        if (user) {
-          token.handle = (user as any).handle;
-        }
-        return token;
       }
     },
     pages: { signIn: '/signin' }

@@ -445,7 +445,11 @@ export default function Home() {
                   </div>
                 ) : session ? (
                   <div style={{ background: 'rgba(2, 6, 23, 0.6)', borderRadius: 24, padding: 'clamp(20px, 4vw, 32px)', border: '1px solid rgba(34, 211, 238, 0.2)', textAlign: 'center' }}>
-                    <p style={{ color: '#94a3b8', fontSize: 'clamp(12px, 2vw, 14px)', margin: 0 }}>⏳ Loading your profile data...</p>
+                    {profileError ? (
+                      <p style={{ color: '#ef4444', fontSize: 'clamp(12px, 2vw, 14px)', margin: 0 }}>❌ Failed to load profile: {profileError}</p>
+                    ) : (
+                      <p style={{ color: '#94a3b8', fontSize: 'clamp(12px, 2vw, 14px)', margin: 0 }}>⏳ Loading your profile data...</p>
+                    )}
                   </div>
                 ) : null}
               </div>
