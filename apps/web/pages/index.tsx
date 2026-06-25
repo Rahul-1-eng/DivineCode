@@ -146,8 +146,15 @@ export default function Home() {
       console.log('🔍 Fetching profile for email:', session.user.email);
       setHeatmapLoading(true);
       
-fetch(`${API_BASE_URL}/api/v2/profile/me`, { 
-        headers: { 'x-user-email': session.user.email, 'Content-Type': 'application/json' } 
+// We assume your NextAuth session is configured to include accessToken
+      const token = (session as any)?.accessToken || ''; 
+      
+      fetch(`${API_BASE_URL}/api/v2/profile/me`, { 
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'x-user-email': session.user.email, 
+          'Content-Type': 'application/json' 
+        } 
       })
         .then(async (r) => {
           const data = await r.json();

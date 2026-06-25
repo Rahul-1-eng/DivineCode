@@ -8,8 +8,14 @@ export const profileRouter = Router();
 
 profileRouter.get('/me', async (req, res) => {
   try {
-    const viewer = await resolvedViewerFromRequest(req, true);
-    const email = viewer.email;
+    let viewer;
+    try {
+      viewer = await resolvedViewerFromRequest(req, true);
+    } catch (authError) {
+      console.error('❌ [AUTH] Viewer resolution failed:', authError);
+      return res.status(401).json({ error: 'Authentication failed' });
+    }
+    const email = viewer?.email;
     
     console.log('📊 [PROFILE] GET /me request received');
     console.log(`   📧 Email from session: ${email}`);
@@ -104,8 +110,14 @@ profileRouter.get('/me', async (req, res) => {
 
 profileRouter.post('/claim-username', async (req, res) => {
   try {
-    const viewer = await resolvedViewerFromRequest(req, true);
-    const email = viewer.email;
+    let viewer;
+    try {
+      viewer = await resolvedViewerFromRequest(req, true);
+    } catch (authError) {
+      console.error('❌ [AUTH] Viewer resolution failed:', authError);
+      return res.status(401).json({ error: 'Authentication failed' });
+    }
+    const email = viewer?.email;
     const name = viewer.name; 
     const { username } = req.body;
     
@@ -152,8 +164,14 @@ profileRouter.post('/claim-username', async (req, res) => {
 
 profileRouter.post('/update-password', async (req, res) => {
   try {
-    const viewer = await resolvedViewerFromRequest(req, true);
-    const email = viewer.email;
+    let viewer;
+    try {
+      viewer = await resolvedViewerFromRequest(req, true);
+    } catch (authError) {
+      console.error('❌ [AUTH] Viewer resolution failed:', authError);
+      return res.status(401).json({ error: 'Authentication failed' });
+    }
+    const email = viewer?.email;
     const { currentPassword, newPassword } = req.body;
     
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
@@ -186,8 +204,14 @@ profileRouter.post('/update-password', async (req, res) => {
 
 profileRouter.post('/save-handles', async (req, res) => {
   try {
-    const viewer = await resolvedViewerFromRequest(req, true);
-    const email = viewer.email;
+    let viewer;
+    try {
+      viewer = await resolvedViewerFromRequest(req, true);
+    } catch (authError) {
+      console.error('❌ [AUTH] Viewer resolution failed:', authError);
+      return res.status(401).json({ error: 'Authentication failed' });
+    }
+    const email = viewer?.email;
     const { codeforcesHandle, leetcodeHandle } = req.body;
     if (!email) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -224,8 +248,14 @@ profileRouter.post('/save-handles', async (req, res) => {
 
 profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
   try {
-    const viewer = await resolvedViewerFromRequest(req, true);
-    const email = viewer.email;
+    let viewer;
+    try {
+      viewer = await resolvedViewerFromRequest(req, true);
+    } catch (authError) {
+      console.error('❌ [AUTH] Viewer resolution failed:', authError);
+      return res.status(401).json({ error: 'Authentication failed' });
+    }
+    const email = viewer?.email;
     const { platform, handle } = req.params;
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ error: 'User not found' });
