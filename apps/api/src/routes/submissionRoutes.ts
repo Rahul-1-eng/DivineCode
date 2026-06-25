@@ -26,18 +26,34 @@ submissionRouter.get('/contest/:contestId', async (req, res) => {
   }
 });
 
-// Endpoint for LeetCode style "Run Code" (Runs against only sample test cases)
+// ✅ FIXED: Endpoint for LeetCode style "Run Code" (Runs against only sample test cases)
 submissionRouter.post('/run-samples', async (req, res) => {
   const { problemId, code, language } = req.body;
 
+  // Validate inputs
+  if (!problemId || !code || !language) {
+    return res.status(400).json({ error: 'problemId, code, and language are required' });
+  }
+
   try {
-    // 1. First, try fetching from the relational Testcase table
+    console.log(`[Submissions] Running samples for problem: ${problemId}`);
+
+    // 1. First, try fetching from the relational Testcase table (for contest problems)
     let samples = await prisma.testcase.findMany({
-      where: { problemId, isPublic: true }
+      where: { 
+        problemId,
+        isPublic: true,
+        type: 'SAMPLE'  // ✅ FIXED: Only SAMPLE and HIDDEN are valid enum values
+      },
+      orderBy: { order: 'asc' }
     });
+
+    console.log(`[Submissions] Found ${samples.length} sample testcases in Testcase table`);
 
     // 2. Fallback for AI Avatar / Practice Dataset problems
     if (samples.length === 0) {
+      console.log(`[Submissions] Trying AI dataset fallback for problem: ${problemId}`);
+      
       const aiProblem = await prisma.aiProblemDataset.findUnique({
         where: { id: problemId }
       });
@@ -60,26 +76,50 @@ submissionRouter.post('/run-samples', async (req, res) => {
               createdAt: new Date(),
               updatedAt: new Date()
             })) as any;
+            
+            console.log(`[Submissions] Loaded ${samples.length} testcases from AI dataset`);
           }
         } catch (jsonErr) {
-          console.error('[JSON Parse Error] Failed to read AI dataset testcases field:', jsonErr);
+          console.error('[Submissions] JSON Parse Error for AI dataset testcases:', jsonErr);
         }
       }
     }
 
     if (samples.length === 0) {
-      return res.status(400).json({ error: 'No sample test cases configured for this problem.' });
+      console.warn(`[Submissions] No sample test cases found for problem: ${problemId}`);
+      return res.status(404).json({ error: 'No sample test cases configured for this problem.' });
     }
 
+    // Execute code against all samples
+    console.log(`[Submissions] Executing code against ${samples.length} test cases...`);
     const evaluations = [];
+    
     for (const test of samples) {
-      const result = await executeSubmission(code, language, test.input, test.expectedOutput);
-      evaluations.push({ testCaseId: test.id, ...result });
+      try {
+        const result = await executeSubmission(code, language, test.input, test.expectedOutput);
+        evaluations.push({ 
+          testCaseId: test.id,
+          testCaseNumber: samples.indexOf(test) + 1,
+          input: test.input.substring(0, 100), // Show first 100 chars
+          ...result 
+        });
+      } catch (execErr: any) {
+        console.error(`[Submissions] Execution error for test case ${test.id}:`, execErr);
+        evaluations.push({
+          testCaseId: test.id,
+          testCaseNumber: samples.indexOf(test) + 1,
+          verdict: 'RUNTIME_ERROR',
+          compileError: execErr.message
+        });
+      }
     }
 
-    return res.json({ results: evaluations });
+    console.log(`[Submissions] Execution complete. Results:`, evaluations);
+    return res.json({ success: true, results: evaluations });
+    
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    console.error('[Submissions] run-samples error:', err);
+    return res.status(500).json({ error: err.message || 'Failed to execute code' });
   }
 });
 

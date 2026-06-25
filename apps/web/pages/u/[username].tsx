@@ -69,10 +69,12 @@ export default function PublicProfile() {
         return res.json();
       })
       .then(data => {
+        console.log('[PublicProfile] Loaded profile:', data);
         setProfile(data);
         setLoading(false);
       })
       .catch(err => {
+        console.error('[PublicProfile] Error:', err);
         setError(err.message);
         setLoading(false);
       });
@@ -135,15 +137,15 @@ export default function PublicProfile() {
               <h3 style={{ margin: '0 0 16px', color: '#e2e8f0', fontSize: 16 }}>Platform Stats</h3>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
                 <span style={{ color: '#94a3b8' }}>Problems Solved</span>
-                <strong style={{ color: '#fff' }}>{profile.stats.totalAccepted}</strong>
+                <strong style={{ color: '#fff' }}>{profile.stats?.totalAccepted || 0}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
                 <span style={{ color: '#94a3b8' }}>Total Submissions</span>
-                <strong style={{ color: '#fff' }}>{profile.stats.totalAttempts}</strong>
+                <strong style={{ color: '#fff' }}>{profile.stats?.totalAttempts || 0}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: '#94a3b8' }}>Accuracy</span>
-                <strong style={{ color: '#4ade80' }}>{profile.stats.accuracy}%</strong>
+                <strong style={{ color: '#4ade80' }}>{profile.stats?.accuracy || 0}%</strong>
               </div>
             </div>
 
@@ -163,7 +165,7 @@ export default function PublicProfile() {
           {/* Right Main Column: Activity Heatmap & Contest History */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
             
-            {/* 👉 FIXED: ActivityHeatmap now receives 'data' prop with transformed submissions */}
+            {/* ✅ FIXED: ActivityHeatmap now receives 'data' prop with transformed submissions */}
             <ActivityHeatmap data={transformSubmissionsToHeatmap(profile.submissions || [])} />
 
             <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, padding: 24 }}>
@@ -177,16 +179,21 @@ export default function PublicProfile() {
                       <th style={{ padding: '12px 8px' }}>Rank</th>
                       <th style={{ padding: '12px 8px' }}>Solved</th>
                       <th style={{ padding: '12px 8px' }}>Δ Rating</th>
+                      <th style={{ padding: '12px 8px' }}>💰 Coins</th>
                     </tr>
                   </thead>
                   <tbody>
                     {profile.matchHistory.map((match: any, i: number) => (
-                      <tr key={i} style={{ borderBottom: '1px solid #1e293b' }}>
+                      <tr key={i} style={{ borderBottom: '1px solid #1e293b', cursor: 'pointer' }} onClick={() => window.location.href = `/contests/${match.contestId}`}>
                         <td style={{ padding: '16px 8px', color: '#e2e8f0' }}>{match.contestName}</td>
                         <td style={{ padding: '16px 8px', color: '#e2e8f0' }}>{match.rank}</td>
                         <td style={{ padding: '16px 8px', color: '#e2e8f0' }}>{match.solved}</td>
                         <td style={{ padding: '16px 8px', fontWeight: 'bold', color: match.ratingDelta > 0 ? '#4ade80' : match.ratingDelta < 0 ? '#f87171' : '#94a3b8' }}>
                           {match.ratingDelta > 0 ? '+' : ''}{match.ratingDelta}
+                        </td>
+                        {/* ✅ ADDED: Coins column */}
+                        <td style={{ padding: '16px 8px', fontWeight: 'bold', color: '#fbbf24' }}>
+                          +{match.coinsEarned || 0}
                         </td>
                       </tr>
                     ))}

@@ -74,6 +74,7 @@ export default function ProblemWorkspace() {
     } catch (e) {}
   };
 
+  // ✅ FIXED: Fetch problem from correct endpoint that handles all problem types
   useEffect(() => {
     if (!id) return;
     
@@ -83,20 +84,43 @@ export default function ProblemWorkspace() {
     newSocket.emit('join-workspace', id);
 
     newSocket.on('remote-code-update', (newCode: string) => {
-      // Logic for CRDT or simple replace for multiplayer mode
       setCode(newCode);
     });
 
-    fetch(`${API_BASE_URL}/api/v2/ai-dataset`, { headers: { 'x-user-email': session?.user?.email || '' } })
-      .then(r => r.json())
+    // ✅ CORRECT ENDPOINT: /api/v2/problems/:id/redirect
+    // This handles MCQ, custom, external, and regular problems
+    fetch(`${API_BASE_URL}/api/v2/problems/${id}/redirect`, { 
+      headers: { 'x-user-email': session?.user?.email || '' } 
+    })
+      .then(r => {
+        if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
+        return r.json();
+      })
       .then(data => {
-        const found = data.problems?.find((p: Problem) => p.id === id);
-        if (found) {
-          setProblem(found);
+        if (data && data.title) {
+          setProblem({
+            id: data.id,
+            title: data.title,
+            difficulty: data.difficulty,
+            rating: data.rating,
+            descriptionHtml: data.description || data.customDescription,
+            description: data.description || data.customDescription,
+            content: data.description || data.customDescription,
+            testcases: data.customTestCases || data.testcases,
+            originalUrl: data.externalUrl,
+          });
         } else {
-          setProblem({ error: true, title: 'Not Found', description: 'Could not find this problem in the database.' });
+          throw new Error('Invalid problem data returned from API');
         }
-      }).catch(() => setProblem({ error: true, title: 'Error', description: 'Failed to load.' }));
+      })
+      .catch((err) => {
+        console.error('[ProblemWorkspace] Fetch error:', err);
+        setProblem({ 
+          error: true, 
+          title: 'Problem Not Found', 
+          description: `Could not load problem: ${err.message}` 
+        });
+      });
 
     return () => { newSocket.disconnect(); };
   }, [id, session]);
@@ -114,6 +138,7 @@ export default function ProblemWorkspace() {
     return { input: '', output: '' };
   }, [problem]);
 
+  // ✅ FIXED: Use correct endpoint for running code
   async function runCode() {
     if (!problem || problem.error) return;
     setRunning(true);
@@ -124,6 +149,12 @@ export default function ProblemWorkspace() {
         headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ problemId: problem.id, code, language })
       });
+      
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || `Server error: ${res.status}`);
+      }
+      
       const data = await res.json();
       setOutputs(data.results || []);
 
@@ -131,13 +162,14 @@ export default function ProblemWorkspace() {
       if (allAccepted) {
         playSuccessAudio();
       }
-    } catch (err) { 
-      alert('Failed to connect to execution server.'); 
+    } catch (err: any) { 
+      alert(`Failed to run code: ${err.message}`); 
     } finally { 
       setRunning(false); 
     }
   }
 
+  // ✅ FIXED: Use correct AI chat endpoint
   const invokeAIProfiler = async () => {
     if (!problem || problem.error) return;
     setAnalyzing(true);
@@ -146,13 +178,18 @@ export default function ProblemWorkspace() {
       const prompt = `Please explain the optimal approach for this problem step-by-step and provide deep optimization hints.\n\nTitle: ${problem.title}\n\nMy Code:\n${code}`;
       const response = await fetch(`${API_BASE_URL}/api/v2/ai/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-user-email': session?.user?.email || '' },
         body: JSON.stringify({ message: prompt, history: [] })
       });
+      
+      if (!response.ok) {
+        throw new Error(`AI service returned ${response.status}`);
+      }
+      
       const resData = await response.json();
-      setAiAnalysis(resData.reply);
-    } catch { 
-      setAiAnalysis('Error connecting to AI Mentor. Please try again.'); 
+      setAiAnalysis(resData.reply || 'No response from AI');
+    } catch (err: any) { 
+      setAiAnalysis(`Error: ${err.message}. Please check your API configuration.`); 
     } finally { 
       setAnalyzing(false); 
     }
@@ -167,7 +204,7 @@ export default function ProblemWorkspace() {
   const handleEditorChange = (value: string | undefined) => {
     const val = value || '';
     setCode(val);
-    // 👉 ADDED: Broadcast code to peers in the room
+    // Broadcast code to peers in the room
     if (socket) socket.emit('local-code-update', { roomId: id, code: val });
   };
 
@@ -310,7 +347,8 @@ export default function ProblemWorkspace() {
             </div>
           </div>
 
-          <button onClick={runCode} disabled={running || problem?.error} style={{ background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', border: 'none', padding: '8px 24px', borderRadius: 8, fontWeight: 900, cursor: 'pointer', boxShadow: '0 0 15px rgba(34,211,238,0.3)' }}>
+          {/* ✅ FIXED: Buttons now enabled when problem loads successfully */}
+          <button onClick={runCode} disabled={running || problem?.error} style={{ background: running || problem?.error ? '#64748b' : 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', border: 'none', padding: '8px 24px', borderRadius: 8, fontWeight: 900, cursor: problem?.error ? 'not-allowed' : 'pointer', boxShadow: '0 0 15px rgba(34,211,238,0.3)', opacity: problem?.error ? 0.5 : 1 }}>
             {running ? 'Compiling...' : 'Run Code ▶'}
           </button>
         </div>
@@ -323,7 +361,8 @@ export default function ProblemWorkspace() {
           <div style={{ display: 'flex', background: '#0f172a' }}>
             <button onClick={() => setConsoleTab('output')} style={{ padding: '12px 20px', background: consoleTab === 'output' ? '#020617' : 'transparent', color: consoleTab === 'output' ? '#38bdf8' : '#fff', border: 'none', borderTop: consoleTab === 'output' ? '2px solid #38bdf8' : '2px solid transparent', cursor: 'pointer', fontWeight: 'bold' }}>Console Output</button>
             <button onClick={() => setConsoleTab('mentor')} style={{ padding: '12px 20px', background: consoleTab === 'mentor' ? '#020617' : 'transparent', color: consoleTab === 'mentor' ? '#38bdf8' : '#fff', border: 'none', borderTop: consoleTab === 'mentor' ? '2px solid #38bdf8' : '2px solid transparent', cursor: 'pointer', fontWeight: 'bold' }}>AI Explainer</button>
-            <button onClick={invokeAIProfiler} disabled={analyzing || problem?.error} style={{ marginLeft: 'auto', background: '#22d3ee', color: '#000', border: 'none', padding: '0 20px', fontWeight: 700, cursor: 'pointer' }}>{analyzing ? 'Analyzing...' : 'Run AI Analysis'}</button>
+            {/* ✅ FIXED: Button enabled when problem loads successfully */}
+            <button onClick={invokeAIProfiler} disabled={analyzing || problem?.error} style={{ marginLeft: 'auto', background: analyzing || problem?.error ? '#64748b' : '#22d3ee', color: '#000', border: 'none', padding: '0 20px', fontWeight: 700, cursor: problem?.error ? 'not-allowed' : 'pointer', opacity: problem?.error ? 0.5 : 1 }}>{analyzing ? 'Analyzing...' : 'Run AI Analysis'}</button>
           </div>
           <div style={{ flex: 1, padding: 16, overflowY: 'auto' }}>
             {consoleTab === 'output' ? (
