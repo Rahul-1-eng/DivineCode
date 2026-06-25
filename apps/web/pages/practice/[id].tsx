@@ -26,6 +26,8 @@ interface ExecutionResult {
   verdict: string;
   runtimeMs?: number;
   compileError?: string;
+  stdout?: string;
+  stderr?: string;
 }
 
 interface ChatPost {
@@ -57,6 +59,10 @@ export default function ProblemWorkspace() {
 
   const [socket, setSocket] = useState<Socket | null>(null);
 
+  // ✅ NEW: Terminal Mode States
+  const [customInput, setCustomInput] = useState('');
+  const [isTerminalMode, setIsTerminalMode] = useState(false);
+
   const battleKits = [
     { name: 'IICPC Standard IO Boilerplate', code: '#include <bits/stdc++.h>\nusing namespace std;\n\nvoid solve() {\n    // Implementation here\n}\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n    int t; cin >> t;\n    while(t--) solve();\n    return 0;\n}' },
     { name: 'Segment Tree Template', code: '// Segment Tree (Point Update, Range Query)\nconst int N = 1e5+5;\nint tree[4*N];\n\nvoid build(int node, int start, int end) {\n    if(start == end) return;\n    int mid = (start + end) / 2;\n    build(2*node, start, mid);\n    build(2*node+1, mid+1, end);\n    tree[node] = tree[2*node] + tree[2*node+1];\n}' },
@@ -71,7 +77,7 @@ export default function ProblemWorkspace() {
     } catch (e) {}
   };
 
-  // 👉 ADDED: Load messages from local storage when component mounts
+  // Load messages from local storage
   useEffect(() => {
     if (id) {
       const saved = localStorage.getItem(`chat_${id}`);
@@ -80,7 +86,7 @@ export default function ProblemWorkspace() {
     }
   }, [id]);
 
-  // 👉 ADDED: Save messages to local storage when posts change
+  // Save messages to local storage
   useEffect(() => {
     if (id && posts.length > 0) {
       localStorage.setItem(`chat_${id}`, JSON.stringify(posts));
@@ -101,6 +107,9 @@ export default function ProblemWorkspace() {
     fetchApi(`/api/v2/problems/${id}/redirect`)
       .then(data => {
         if (data && data.title) {
+          const hasTestcases = data.customTestCases || data.testcases;
+          setIsTerminalMode(!hasTestcases || (typeof hasTestcases === 'string' && JSON.parse(hasTestcases).length === 0) || (Array.isArray(hasTestcases) && hasTestcases.length === 0));
+          
           setProblem({
             id: data.id,
             title: data.title,
@@ -141,26 +150,60 @@ export default function ProblemWorkspace() {
     return { input: '', output: '' };
   }, [problem]);
 
+  // ✅ UPDATED: Run Code with Terminal Mode Support
   async function runCode() {
     if (!problem || problem.error) return;
     setRunning(true);
     setConsoleTab('output');
+    
     try {
-      const data = await fetchApi('/api/v2/submissions/run-samples', {
-        method: 'POST', 
-        body: JSON.stringify({ problemId: problem.id, code, language })
-      });
+      let data;
       
-      setOutputs(data.results || []);
-
-      const allAccepted = data.results?.length > 0 && data.results.every((r: ExecutionResult) => r.verdict === 'ACCEPTED');
-      if (allAccepted) {
-        playSuccessAudio();
+      if (isTerminalMode) {
+        // Terminal Mode: Use execute-raw endpoint
+        console.log('[ProblemWorkspace] Running in Terminal Mode with custom input');
+        data = await fetchApi('/api/v2/submissions/execute-raw', {
+          method: 'POST',
+          body: JSON.stringify({
+            code,
+            language,
+            stdin: customInput
+          })
+        });
+        
+        // Format response for terminal mode
+        setOutputs([{
+          verdict: data.verdict,
+          stdout: data.stdout,
+          stderr: data.stderr,
+          compileError: data.compileError,
+          runtimeMs: data.runtimeMs
+        }]);
+      } else {
+        // Test Case Mode: Use run-samples endpoint
+        console.log('[ProblemWorkspace] Running in Test Case Mode');
+        data = await fetchApi('/api/v2/submissions/run-samples', {
+          method: 'POST',
+          body: JSON.stringify({ 
+            problemId: problem.id, 
+            code, 
+            language 
+          })
+        });
+        
+        setOutputs(data.results || []);
+        
+        // Play sound if all tests passed
+        const allAccepted = data.results?.length > 0 && data.results.every((r: ExecutionResult) => r.verdict === 'ACCEPTED');
+        if (allAccepted) {
+          playSuccessAudio();
+        }
       }
-    } catch (err: any) { 
-      alert(`Failed to run code: ${err.message}`); 
-    } finally { 
-      setRunning(false); 
+    } catch (err: any) {
+      console.error('[ProblemWorkspace] Run code error:', err);
+      alert(`Failed to run code: ${err.message}`);
+    } finally {
+      setRunning(false);
     }
   }
 
@@ -176,10 +219,10 @@ export default function ProblemWorkspace() {
       });
       
       setAiAnalysis(resData.reply || 'No response from AI');
-    } catch (err: any) { 
-      setAiAnalysis(`Error: ${err.message}. Please check your API configuration.`); 
-    } finally { 
-      setAnalyzing(false); 
+    } catch (err: any) {
+      setAiAnalysis(`Error: ${err.message}. Please check your API configuration.`);
+    } finally {
+      setAnalyzing(false);
     }
   };
 
@@ -240,7 +283,7 @@ export default function ProblemWorkspace() {
                 </div>
               )}
 
-              {(sampleData.input || sampleData.output) && (
+              {(sampleData.input || sampleData.output) && !isTerminalMode && (
                 <div style={{ marginTop: 24, padding: 16, borderRadius: 12, background: '#020617', border: '1px solid rgba(148,163,184,.18)' }}>
                   {sampleData.input && (
                     <><strong style={{ display: 'block', marginBottom: 8, color: '#94a3b8' }}>Sample Input</strong>
@@ -252,6 +295,31 @@ export default function ProblemWorkspace() {
                   )}
                 </div>
               )}
+
+              {isTerminalMode && (
+                <div style={{ marginTop: 24, padding: 16, borderRadius: 12, background: '#020617', border: '2px solid #22d3ee' }}>
+                  <strong style={{ display: 'block', marginBottom: 8, color: '#22d3ee' }}>🖥️ Terminal Mode</strong>
+                  <p style={{ color: '#cbd5e1', fontSize: 13, margin: '0 0 8px' }}>No predefined test cases found. Enter custom input below:</p>
+                  <textarea
+                    placeholder="Enter STDIN here...\nExample:\n5\n1 2 3 4 5"
+                    value={customInput}
+                    onChange={(e) => setCustomInput(e.target.value)}
+                    style={{
+                      width: '100%',
+                      height: 120,
+                      background: '#0f172a',
+                      color: '#e2e8f0',
+                      border: '1px solid #334155',
+                      borderRadius: 8,
+                      padding: 12,
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      outline: 'none',
+                      resize: 'vertical'
+                    }}
+                  />
+                </div>
+              )}
             </>
           )}
 
@@ -259,13 +327,44 @@ export default function ProblemWorkspace() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <h3 style={{ color: '#fff', margin: 0 }}>Algorithmic Video Streaming</h3>
               {!problem.error ? (
-                <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 12, background: '#000', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
-                  <iframe style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} src={`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent((problem.title || 'Coding Problem') + ' optimal solution algorithm step by step')}`} frameBorder="0" allowFullScreen />
+                <div>
+                  {problem.originalUrl?.includes('youtube.com') || problem.originalUrl?.includes('youtu.be') ? (
+                    <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 12, background: '#000', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+                      <iframe
+                        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+                        src={`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent((problem.title || 'Coding Problem') + ' solution algorithm explanation')}`}
+                        frameBorder="0"
+                        allowFullScreen
+                      />
+                    </div>
+                  ) : (
+                    <div style={{ padding: 24, background: '#1e293b', borderRadius: 12, border: '1px solid #475569', textAlign: 'center' }}>
+                      <div style={{ fontSize: 48, marginBottom: 12 }}>📹</div>
+                      <h4 style={{ color: '#fff', margin: '0 0 8px' }}>Video Not Available</h4>
+                      <p style={{ color: '#cbd5e1', marginBottom: 16 }}>No direct video link found. Search YouTube manually:</p>
+                      <a
+                        href={`https://www.youtube.com/results?search_query=${encodeURIComponent(problem.title + ' solution algorithm')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          display: 'inline-block',
+                          background: '#ef4444',
+                          color: '#fff',
+                          padding: '10px 20px',
+                          borderRadius: 8,
+                          textDecoration: 'none',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        🔍 Search YouTube for "{problem.title}"
+                      </a>
+                    </div>
+                  )}
+                  <p style={{ color: '#64748b', fontSize: 14, textAlign: 'center', marginTop: 12 }}>Streaming the top-rated YouTube editorial for this problem.</p>
                 </div>
               ) : (
                 <p style={{ color: '#94a3b8' }}>Cannot load video for this problem.</p>
               )}
-              <p style={{ color: '#64748b', fontSize: 14, textAlign: 'center' }}>Streaming the top-rated YouTube editorial for this exact problem algorithm.</p>
             </div>
           )}
 
@@ -288,10 +387,10 @@ export default function ProblemWorkspace() {
           )}
 
           {workspaceTab === 'voice' && (
-             <VoiceInterviewer 
-                currentQuestion={problem} 
-                code={code} 
-                onSuccess={() => playSuccessAudio()} 
+             <VoiceInterviewer
+                currentQuestion={problem}
+                code={code}
+                onSuccess={() => playSuccessAudio()}
              />
           )}
 
@@ -335,7 +434,7 @@ export default function ProblemWorkspace() {
           </div>
 
           <button onClick={runCode} disabled={running || problem?.error} style={{ background: running || problem?.error ? '#64748b' : 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', border: 'none', padding: '8px 24px', borderRadius: 8, fontWeight: 900, cursor: problem?.error ? 'not-allowed' : 'pointer', boxShadow: '0 0 15px rgba(34,211,238,0.3)', opacity: problem?.error ? 0.5 : 1 }}>
-            {running ? 'Compiling...' : 'Run Code ▶'}
+            {running ? 'Compiling...' : isTerminalMode ? '▶ Run' : 'Run Code ▶'}
           </button>
         </div>
         
@@ -355,10 +454,41 @@ export default function ProblemWorkspace() {
                 {outputs.length === 0 && <p style={{ color: '#475569' }}>Run your code to see results here.</p>}
                 {outputs.map((out, idx) => (
                   <div key={idx} style={{ marginBottom: 12, padding: 12, borderRadius: 8, background: out.verdict === 'ACCEPTED' ? 'rgba(34,211,238,0.1)' : 'rgba(239,68,68,0.1)' }}>
-                    <strong>Test Case {idx + 1}: </strong> 
-                    <span style={{ color: out.verdict === 'ACCEPTED' ? '#22d3ee' : '#ef4444', fontWeight: 'bold' }}>{out.verdict}</span>
-                    {out.runtimeMs && <span style={{ color: '#94a3b8', marginLeft: 8 }}>({out.runtimeMs}ms)</span>}
-                    {out.compileError && <pre style={{ color: '#ef4444', marginTop: 12, whiteSpace: 'pre-wrap', fontSize: 13, background: 'rgba(0,0,0,0.2)', padding: 12, borderRadius: 6 }}>{out.compileError}</pre>}
+                    {isTerminalMode ? (
+                      <>
+                        <strong>Execution Status: </strong>
+                        <span style={{ color: out.verdict === 'ACCEPTED' ? '#22d3ee' : '#ef4444', fontWeight: 'bold' }}>{out.verdict}</span>
+                        {out.runtimeMs && <span style={{ color: '#94a3b8', marginLeft: 8 }}>({out.runtimeMs}ms)</span>}
+                        
+                        {out.stdout && (
+                          <>
+                            <h4 style={{ color: '#cbd5e1', marginTop: 12 }}>Output:</h4>
+                            <pre style={{ color: '#e2e8f0', background: '#0f172a', padding: 12, borderRadius: 6, whiteSpace: 'pre-wrap', margin: 0 }}>{out.stdout}</pre>
+                          </>
+                        )}
+                        
+                        {out.stderr && (
+                          <>
+                            <h4 style={{ color: '#ef4444', marginTop: 12 }}>Stderr:</h4>
+                            <pre style={{ color: '#ef4444', background: '#0f172a', padding: 12, borderRadius: 6, whiteSpace: 'pre-wrap', margin: 0 }}>{out.stderr}</pre>
+                          </>
+                        )}
+                        
+                        {out.compileError && (
+                          <>
+                            <h4 style={{ color: '#ef4444', marginTop: 12 }}>Compile Error:</h4>
+                            <pre style={{ color: '#ef4444', background: '#0f172a', padding: 12, borderRadius: 6, whiteSpace: 'pre-wrap', margin: 0 }}>{out.compileError}</pre>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <strong>Test Case {idx + 1}: </strong>
+                        <span style={{ color: out.verdict === 'ACCEPTED' ? '#22d3ee' : '#ef4444', fontWeight: 'bold' }}>{out.verdict}</span>
+                        {out.runtimeMs && <span style={{ color: '#94a3b8', marginLeft: 8 }}>({out.runtimeMs}ms)</span>}
+                        {out.compileError && <pre style={{ color: '#ef4444', marginTop: 12, whiteSpace: 'pre-wrap', fontSize: 13, background: 'rgba(0,0,0,0.2)', padding: 12, borderRadius: 6 }}>{out.compileError}</pre>}
+                      </>
+                    )}
                   </div>
                 ))}
               </>

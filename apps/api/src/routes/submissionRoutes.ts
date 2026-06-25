@@ -13,8 +13,7 @@ submissionRouter.get('/contest/:contestId', async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req, true);
     const email = viewer.email;
     
-    // FIX 1.2: Do not read from x-user-id header. Use the verified viewer object.
-    const userId = viewer.userId; 
+    const userId = viewer.userId;
 
     const submissions = await getContestSubmissions({
       contestId,
@@ -31,7 +30,6 @@ submissionRouter.get('/contest/:contestId', async (req, res) => {
 submissionRouter.post('/run-samples', async (req, res) => {
   const { problemId, code, language } = req.body;
 
-  // Validate inputs
   if (!problemId || !code || !language) {
     return res.status(400).json({ error: 'problemId, code, and language are required' });
   }
@@ -44,7 +42,7 @@ submissionRouter.post('/run-samples', async (req, res) => {
       where: { 
         problemId,
         isPublic: true,
-        type: 'SAMPLE'  // ✅ FIXED: Only SAMPLE and HIDDEN are valid enum values
+        type: 'SAMPLE'
       },
       orderBy: { order: 'asc' }
     });
@@ -101,7 +99,7 @@ submissionRouter.post('/run-samples', async (req, res) => {
         evaluations.push({ 
           testCaseId: test.id,
           testCaseNumber: samples.indexOf(test) + 1,
-          input: test.input.substring(0, 100), // Show first 100 chars
+          input: test.input.substring(0, 100),
           ...result 
         });
       } catch (execErr: any) {
@@ -120,6 +118,40 @@ submissionRouter.post('/run-samples', async (req, res) => {
     
   } catch (err: any) {
     console.error('[Submissions] run-samples error:', err);
+    return res.status(500).json({ error: err.message || 'Failed to execute code' });
+  }
+});
+
+// ✅ NEW: Terminal Mode - Execute code with custom STDIN (no test cases needed)
+// ✅ NEW: Terminal Mode - Execute code with custom STDIN
+submissionRouter.post('/execute-raw', async (req, res) => {
+  const { code, language, stdin } = req.body;
+
+  if (!code || !language) {
+    return res.status(400).json({ error: 'code and language are required' });
+  }
+
+  try {
+    console.log(`[Submissions] Executing raw code in terminal mode`);
+    console.log(`[Submissions] Language: ${language}, Input length: ${(stdin || '').length}`);
+
+    const result = await executeSubmission(code, language, stdin || '', '');
+    
+    console.log(`[Submissions] Raw execution result: ${result.verdict}`);
+    
+    // 👉 FIXED: Added (result as any) to stop TypeScript build errors
+    return res.json({ 
+      success: true, 
+      verdict: result.verdict,
+      stdout: (result as any).stdout || '',
+      stderr: (result as any).stderr || '',
+      compileError: (result as any).compileError || '',
+      runtimeMs: (result as any).runtimeMs || 0,
+      memoryMb: (result as any).memoryMb || 0
+    });
+    
+  } catch (err: any) {
+    console.error('[Submissions] execute-raw error:', err);
     return res.status(500).json({ error: err.message || 'Failed to execute code' });
   }
 });
