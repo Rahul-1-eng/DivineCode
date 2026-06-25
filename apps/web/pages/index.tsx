@@ -146,48 +146,27 @@ export default function Home() {
       console.log('🔍 Fetching profile for email:', session.user.email);
       setHeatmapLoading(true);
       
-      fetch(`${API_BASE_URL}/api/v2/profile/me`, { 
-        headers: { 
-          'x-user-email': session.user.email,
-          'Content-Type': 'application/json'
-        } 
+fetch(`${API_BASE_URL}/api/v2/profile/me`, { 
+        headers: { 'x-user-email': session.user.email, 'Content-Type': 'application/json' } 
       })
-        .then(r => {
-          console.log('📊 Profile response status:', r.status);
-          return r.json();
+        .then(async (r) => {
+          const data = await r.json();
+          if (!r.ok || data.error) throw new Error(data.error || 'Fetch failed');
+          return data;
         })
         .then(data => {
-          console.log('✅ Profile data received:', {
-            username: data.username,
-            rating: data.rating,
-            coins: data.coins,
-            submissions_count: data.submissions?.length || 0,
-            has_error: !!data.error
-          });
-
-          if (data.error) {
-            console.error('❌ Profile API error:', data.error);
-            setProfileError(data.error);
-            setHeatmapLoading(false);
-          } else {
-            setProfile(data);
-            setProfileError(null);
-
-            // Transform submissions to heatmap data
-            if (data.submissions && Array.isArray(data.submissions)) {
-              console.log('📈 Transforming', data.submissions.length, 'submissions to heatmap...');
-              const transformed = transformSubmissionsToHeatmap(data.submissions);
-              setHeatmapData(transformed);
-            } else {
-              console.warn('⚠️ No submissions array in profile data');
-              setHeatmapData([]);
-            }
-            setHeatmapLoading(false);
-          }
+          setProfile(data);
+          setProfileError(null);
+          // Only transform if data exists
+          const transformed = data.submissions ? transformSubmissionsToHeatmap(data.submissions) : [];
+          setHeatmapData(transformed);
         })
         .catch(err => {
           console.error('❌ Profile fetch error:', err);
-          setProfileError('Failed to load profile - check console for details');
+          setProfileError(err.message || 'Error');
+          setProfile(null); // Explicitly clear profile on error
+        })
+        .finally(() => {
           setHeatmapLoading(false);
         });
     }

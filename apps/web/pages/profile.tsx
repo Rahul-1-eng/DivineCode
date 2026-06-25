@@ -326,32 +326,38 @@ export default function ProfilePage() {
           </section>
         </div>
         
+// Inside apps/web/pages/profile.tsx
+
 <section style={{ ...card, marginTop: 18 }}>
-          <h2 style={{ margin: '0 0 16px 0', fontSize: 20 }}>Match History</h2>
-          
-          {(!userData?.matchHistory || userData.matchHistory.length === 0) ? (
-            <p style={{ color: '#94a3b8' }}>No rated contest history found.</p>
-          ) : (
-            <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid rgba(148,163,184,.16)' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                <thead style={{ background: 'rgba(2,6,23,.5)' }}>
-                  <tr>
-                    <th style={th}>Contest</th>
-                    <th style={th}>Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {userData.matchHistory.map((match: any, i: number) => (
-                    <tr key={i} style={{ borderBottom: '1px solid rgba(148,163,184,.12)' }}>
-                      <td style={td}>{match.contestName}</td>
-                      <td style={td}>{new Date(match.date).toLocaleDateString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+  <h2 style={{ margin: '0 0 16px 0', fontSize: 20 }}>Transaction & Rating Logs</h2>
+  
+  <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid rgba(148,163,184,.16)' }}>
+    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+      <thead style={{ background: 'rgba(2,6,23,.5)' }}>
+        <tr>
+          <th style={th}>Date</th>
+          <th style={th}>Event</th>
+          <th style={th}>Rating Change</th>
+          <th style={th}>Coin Change</th>
+        </tr>
+      </thead>
+      <tbody>
+        {userData?.activityLog?.map((act: any, i: number) => (
+          <tr key={i} style={{ borderBottom: '1px solid rgba(148,163,184,.12)' }}>
+            <td style={td}>{new Date(act.date).toLocaleDateString()}</td>
+            <td style={td}>{act.eventDescription}</td>
+            <td style={{ ...td, color: act.ratingDelta >= 0 ? '#4ade80' : '#f87171' }}>
+              {act.ratingDelta > 0 ? '+' : ''}{act.ratingDelta}
+            </td>
+            <td style={{ ...td, color: '#fcd34d' }}>
+              {act.coinDelta > 0 ? '+' : ''}{act.coinDelta} 🪙
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</section>
 
       </section>
     </main>
