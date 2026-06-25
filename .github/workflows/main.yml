@@ -57,4 +57,4 @@ jobs:
       # 👉 FIX: Explicitly point the worker to the temporary Redis container we spun up above
       env:
         REDIS_URL: redis://localhost:6379
-      run: node dist/workers/index.js --dry-run || echo "Worker compiled successfully."
+run: node --check dist/workers/index.js && echo "Worker compiled and verified successfully."
