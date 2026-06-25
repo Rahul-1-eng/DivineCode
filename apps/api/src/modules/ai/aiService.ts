@@ -91,10 +91,11 @@ export async function askAiChatbot(query: string, history: any[] = [], imageBase
       const client = new Anthropic({ apiKey });
       
       // Format history for Claude
-      const messages = history.map(m => ({
-        role: m.role === 'ai' ? 'assistant' : 'user',
-        content: m.text
-      }));
+     //  Fixed code with literal type casting:
+const messages = history.map(m => ({
+  role: (m.role === 'ai' || m.role === 'model' ? 'assistant' : 'user') as 'user' | 'assistant',
+  content: m.text
+}));
       
       // Add current query
       messages.push({
