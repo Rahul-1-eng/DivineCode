@@ -41,14 +41,19 @@ export default function CommunityHubPage() {
     return () => { socket.disconnect(); };
   }, []);
 
-  const loadCommunityPosts = async () => {
+ const loadCommunityPosts = async () => {
     setLoading(true);
+    const url = `${API_BASE_URL}/api/v2/community/problems`;
+    console.log("[Community Hub]: Fetching posts from", url);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v2/community/problems`);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
       const data = await res.json();
+      console.log("[Community Hub]: Received posts:", data);
       setPosts(Array.isArray(data) ? data : []);
-    } catch (err) {
-      toast.error("Failed to load community hub.");
+    } catch (err: any) {
+      console.error("[Community Hub]: Fetch error:", err);
+      toast.error("Failed to load community hub: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -84,6 +89,7 @@ export default function CommunityHubPage() {
         
       const method = isEditing ? 'PUT' : 'POST';
 
+   console.log(`[Community Hub]: Submitting ${method} request to ${url} with data:`, payload);
       const res = await fetch(url, {
         method,
         headers: { 

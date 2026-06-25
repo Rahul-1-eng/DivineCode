@@ -5,6 +5,7 @@ export const communityRouter = Router();
 
 // GET /api/v2/community/problems
 communityRouter.get('/problems', async (req, res) => {
+  console.log("[Community Hub]: Request received for /problems"); // Debug log
   try {
     const communityProblems = await prisma.problem.findMany({
       where: {
@@ -80,9 +81,12 @@ communityRouter.post('/upload', async (req, res) => {
 
     const io = req.app.get('io');
     if (io) {
+      console.log("[Community Hub]: Emitting new post to sockets");
       io.emit('new_notification', notification);
       io.emit('new_community_post', newPost);
       io.emit('global_ticker', `🌐 ${user.username || user.name} published a new tutorial: ${title}`);
+    } else {
+      console.warn("[Community Hub Warning]: Socket.io instance not found.");
     }
 
     res.status(201).json({ success: true, post: newPost });
