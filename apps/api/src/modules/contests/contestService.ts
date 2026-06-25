@@ -235,7 +235,7 @@ export async function registerForContestV2(contestId: string, input: MemberInput
 
     let teamId: string | null = null;
     let isPending = false;
-    let role = ContestParticipantRole.PARTICIPANT;
+    let role: ContestParticipantRole = ContestParticipantRole.PARTICIPANT;
     
     if (memberInput.teamInviteCode) {
       const team = await tx.contestTeam.findFirst({ where: { inviteCode: memberInput.teamInviteCode.trim().toUpperCase(), contestId } });
