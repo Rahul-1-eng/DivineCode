@@ -2,9 +2,8 @@ import { CSSProperties, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/router';
 import { motion } from 'framer-motion';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
+// 👉 ADDED: Import secure fetch wrapper
+import { fetchApi } from '../../lib/api';
 
 function getDynamicStatus(contest: any) {
   const start = new Date(contest.startTime).getTime();
@@ -20,39 +19,21 @@ export default function ContestsList() {
   const router = useRouter();
   const [contests, setContests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // 👉 SECURE AUTH PATTERN
-  const [apiToken, setApiToken] = useState<string>('');
 
   useEffect(() => {
-    if (session?.user) {
-      fetch('/api/auth/api-token')
-        .then(res => res.json())
-        .then(data => { if (data.token) setApiToken(data.token); })
-        .catch(console.error);
-    }
-  }, [session]);
+    if (status === 'loading') return;
 
-  useEffect(() => {
-    // If there is a session, wait for the token before fetching
-    if (session && !apiToken) return;
-
-    fetch(`${API_V2_BASE_URL}/contests`, {
-      headers: { 
-        'x-user-email': session?.user?.email || '',
-        ...(apiToken ? { 'Authorization': `Bearer ${apiToken}` } : {})
-      }
-    })
-      .then(res => res.json())
+    // 👉 FIXED: Replaced manual token fetching and raw fetch with streamlined fetchApi
+    fetchApi('/api/v2/contests', { requireAuth: !!session })
       .then(data => {
         if (Array.isArray(data)) setContests(data);
         setLoading(false);
       })
       .catch((err) => {
-        console.error(err);
+        console.error("Failed to load contests:", err);
         setLoading(false);
       });
-  }, [session, apiToken]);
+  }, [session, status]);
 
   const running = contests.filter(c => getDynamicStatus(c) === 'RUNNING');
   const scheduled = contests.filter(c => getDynamicStatus(c) === 'SCHEDULED');

@@ -45,8 +45,9 @@ export default function InterviewPage() {
     }
 
     Promise.all([
-      fetchApi('/api/v2/interview/tracks').catch(() => []),
-      fetchApi('/api/v2/interview/questions').catch(() => []),
+      // 👉 FIXED: Added requireAuth: false so guests can view the curriculum
+      fetchApi('/api/v2/interview/tracks', { requireAuth: false }).catch(() => []),
+      fetchApi('/api/v2/interview/questions', { requireAuth: false }).catch(() => []),
       session?.user ? fetchApi('/api/v2/interview/progress').catch(() => []) : Promise.resolve([])
     ]).then(([trackData, qData, progData]) => {
       setTracks(Array.isArray(trackData) ? trackData : []);
@@ -95,7 +96,7 @@ export default function InterviewPage() {
 
   const updateProgress = async (qId: string, progressStatus: string) => {
     setProgress(prev => ({ ...prev, [qId]: progressStatus }));
-    if (!session?.user) return;
+    if (!session?.user) return; // Guests won't save progress
     
     try {
       await fetchApi(`/api/v2/interview/progress/${qId}`, {
@@ -113,7 +114,7 @@ export default function InterviewPage() {
       toast.success("Question approved and live!");
       setPendingQs(prev => prev.filter(q => q.id !== qId));
       
-      const refreshedQuestions = await fetchApi('/api/v2/interview/questions');
+      const refreshedQuestions = await fetchApi('/api/v2/interview/questions', { requireAuth: false });
       setQuestions(Array.isArray(refreshedQuestions) ? refreshedQuestions : []);
     } catch (err: any) {
       toast.error(err.message || "Failed to approve");
@@ -148,7 +149,6 @@ export default function InterviewPage() {
     }
   }
 
-  // Hook for the VoiceInterviewer to call upon AI pass evaluation
   const handleAiSuccess = () => {
     toast.success('AI FAANG Interviewer passed your response! Marked as Mastered.', { icon: '💼' });
     updateProgress(currentQ.id, 'MASTERED');

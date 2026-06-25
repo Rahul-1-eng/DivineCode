@@ -38,7 +38,6 @@ export default function DuelPage() {
   const [myAttempts, setMyAttempts] = useState(0);
   const [lockedOptions, setLockedOptions] = useState<number[]>([]);
 
-  // 👉 ADDED: Chat and Voice States
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
@@ -58,7 +57,7 @@ export default function DuelPage() {
     }
   }, [router.query, session]);
 
-  // 👉 ADDED: Helper to clean up audio DOM elements
+  // 👉 FIXED: Consistent Audio Element Cleanup
   const cleanupAudioElement = (socketId: string) => {
     const audio = document.getElementById(`audio-${socketId}`) as HTMLAudioElement;
     if (audio) {
@@ -113,7 +112,7 @@ export default function DuelPage() {
       });
 
       if (!state.finished && state.question) setStatus('Answer before the timer burns out.'); 
-      if (state.finished) setStatus('Duel finished.'); 
+      if (state.finished) setStatus('Duel finished. Rankings synced.'); 
     });
     
     socket.on('duel:feedback', (data) => {
@@ -123,7 +122,6 @@ export default function DuelPage() {
       setFeedback(`${data.playerName} answered ${data.correct ? 'correctly ✅' : 'wrong ❌'} (${data.attemptsLeft || 0} chances left)`); 
     });
 
-    // 👉 ADDED: Chat Listeners
     socket.on('chat:message', (msg) => {
       setMessages(prev => [...prev, { ...msg, type: 'text' }]);
     });
@@ -132,9 +130,9 @@ export default function DuelPage() {
       setMessages(prev => [...prev, { ...msg, type: 'image' }]);
     });
 
-    // 👉 ADDED: WebRTC Listeners for Voice
+    // WEBRTC Voice Connections
     socket.on('webrtc:offer', async ({ senderId, offer }) => {
-      if (!localStreamRef.current) return; // Ignore if user hasn't enabled voice
+      if (!localStreamRef.current) return; 
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
       peersRef.current[senderId] = pc;
@@ -191,7 +189,6 @@ export default function DuelPage() {
     };
   }, []);
 
-  // Hack to allow socket listeners inside useEffect to read current roomId
   const stateRoomIdRef = useRef(roomId);
   useEffect(() => { stateRoomIdRef.current = roomId; }, [roomId]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -228,9 +225,12 @@ export default function DuelPage() {
     }
 
     const name = session?.user?.name || session?.user?.email || `Player-${Math.floor(Math.random() * 1000)}`; 
+    const userEmail = session?.user?.email; 
     
+    // 👉 FIXED: Pass email so rating can update
     socketRef.current.emit('duel:createCustom', { 
       name, 
+      userEmail,
       questionIds: useCustomQuestions ? filteredIds : undefined 
     });
     setJoined(true);
@@ -238,19 +238,21 @@ export default function DuelPage() {
 
   function joinCustom() {
     if (!socketRef.current || joined || !joinInputCode.trim()) return;
+    
     const name = session?.user?.name || session?.user?.email || `Player-${Math.floor(Math.random() * 1000)}`; 
-    socketRef.current.emit('duel:joinCustom', { name, roomCode: joinInputCode });
+    const userEmail = session?.user?.email; 
+
+    // 👉 FIXED: Pass email so rating can update
+    socketRef.current.emit('duel:joinCustom', { name, userEmail, roomCode: joinInputCode });
     setJoined(true);
   }
 
-  // 👉 ADDED: Chat Send Handler
   const handleSendMessage = () => {
     if (!chatInput.trim() || !socketRef.current || !roomId) return;
     socketRef.current.emit('chat:message', { roomId, message: chatInput.trim() });
     setChatInput('');
   };
 
-  // 👉 ADDED: Image Upload Handler
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !socketRef.current || !roomId) return;
@@ -263,7 +265,6 @@ export default function DuelPage() {
     reader.readAsDataURL(file);
   };
 
-  // 👉 ADDED: Voice Toggle Handler (Gapless communication)
   const toggleVoice = async () => {
     if (!socketRef.current || !roomId) return alert("Must be in a duel to connect voice.");
 
@@ -286,11 +287,12 @@ export default function DuelPage() {
         localStreamRef.current = stream;
         setVoiceStatus('connected');
         
-        // As the initiator, we create an offer and send it to the room. 
-        // The opponent will hear it if they have already pressed 'Join Voice'.
         const pc = new RTCPeerConnection(ICE_SERVERS);
         
-        // Track the single opponent. Since it's a duel, any answer we get will map to them.
+        // 👉 FIXED: Use opponent's exact socket ID to ensure clean creation and teardown
+        const opponent = players.find(p => p.id !== socketRef.current?.id);
+        const opponentId = opponent?.id || 'opponent';
+
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
         pc.onicecandidate = (e) => {
@@ -298,18 +300,17 @@ export default function DuelPage() {
         };
 
         pc.ontrack = (e) => {
-          let audio = document.getElementById('opponent-audio') as HTMLAudioElement;
+          let audio = document.getElementById(`audio-${opponentId}`) as HTMLAudioElement;
           if (!audio) {
             audio = document.createElement('audio');
-            audio.id = 'opponent-audio';
+            audio.id = `audio-${opponentId}`;
             audio.autoplay = true;
             document.body.appendChild(audio);
           }
           audio.srcObject = e.streams[0];
         };
         
-        // Note: For simplicity in 1v1, we bind the opponent's PC to "opponent"
-        peersRef.current['opponent'] = pc;
+        peersRef.current[opponentId] = pc;
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
@@ -508,7 +509,6 @@ export default function DuelPage() {
         )}
       </section>
 
-      {/* 👉 ADDED: Floating Chat & Voice Panel (Only available when playing) */}
       {duelMode === 'playing' && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
           {isChatOpen ? (

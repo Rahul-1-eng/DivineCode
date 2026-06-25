@@ -4,7 +4,6 @@ import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
 import { io, Socket } from 'socket.io-client';
 import VoiceInterviewer from '../../components/VoiceInterviewer';
-// 👉 ADDED: Import the fetchApi wrapper
 import { fetchApi } from '../../lib/api'; 
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
@@ -54,9 +53,7 @@ export default function ProblemWorkspace() {
   const [analyzing, setAnalyzing] = useState(false);
 
   const [discussionInput, setDiscussionInput] = useState('');
-  const [posts, setPosts] = useState<ChatPost[]>([
-    { author: 'System_Admin', message: 'If executing in O(N), ensure the sparse initialization bounds are checked properly to avoid segment errors.', timestamp: '1 hour ago' }
-  ]);
+  const [posts, setPosts] = useState<ChatPost[]>([]);
 
   const [socket, setSocket] = useState<Socket | null>(null);
 
@@ -74,6 +71,22 @@ export default function ProblemWorkspace() {
     } catch (e) {}
   };
 
+  // 👉 ADDED: Load messages from local storage when component mounts
+  useEffect(() => {
+    if (id) {
+      const saved = localStorage.getItem(`chat_${id}`);
+      if (saved) setPosts(JSON.parse(saved));
+      else setPosts([{ author: 'System_Admin', message: 'If executing in O(N), ensure the sparse initialization bounds are checked properly to avoid segment errors.', timestamp: '1 hour ago' }]);
+    }
+  }, [id]);
+
+  // 👉 ADDED: Save messages to local storage when posts change
+  useEffect(() => {
+    if (id && posts.length > 0) {
+      localStorage.setItem(`chat_${id}`, JSON.stringify(posts));
+    }
+  }, [posts, id]);
+
   useEffect(() => {
     if (!id) return;
     
@@ -85,7 +98,6 @@ export default function ProblemWorkspace() {
       setCode(newCode);
     });
 
-    // 👉 FIXED: Using fetchApi to properly authenticate and handle the request
     fetchApi(`/api/v2/problems/${id}/redirect`)
       .then(data => {
         if (data && data.title) {
@@ -129,7 +141,6 @@ export default function ProblemWorkspace() {
     return { input: '', output: '' };
   }, [problem]);
 
-  // 👉 FIXED: Using fetchApi to authenticate the judge execution request
   async function runCode() {
     if (!problem || problem.error) return;
     setRunning(true);
@@ -153,7 +164,6 @@ export default function ProblemWorkspace() {
     }
   }
 
-  // 👉 FIXED: Using fetchApi to authenticate the AI explainer request
   const invokeAIProfiler = async () => {
     if (!problem || problem.error) return;
     setAnalyzing(true);

@@ -3,8 +3,8 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import { motion } from 'framer-motion';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+// 👉 ADDED: Import fetchApi wrapper for secure authenticated requests
+import { fetchApi } from '../lib/api';
 
 export default function AdminDashboard() {
   const { data: session, status } = useSession();
@@ -28,27 +28,21 @@ export default function AdminDashboard() {
 
     const fetchAdminData = async () => {
       try {
-        const headers = { 'x-user-email': session.user?.email || '' };
-        
-        const [metricsRes, reportsRes, questionsRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/v2/admin/metrics`, { headers }),
-          fetch(`${API_BASE_URL}/api/v2/admin/reports`, { headers }),
-          fetch(`${API_BASE_URL}/api/v2/interview/pending`, { headers }) // 👉 FETCH PENDING AI QUESTIONS
+        // 👉 FIXED: Replaced raw fetch with fetchApi to pass JWT securely
+        const [metricsData, reportsData, qData] = await Promise.all([
+          fetchApi('/api/v2/admin/metrics'),
+          fetchApi('/api/v2/admin/reports'),
+          fetchApi('/api/v2/interview/pending')
         ]);
 
-        if (!metricsRes.ok || !reportsRes.ok) {
-          throw new Error('Access Denied. Ensure your email is granted ADMIN privileges.');
-        }
-
-        setMetrics(await metricsRes.json());
-        setReports(await reportsRes.json());
+        setMetrics(metricsData);
+        setReports(reportsData);
         
-        const qData = await questionsRes.json();
         if (qData.success) setPendingQuestions(qData.questions);
         
         setLoading(false);
       } catch (err: any) {
-        setError(err.message);
+        setError(err.message || 'Access Denied. Ensure your email is granted ADMIN privileges.');
         setLoading(false);
       }
     };
@@ -58,9 +52,9 @@ export default function AdminDashboard() {
 
   const handleDismissReport = async (reportId: string) => {
     try {
-      await fetch(`${API_BASE_URL}/api/v2/admin/reports/${reportId}`, {
-        method: 'DELETE',
-        headers: { 'x-user-email': session?.user?.email || '' }
+      // 👉 FIXED: Used fetchApi
+      await fetchApi(`/api/v2/admin/reports/${reportId}`, {
+        method: 'DELETE'
       });
       setReports(prev => prev.filter(r => r.id !== reportId));
     } catch (err) {
@@ -70,13 +64,11 @@ export default function AdminDashboard() {
 
   const handleApproveQuestion = async (questionId: string) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v2/interview/questions/${questionId}/approve`, {
-        method: 'PATCH',
-        headers: { 'x-user-email': session?.user?.email || '' }
+      // 👉 FIXED: Used fetchApi
+      await fetchApi(`/api/v2/interview/questions/${questionId}/approve`, {
+        method: 'PATCH'
       });
-      if (res.ok) {
-        setPendingQuestions(prev => prev.filter(q => q.id !== questionId));
-      }
+      setPendingQuestions(prev => prev.filter(q => q.id !== questionId));
     } catch (err) {
       console.error("Failed to approve question", err);
     }

@@ -10,8 +10,6 @@ export default function GlobalNavigationAndMashupCreator() {
   const { data: session } = useSession();
   
   const [navTab, setNavTab] = useState<'mashup' | 'duel' | 'interview'>('mashup');
-  
-  // 🔥 FIX: Multi-step UI Tracker
   const [step, setStep] = useState(1);
 
   const [contestMode, setContestMode] = useState<'SOLO' | 'GROUP'>('GROUP');

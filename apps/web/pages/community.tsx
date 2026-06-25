@@ -3,6 +3,8 @@ import { useSession } from 'next-auth/react';
 import { io } from 'socket.io-client';
 import toast, { Toaster } from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown'; 
+// 👉 ADDED: Import fetchApi wrapper
+import { fetchApi } from '../lib/api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -39,15 +41,11 @@ export default function CommunityHubPage() {
     return () => { socket.disconnect(); };
   }, []);
 
- const loadCommunityPosts = async () => {
+  // 👉 FIXED: Replaced raw fetch with fetchApi (bypasses auth for viewing public feed)
+  const loadCommunityPosts = async () => {
     setLoading(true);
-    const url = `${API_BASE_URL}/api/v2/community/problems`;
-    console.log("[Community Hub]: Fetching posts from", url);
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
-      const data = await res.json();
-      console.log("[Community Hub]: Received posts:", data);
+      const data = await fetchApi('/api/v2/community/problems', { requireAuth: false });
       setPosts(Array.isArray(data) ? data : []);
     } catch (err: any) {
       console.error("[Community Hub]: Fetch error:", err);
@@ -69,6 +67,7 @@ export default function CommunityHubPage() {
       setShowUploadModal(true);
   };
 
+  // 👉 FIXED: Replaced raw fetch with authenticated fetchApi wrapper
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!session?.user?.email) return toast.error("Must be logged in to modify posts.");
@@ -82,25 +81,16 @@ export default function CommunityHubPage() {
       };
 
       const url = isEditing 
-        ? `${API_BASE_URL}/api/v2/community/problems/${formData.id}` 
-        : `${API_BASE_URL}/api/v2/community/upload`;
+        ? `/api/v2/community/problems/${formData.id}` 
+        : `/api/v2/community/upload`;
         
       const method = isEditing ? 'PUT' : 'POST';
 
-      console.log(`[Community Hub]: Submitting ${method} request to ${url} with data:`, payload);
-      const res = await fetch(url, {
+      const data = await fetchApi(url, {
         method,
-        headers: { 
-          'Content-Type': 'application/json', 
-          'x-user-email': session.user.email 
-        },
         body: JSON.stringify(payload)
       });
 
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.error || "Action failed on server.");
-      
       toast.success(isEditing ? "Tutorial Updated!" : "Tutorial Published!");
       setShowUploadModal(false);
     } catch (err: any) {
@@ -110,21 +100,19 @@ export default function CommunityHubPage() {
     }
   };
 
+  // 👉 FIXED: Replaced raw fetch with authenticated fetchApi wrapper
   const handleDeletePost = async (postId: string) => {
     if (!confirm("Are you sure you want to delete this tutorial? This cannot be undone.")) return;
     if (!session?.user?.email) return;
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v2/community/problems/${postId}`, {
-        method: 'DELETE',
-        headers: { 'x-user-email': session.user.email }
+      await fetchApi(`/api/v2/community/problems/${postId}`, {
+        method: 'DELETE'
       });
-      const data = await res.json();
       
-      if (!res.ok) throw new Error(data.error || "Failed to delete post.");
       toast.success("Tutorial deleted.");
     } catch (err: any) {
-      toast.error(err.message);
+      toast.error(err.message || "Failed to delete post.");
     }
   };
 
@@ -224,7 +212,6 @@ export default function CommunityHubPage() {
         )}
       </section>
 
-      {/* UPLOAD/EDIT MODAL */}
       {showUploadModal && (
         <div style={modalOverlay}>
           <div style={modalContent}>

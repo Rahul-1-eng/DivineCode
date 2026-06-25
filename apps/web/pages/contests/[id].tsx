@@ -3,7 +3,6 @@ import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
-// Correct: Using the default import
 import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/prism-light';
 import jsx from 'react-syntax-highlighter/dist/esm/languages/prism/jsx';
 import cpp from 'react-syntax-highlighter/dist/esm/languages/prism/cpp';
@@ -123,6 +122,25 @@ export default function ContestRoomPage() {
   const canUnregister = viewerMember && nowTick < halfTimeMs && displayStatus !== 'ENDED';
 
   const playSuccessSound = () => { try { new Audio('/accepted.mp3').play().catch(()=>{}); } catch (e) {} };
+
+  // 👉 FIXED: Chat Persistence - Load existing messages on mount
+  useEffect(() => {
+    if (id) {
+      const savedTeam = localStorage.getItem(`team_chat_${id}`);
+      const savedLobby = localStorage.getItem(`lobby_chat_${id}`);
+      if (savedTeam) setMessages(JSON.parse(savedTeam));
+      if (savedLobby) setLobbyMessages(JSON.parse(savedLobby));
+    }
+  }, [id]);
+
+  // 👉 FIXED: Chat Persistence - Update local storage when messages change
+  useEffect(() => {
+    if (id && messages.length > 0) localStorage.setItem(`team_chat_${id}`, JSON.stringify(messages));
+  }, [messages, id]);
+
+  useEffect(() => {
+    if (id && lobbyMessages.length > 0) localStorage.setItem(`lobby_chat_${id}`, JSON.stringify(lobbyMessages));
+  }, [lobbyMessages, id]);
 
   function formatCountdown(ms: number) {
     if (ms <= 0) return '00:00:00';
@@ -393,6 +411,7 @@ export default function ContestRoomPage() {
     if (!id || !session || !confirm('End this contest immediately and calculate final ratings/coins? This cannot be undone.')) return;
     setLoadingText('Calculating Final Ratings & Coins...'); setSyncing(true); 
     try {
+      // 👉 FIXED: Replaced raw fetch with authenticated fetchApi 
       const data = await fetchApi(`/api/v2/contests/${id}/finalize`, { method: 'POST' });
       playSuccessSound(); toast.success(data.message || 'Contest finalized!'); router.push(`/contests/${id}/final`);
     } catch (err: any) {
@@ -433,6 +452,17 @@ export default function ContestRoomPage() {
     setChatInput('');
   };
 
+  // 👉 FIXED: Modular cleanup function to erase leaked audio nodes from the DOM
+  const cleanupAudioElement = (peerId: string) => {
+    const audio = document.getElementById(`audio-${peerId}`) as HTMLAudioElement;
+    if (audio) {
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      audio.remove();
+    }
+  };
+
   const toggleVoice = async () => {
     if (!contest?.viewerMember?.teamId) return toast.error("You must be in a team to use voice chat. Solos can only use Text Chat.");
 
@@ -443,7 +473,10 @@ export default function ContestRoomPage() {
         localStreamRef.current.getTracks().forEach(track => track.stop()); 
         localStreamRef.current = null; 
       }
-      Object.values(peersRef.current).forEach(pc => pc.close()); 
+      Object.keys(peersRef.current).forEach(peerId => {
+        peersRef.current[peerId].close();
+        cleanupAudioElement(peerId);
+      }); 
       peersRef.current = {};
       toast.success("Voice disconnected.");
     } else {
@@ -523,11 +556,16 @@ export default function ContestRoomPage() {
         
         localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
         
+        // 👉 FIXED: Injecting Peer ID so we can track and delete the audio node later
         pc.ontrack = (event) => { 
-            const globalAudioNode = document.createElement('audio');
+            let globalAudioNode = document.getElementById(`audio-${peerId}`) as HTMLAudioElement;
+            if (!globalAudioNode) {
+              globalAudioNode = document.createElement('audio');
+              globalAudioNode.id = `audio-${peerId}`;
+              globalAudioNode.autoplay = true;
+              document.body.appendChild(globalAudioNode);
+            }
             globalAudioNode.srcObject = event.streams[0];
-            globalAudioNode.autoplay = true;
-            document.body.appendChild(globalAudioNode);
         };
         
         pc.onicecandidate = (event) => { 
@@ -538,6 +576,7 @@ export default function ContestRoomPage() {
             if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
                 pc.close();
                 delete peersRef.current[peerId];
+                cleanupAudioElement(peerId);
             }
         };
 
@@ -558,11 +597,16 @@ export default function ContestRoomPage() {
         
         localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
         
+        // 👉 FIXED: Same cleanup identifier assigned on the receiving end
         pc.ontrack = (event) => { 
-            const globalAudioNode = document.createElement('audio');
+            let globalAudioNode = document.getElementById(`audio-${from}`) as HTMLAudioElement;
+            if (!globalAudioNode) {
+              globalAudioNode = document.createElement('audio');
+              globalAudioNode.id = `audio-${from}`;
+              globalAudioNode.autoplay = true;
+              document.body.appendChild(globalAudioNode);
+            }
             globalAudioNode.srcObject = event.streams[0];
-            globalAudioNode.autoplay = true;
-            document.body.appendChild(globalAudioNode);
         };
         
         pc.onicecandidate = (event) => { 
@@ -573,6 +617,7 @@ export default function ContestRoomPage() {
             if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
                 pc.close();
                 delete peersRef.current[from];
+                cleanupAudioElement(from);
             }
         };
 
@@ -600,16 +645,19 @@ export default function ContestRoomPage() {
               peersRef.current[peerId].close(); 
               delete peersRef.current[peerId]; 
           } 
+          cleanupAudioElement(peerId);
       });
 
       return () => { 
         socket.disconnect(); socketRef.current = null;
         if (localStreamRef.current) localStreamRef.current.getTracks().forEach(track => track.stop());
-        Object.values(peersRef.current).forEach(pc => pc.close());
+        Object.keys(peersRef.current).forEach(peerId => {
+          peersRef.current[peerId].close();
+          cleanupAudioElement(peerId);
+        });
       };
   }, [id, session, isFinal, contest?.viewerMember?.teamId]);
   
-  // Scrolls the chat window to the bottom when new messages arrive or when chat is opened
   useEffect(() => { 
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); 
   }, [messages, lobbyMessages, isChatOpen]);
@@ -844,13 +892,12 @@ export default function ContestRoomPage() {
           </div>
         </div>
 
-        {/* 👉 ADDED: Finalize & Distribute Ratings UI */}
         <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
           {isOwner && displayStatus !== 'ENDED' && !isFinal && (
             <button 
               onClick={async () => {
                 if (confirm('Are you sure? This will distribute Ratings & Coins and close the contest.')) {
-                  await fetch(`${API_BASE_URL}/api/v2/contests/${contest.id}/finalize`, { method: 'POST', headers: { 'x-user-email': session?.user?.email || '' } });
+                  await fetchApi(`/api/v2/contests/${contest.id}/finalize`, { method: 'POST' });
                   window.location.reload();
                 }
               }} 

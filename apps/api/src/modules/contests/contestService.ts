@@ -249,7 +249,8 @@ export async function registerForContestV2(contestId: string, input: MemberInput
       } else {
         const createdTeam = await tx.contestTeam.create({ data: { contestId, name: memberInput.teamName, inviteCode: inviteCode(memberInput.teamName) } });
         teamId = createdTeam.id;
-        role = ContestParticipantRole.PARTICIPANT;
+        // 👉 FIXED: Assign MANAGER role so the team creator can approve future join requests
+        role = ContestParticipantRole.MANAGER;
         isPending = false;
       }
     }
@@ -318,7 +319,6 @@ export async function createContestV2(input: CreateContestInput) {
         where: { userId: owner.id, platform: Platform.CODEFORCES } 
     });
     
-    // Auto-register the creator of the contest
     await tx.contestParticipant.create({
       data: {
         contestId: created.id,
@@ -492,9 +492,10 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
       
       if (problem.mcqData?.generateAiTests || (problem as any).generateAiTests) {
          const aiGeneratedCases = await generateToughTestCases(scraped.descriptionHtml);
-         scrapedTestcases = [...scraped.testcases, ...aiGeneratedCases];
+         // 👉 FIXED: Safe optional chaining for missing testcases from scraper
+         scrapedTestcases = [...(scraped.testcases || []), ...aiGeneratedCases];
       } else {
-         scrapedTestcases = [...scraped.testcases];
+         scrapedTestcases = [...(scraped.testcases || [])];
       }
     } catch (err) { 
         finalDescription = `<h3>External Problem</h3><p>View statement at: <a href="${problem.url}" target="_blank">${problem.url}</a></p>`; 
@@ -725,7 +726,8 @@ export async function createTeamForContest(contestId: string, teamName: string, 
               externalHandleId: externalHandle?.id || existing.externalHandleId,
               teamId: team.id,
               teamName,
-              role: ContestParticipantRole.PARTICIPANT,
+              // 👉 FIXED: The team creator is assigned MANAGER so they can approve others
+              role: ContestParticipantRole.MANAGER,
               isOfficial: officialFlag
             }
           })
@@ -737,7 +739,8 @@ export async function createTeamForContest(contestId: string, teamName: string, 
               displayName: user.name || user.email,
               teamId: team.id,
               teamName,
-              role: ContestParticipantRole.PARTICIPANT,
+              // 👉 FIXED: The team creator is assigned MANAGER so they can approve others
+              role: ContestParticipantRole.MANAGER,
               isOfficial: officialFlag
             }
           });

@@ -1,8 +1,9 @@
 import { Server, Socket } from 'socket.io';
 import { prisma } from '../../prisma/client';
 
-type Player = { id: string; name: string; socket: Socket; score: number; attempts: number };
-type QueuedPlayer = Player & { queuedAt: number; rating: number };
+// 👉 FIXED: Added email and rating to the core Player type so we can update the DB later
+type Player = { id: string; name: string; email?: string; socket: Socket; score: number; attempts: number; rating: number };
+type QueuedPlayer = Player & { queuedAt: number };
 type DuelState = {
   roomId: string;
   players: Player[];
@@ -117,6 +118,33 @@ export function setupDuelSockets(io: Server) {
     }
   }
 
+  // 👉 ADDED: Helper function to save results to the DB
+  async function saveDuelResults(state: DuelState) {
+    const sortedPlayers = [...state.players].sort((a, b) => b.score - a.score);
+    const isDraw = sortedPlayers[0].score === sortedPlayers[1].score;
+
+    for (let i = 0; i < sortedPlayers.length; i++) {
+      const player = sortedPlayers[i];
+      if (!player.email) continue; // Skip guests
+
+      const isWinner = !isDraw && i === 0;
+      const ratingChange = isDraw ? 5 : (isWinner ? 25 : -15);
+      const coinReward = isDraw ? 10 : (isWinner ? 50 : 5);
+
+      try {
+        await prisma.user.update({
+          where: { email: player.email },
+          data: {
+            rating: { increment: ratingChange },
+            coins: { increment: coinReward }
+          }
+        });
+      } catch (e) {
+        console.error(`Failed to update DB for player ${player.email}`);
+      }
+    }
+  }
+
   io.on('connection', (socket: Socket) => {
     
     socket.on('duel:join', async ({ name, userEmail }) => {
@@ -126,13 +154,15 @@ export function setupDuelSockets(io: Server) {
       if (userEmail) {
         try {
           const user = await prisma.user.findUnique({ where: { email: userEmail } });
-          if (user) playerRating = user.duelRating || 1200;
+          // Fetch global rating instead of missing duelRating
+          if (user) playerRating = user.rating || 1200; 
         } catch (e) { console.error("Elo fetch failed"); }
       }
 
       const queuedPlayer: QueuedPlayer = {
         id: socket.id,
         name,
+        email: userEmail,
         socket,
         score: 0,
         attempts: 0,
@@ -144,25 +174,27 @@ export function setupDuelSockets(io: Server) {
       socket.emit('duel:waiting', { message: `Queued. Searching for opponents near Rating: ${playerRating}...` });
     });
 
-    socket.on('duel:createCustom', ({ name, questionIds }) => {
+    socket.on('duel:createCustom', ({ name, userEmail, questionIds }) => {
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const player = { id: socket.id, name: name || `Player-${socket.id.slice(0, 4)}`, socket, score: 0, attempts: 0 };
+      // 👉 FIXED: Attach email so host gets points
+      const player: Player = { id: socket.id, name: name || `Player-${socket.id.slice(0, 4)}`, email: userEmail, socket, score: 0, attempts: 0, rating: 1200 };
       customWaitingRooms.set(code, { host: player, customQuestionIds: questionIds });
       socket.emit('duel:customCreated', { roomCode: code });
     });
 
-    socket.on('duel:joinCustom', async ({ name, roomCode }) => {
+    socket.on('duel:joinCustom', async ({ name, userEmail, roomCode }) => {
       const code = roomCode.trim().toUpperCase();
       const room = customWaitingRooms.get(code);
       if (!room) return socket.emit('duel:error', { message: 'Invalid or expired room code.' });
       if (room.host.id === socket.id) return; 
       
-      const p2 = { id: socket.id, name: name || `Player-${socket.id.slice(0, 4)}`, socket, score: 0, attempts: 0 };
+      // 👉 FIXED: Attach email so opponent gets points
+      const p2: Player = { id: socket.id, name: name || `Player-${socket.id.slice(0, 4)}`, email: userEmail, socket, score: 0, attempts: 0, rating: 1200 };
       customWaitingRooms.delete(code); 
       await initializeMatch(room.host, p2, room.customQuestionIds);
     });
 
-    socket.on('duel:answer', ({ roomId, questionId, answerIndex }) => {
+    socket.on('duel:answer', async ({ roomId, questionId, answerIndex }) => {
       const state = activeRooms.get(roomId);
       if (!state || state.finished) return;
 
@@ -194,6 +226,8 @@ export function setupDuelSockets(io: Server) {
         state.players.forEach(p => p.attempts = 0); 
         if (state.currentQuestionIndex >= state.questions.length) {
           state.finished = true;
+          // 👉 FIXED: Save the match to the database!
+          await saveDuelResults(state);
         }
       }
       
@@ -242,7 +276,6 @@ export function setupDuelSockets(io: Server) {
       socket.to(roomId).emit('webrtc:ice-candidate', { senderId: socket.id, candidate });
     });
 
-    // 👉 ADDED: Cleanup routing for Voice
     socket.on('webrtc:leave', ({ roomId }) => {
       socket.to(roomId).emit('webrtc:leave', { senderId: socket.id });
     });
@@ -254,10 +287,13 @@ export function setupDuelSockets(io: Server) {
         if (room.host.id === socket.id) customWaitingRooms.delete(code);
       }
       for (const [roomId, state] of activeRooms.entries()) {
-        if (state.players.some(p => p.id === socket.id)) {
+        if (state.players.some(p => p.id === socket.id) && !state.finished) {
           state.finished = true;
           io.to(roomId).emit('duel:feedback', { playerName: 'System', correct: false, concept: 'Opponent disconnected' });
           emitState(roomId);
+          
+          // Automatically save results awarding the remaining player the win
+          saveDuelResults(state);
           activeRooms.delete(roomId);
         }
       }

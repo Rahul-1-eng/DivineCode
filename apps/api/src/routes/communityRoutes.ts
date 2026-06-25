@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
+// 👉 ADDED: Import the secure JWT verifier
+import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 
 export const communityRouter = Router();
 
@@ -27,10 +29,11 @@ communityRouter.get('/problems', async (req, res) => {
 // POST /api/v2/community/upload
 communityRouter.post('/upload', async (req, res) => {
   try {
-    const email = req.headers['x-user-email'] as string;
-    if (!email) return res.status(401).json({ error: "Unauthorized. Missing email header." });
+    // 👉 FIXED: Secure token validation to prevent identity spoofing
+    const viewer = await resolvedViewerFromRequest(req, true);
+    if (!viewer.userId) return res.status(401).json({ error: "Unauthorized. Invalid session token." });
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { id: viewer.userId } });
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const { title, videoUrl, description } = req.body;
@@ -55,7 +58,6 @@ communityRouter.post('/upload', async (req, res) => {
       include: { author: true }
     });
 
-    // 👉 FIX: Use upsert to prevent Unique Constraint Violation crashes if multiple users upload at once
     const systemUser = await prisma.user.upsert({
       where: { id: 'ALL' },
       update: {}, 
@@ -98,10 +100,11 @@ communityRouter.post('/upload', async (req, res) => {
 // PUT /api/v2/community/problems/:id (Edit Post Endpoint)
 communityRouter.put('/problems/:id', async (req, res) => {
   try {
-    const email = req.headers['x-user-email'] as string;
-    if (!email) return res.status(401).json({ error: "Unauthorized. Missing email header." });
+    // 👉 FIXED: Secure token validation
+    const viewer = await resolvedViewerFromRequest(req, true);
+    if (!viewer.userId) return res.status(401).json({ error: "Unauthorized. Invalid session token." });
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { id: viewer.userId } });
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const problemId = req.params.id;
@@ -142,10 +145,11 @@ communityRouter.put('/problems/:id', async (req, res) => {
 // DELETE /api/v2/community/problems/:id
 communityRouter.delete('/problems/:id', async (req, res) => {
   try {
-    const email = req.headers['x-user-email'] as string;
-    if (!email) return res.status(401).json({ error: "Unauthorized. Missing email header." });
+    // 👉 FIXED: Secure token validation
+    const viewer = await resolvedViewerFromRequest(req, true);
+    if (!viewer.userId) return res.status(401).json({ error: "Unauthorized. Invalid session token." });
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { id: viewer.userId } });
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const problemId = req.params.id;

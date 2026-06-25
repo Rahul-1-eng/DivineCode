@@ -742,7 +742,6 @@ export function mountV2Routes(app: Express, io: Server) {
     });
 
     if (!problem) {
-      // 👉 FIXED: Fallback for Practice Hub / AI Dataset problems (removed invalid '.description' property access)
       const aiProblem = await prisma.aiProblemDataset.findUnique({
         where: { id: req.params.id }
       });
@@ -757,6 +756,25 @@ export function mountV2Routes(app: Express, io: Server) {
           externalUrl: aiProblem.originalUrl || null,
           customDescription: aiProblem.descriptionHtml || '', 
           customTestCases: aiProblem.testcases || []
+        });
+      }
+
+      // 👉 ADDED: Check the Base Problem Table
+      const baseProblem = await prisma.problem.findUnique({
+        where: { id: req.params.id },
+        include: { testcases: true }
+      });
+
+      if (baseProblem) {
+        return res.json({
+          id: baseProblem.id,
+          title: baseProblem.title,
+          type: 'INTERNAL',
+          isMCQ: false,
+          platform: baseProblem.platform || 'DIVINECODE',
+          externalUrl: baseProblem.url || null,
+          customDescription: baseProblem.description || '', 
+          customTestCases: baseProblem.testcases || []
         });
       }
 
