@@ -51,10 +51,9 @@ export default function Home() {
     { role: 'ai', text: 'Welcome to DivineCode Pro. I am configured to handle algorithmic breakdowns, testcase overrides, and platform navigation. How can I assist you today?' }
   ]);
 
-  // LIVE TICKER STATE - Cleaned up to remove mock spam. Starts with a baseline status.
+  // 👉 UPDATED: State for Live External Contests
   const [liveEvents, setLiveEvents] = useState<string[]>([
-    "⚡ System: DivineCode Judge0 nodes initialized and scaling.",
-    "🌐 Platform: Real-time WebSocket connection established."
+    "⚡ System: Fetching global contest schedules..."
   ]);
 
   const navLinks = [
@@ -70,32 +69,46 @@ export default function Home() {
     return DAILY_QUOTES[dayOfYear % DAILY_QUOTES.length];
   }, []);
 
-  // WebSockets for Real-time Ticker Updates
+  // 👉 UPDATED: Fetch Real Codeforces Schedule on Mount
   useEffect(() => {
+    fetch(`${API_BASE_URL}/api/v2/proxy/live-contests`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.contests && data.contests.length > 0) {
+          const formattedContests = data.contests.map((c: any) => {
+            const date = new Date(c.startTimeSeconds * 1000).toLocaleString(undefined, {
+              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+            });
+            return `🚀 Upcoming Codeforces: ${c.name} — Scheduled for ${date}`;
+          });
+          setLiveEvents(formattedContests);
+        } else {
+          setLiveEvents(["🌐 System: Live contest sync temporarily unavailable. Check back later."]);
+        }
+      })
+      .catch(() => setLiveEvents(["🌐 System: Operating in standalone mode."]));
+
+    // Keep WebSocket for internal platform notifications
     const socket = io(API_BASE_URL, { transports: ['websocket'] });
     socket.on('global_ticker', (newEvent: string) => {
-      setLiveEvents(prev => [newEvent, ...prev].slice(0, 10)); // Keep last 10
+      setLiveEvents(prev => [newEvent, ...prev].slice(0, 10));
     });
     return () => { socket.disconnect(); };
   }, []);
 
-  // Fetch Profile and Real Leaderboard Data
   useEffect(() => {
-    // 1. Fetch Real Hall of Fame
-    fetch(`${API_BASE_URL}/api/v2/leaderboard/global`)
-      .then(r => r.json())
-      .then(data => {
-        if (Array.isArray(data)) setTopUsers(data.slice(0, 5));
-      })
-      .catch(() => null);
+    if (status === 'authenticated' && session?.user?.email) {
+      fetch(`${API_BASE_URL}/api/v2/leaderboard/global`)
+        .then(r => r.json())
+        .then(data => { if (Array.isArray(data)) setTopUsers(data.slice(0, 5)); })
+        .catch(() => null);
 
-    // 2. Fetch User Profile Data
-    if (session?.user?.email) {
       fetch(`${API_BASE_URL}/api/v2/profile/me`, { headers: { 'x-user-email': session.user.email } })
-      .then(r => r.json())
-      .then(data => { if (!data.error) setProfile(data); }).catch(() => null);
+        .then(r => r.json())
+        .then(data => { if (!data.error) setProfile(data); })
+        .catch(() => null);
     }
-  }, [session]);
+  }, [session, status]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, isAiTyping]);
 

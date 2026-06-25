@@ -16,7 +16,7 @@ import { judgeQueuedSubmission, executeSubmission } from '../modules/judge/judge
 import { recomputeContestStandings } from '../modules/standings/standingService';
 import { processContestRewards } from '../modules/ratings/ratingService';
 import { scrapeProblemFromUrl } from '../modules/external-sync/problemScraper'; 
-import { generateToughTestCases } from '../modules/ai/aiService'; // Retained only for mashup creation
+import { generateToughTestCases } from '../modules/ai/aiService';
 import { ContestStatus } from '@prisma/client';
 import axios from 'axios';
 import multer from 'multer';
@@ -43,10 +43,12 @@ async function ensurePlatformOwnerRole(user: { id: string; email: string; role?:
   if (user.role === 'ADMIN') return;
   await prisma.user.update({ where: { id: user.id }, data: { role: 'ADMIN' } });
 }
+
 const uploadDir = path.join(process.cwd(), 'public', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
@@ -54,6 +56,7 @@ const storage = multer.diskStorage({
     cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
+
 const upload = multer({ 
   storage,
   limits: { fileSize: 5 * 1024 * 1024 } 
@@ -149,6 +152,25 @@ async function requireJudgeAccess(submissionId: string, req: Request) {
 
 export function mountV2Routes(app: Express, io: Server) {
   const router = Router();
+
+  // 👉 ADDED: Live Global Contests Proxy Endpoint (For the Homepage Ticker)
+  router.get('/proxy/live-contests', asyncRoute(async (req, res) => {
+    try {
+      // Using Codeforces API as it is highly stable
+      const { data } = await axios.get('https://codeforces.com/api/contest.list?gym=false', { timeout: 8000 });
+      if (data.status === 'OK') {
+        const upcoming = data.result
+          .filter((c: any) => c.phase === 'BEFORE')
+          .sort((a: any, b: any) => a.startTimeSeconds - b.startTimeSeconds)
+          .slice(0, 5); // Get next 5 contests
+        return res.json({ success: true, contests: upcoming });
+      }
+      res.json({ success: false, contests: [] });
+    } catch (error) {
+      console.error("[Live Contests Proxy Error]:", error);
+      res.json({ success: false, contests: [] });
+    }
+  }));
 
   io.on('connection', (socket) => {
     socket.on('joinContest', (contestId) => socket.join(`contest:${contestId}`));
@@ -446,7 +468,7 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
-router.post('/contests/:id/finalize', asyncRoute(async (req, res) => {
+  router.post('/contests/:id/finalize', asyncRoute(async (req, res) => {
     const viewer = await requireContestOwner(req);
     
     const contest = await prisma.contest.findUnique({ where: { id: req.params.id } });
@@ -525,11 +547,11 @@ router.post('/contests/:id/finalize', asyncRoute(async (req, res) => {
       } catch (err) {}
 
       if (generateAiTests && scrapedHtml.length > 50) {
-          const aiCases = await generateToughTestCases(scrapedHtml);
-          if (aiCases && aiCases.length > 0) {
+         const aiCases = await generateToughTestCases(scrapedHtml);
+         if (aiCases && aiCases.length > 0) {
              const formattedAiCases = aiCases.map((c: any) => ({ ...c, isPublic: false }));
              scrapedTestcases = [...scrapedTestcases, ...formattedAiCases];
-          }
+         }
       }
 
       const problem = await prisma.problem.create({

@@ -12,8 +12,12 @@ export default function AdminDashboard() {
   
   const [metrics, setMetrics] = useState<any>(null);
   const [reports, setReports] = useState<any[]>([]);
+  const [pendingQuestions, setPendingQuestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Active tab state for the Recruiter Demo
+  const [activeTab, setActiveTab] = useState<'reports' | 'interview'>('reports');
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -26,17 +30,22 @@ export default function AdminDashboard() {
       try {
         const headers = { 'x-user-email': session.user?.email || '' };
         
-        const [metricsRes, reportsRes] = await Promise.all([
+        const [metricsRes, reportsRes, questionsRes] = await Promise.all([
           fetch(`${API_BASE_URL}/api/v2/admin/metrics`, { headers }),
-          fetch(`${API_BASE_URL}/api/v2/admin/reports`, { headers })
+          fetch(`${API_BASE_URL}/api/v2/admin/reports`, { headers }),
+          fetch(`${API_BASE_URL}/api/v2/interview/pending`, { headers }) // 👉 FETCH PENDING AI QUESTIONS
         ]);
 
         if (!metricsRes.ok || !reportsRes.ok) {
-          throw new Error('Access Denied. Ensure your email is in the ADMIN_EMAILS .env variable.');
+          throw new Error('Access Denied. Ensure your email is granted ADMIN privileges.');
         }
 
         setMetrics(await metricsRes.json());
         setReports(await reportsRes.json());
+        
+        const qData = await questionsRes.json();
+        if (qData.success) setPendingQuestions(qData.questions);
+        
         setLoading(false);
       } catch (err: any) {
         setError(err.message);
@@ -59,6 +68,20 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleApproveQuestion = async (questionId: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v2/interview/questions/${questionId}/approve`, {
+        method: 'PATCH',
+        headers: { 'x-user-email': session?.user?.email || '' }
+      });
+      if (res.ok) {
+        setPendingQuestions(prev => prev.filter(q => q.id !== questionId));
+      }
+    } catch (err) {
+      console.error("Failed to approve question", err);
+    }
+  };
+
   if (loading) {
     return <div style={{ minHeight: '100vh', background: '#020617', color: '#38bdf8', display: 'grid', placeItems: 'center' }}>Loading Command Center...</div>;
   }
@@ -78,10 +101,21 @@ export default function AdminDashboard() {
       <Head><title>Admin Command Center</title></Head>
 
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <h1 style={{ margin: '0 0 30px', fontSize: 32, color: '#38bdf8' }}>Admin Command Center</h1>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 }}>
+            <div>
+                <h1 style={{ margin: '0 0 8px', fontSize: 32, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    🛡️ Admin Command Center
+                </h1>
+                <p style={{ margin: 0, color: '#94a3b8' }}>Welcome back, Super Admin. System telemetry and reports are ready.</p>
+            </div>
+            <button onClick={() => router.push('/')} style={{ padding: '10px 20px', background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, cursor: 'pointer' }}>
+                Exit to Platform
+            </button>
+        </div>
 
         {/* Top Metric Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20, marginBottom: 40 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20, marginBottom: 30 }}>
           {[
             { label: 'Total Coders', value: metrics?.userCount || 0, color: '#a855f7' },
             { label: 'Arenas Created', value: metrics?.contestCount || 0, color: '#4ade80' },
@@ -95,44 +129,96 @@ export default function AdminDashboard() {
           ))}
         </div>
 
-        {/* Flagged Submissions Table */}
-        <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 16, overflow: 'hidden' }}>
-          <div style={{ padding: '20px 24px', borderBottom: '1px solid #1e293b', background: 'rgba(2, 6, 23, 0.5)' }}>
-            <h2 style={{ margin: 0, fontSize: 18 }}>Flagged Submissions Queue</h2>
-          </div>
-          
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ color: '#64748b', fontSize: 12, textTransform: 'uppercase' }}>
-                  <th style={{ padding: '16px 24px' }}>Date</th>
-                  <th style={{ padding: '16px 24px' }}>Reported By</th>
-                  <th style={{ padding: '16px 24px' }}>Reason / Details</th>
-                  <th style={{ padding: '16px 24px' }}>Submission Author</th>
-                  <th style={{ padding: '16px 24px', textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reports.length === 0 ? (
-                  <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>Queue is completely clear. 🎉</td></tr>
-                ) : reports.map(report => (
-                  <tr key={report.id} style={{ borderTop: '1px solid #1e293b' }}>
-                    <td style={{ padding: '16px 24px', color: '#94a3b8' }}>{new Date(report.createdAt).toLocaleDateString()}</td>
-                    <td style={{ padding: '16px 24px', color: '#38bdf8' }}>@{report.reporter?.username || 'Unknown'}</td>
-                    <td style={{ padding: '16px 24px', color: '#e2e8f0', maxWidth: 300 }}>{report.reason}</td>
-                    <td style={{ padding: '16px 24px', color: '#f87171' }}>@{report.submission?.user?.username || 'System'}</td>
-                    <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                      <button onClick={() => handleDismissReport(report.id)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
-                        Dismiss
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {/* Dynamic Data Tabs */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+            <button 
+                onClick={() => setActiveTab('reports')} 
+                style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: activeTab === 'reports' ? '#38bdf8' : '#1e293b', color: activeTab === 'reports' ? '#000' : '#94a3b8', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}
+            >
+                ⚠️ Plagiarism & Reports ({reports.length})
+            </button>
+            <button 
+                onClick={() => setActiveTab('interview')} 
+                style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: activeTab === 'interview' ? '#a855f7' : '#1e293b', color: activeTab === 'interview' ? '#000' : '#94a3b8', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}
+            >
+                🧠 Pending AI Interviews ({pendingQuestions.length})
+            </button>
         </div>
 
+        {/* Toggled Content Area */}
+        <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 16, overflow: 'hidden' }}>
+          
+          {activeTab === 'reports' && (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#64748b', fontSize: 12, textTransform: 'uppercase', background: 'rgba(2, 6, 23, 0.5)' }}>
+                      <th style={{ padding: '16px 24px' }}>Date</th>
+                      <th style={{ padding: '16px 24px' }}>Reported By</th>
+                      <th style={{ padding: '16px 24px' }}>Reason / Details</th>
+                      <th style={{ padding: '16px 24px' }}>Submission Author</th>
+                      <th style={{ padding: '16px 24px', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reports.length === 0 ? (
+                      <tr><td colSpan={5} style={{ padding: 60, textAlign: 'center', color: '#94a3b8' }}>Queue is completely clear. 🎉</td></tr>
+                    ) : reports.map(report => (
+                      <tr key={report.id} style={{ borderTop: '1px solid #1e293b' }}>
+                        <td style={{ padding: '16px 24px', color: '#94a3b8' }}>{new Date(report.createdAt).toLocaleDateString()}</td>
+                        <td style={{ padding: '16px 24px', color: '#38bdf8' }}>@{report.reporter?.username || 'Unknown'}</td>
+                        <td style={{ padding: '16px 24px', color: '#e2e8f0', maxWidth: 300 }}>{report.reason}</td>
+                        <td style={{ padding: '16px 24px', color: '#f87171' }}>@{report.submission?.user?.username || 'System'}</td>
+                        <td style={{ padding: '16px 24px', textAlign: 'right' }}>
+                          <button onClick={() => handleDismissReport(report.id)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
+                            Dismiss
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+          )}
+
+          {activeTab === 'interview' && (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#64748b', fontSize: 12, textTransform: 'uppercase', background: 'rgba(2, 6, 23, 0.5)' }}>
+                      <th style={{ padding: '16px 24px' }}>Submission Date</th>
+                      <th style={{ padding: '16px 24px' }}>Track</th>
+                      <th style={{ padding: '16px 24px' }}>Prompt / Title</th>
+                      <th style={{ padding: '16px 24px' }}>Difficulty</th>
+                      <th style={{ padding: '16px 24px', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingQuestions.length === 0 ? (
+                      <tr><td colSpan={5} style={{ padding: 60, textAlign: 'center', color: '#94a3b8' }}>No pending questions to review.</td></tr>
+                    ) : pendingQuestions.map(q => (
+                      <tr key={q.id} style={{ borderTop: '1px solid #1e293b' }}>
+                        <td style={{ padding: '16px 24px', color: '#94a3b8' }}>{new Date(q.createdAt).toLocaleDateString()}</td>
+                        <td style={{ padding: '16px 24px', color: '#a855f7' }}>{q.track?.title || 'General'}</td>
+                        <td style={{ padding: '16px 24px', color: '#e2e8f0' }}>{q.title}</td>
+                        <td style={{ padding: '16px 24px' }}>
+                            <span style={{ padding: '4px 8px', borderRadius: 4, fontSize: 12, fontWeight: 'bold', background: q.difficulty === 'Hard' ? 'rgba(248, 113, 113, 0.1)' : 'rgba(251, 191, 36, 0.1)', color: q.difficulty === 'Hard' ? '#f87171' : '#fbbf24' }}>
+                                {q.difficulty}
+                            </span>
+                        </td>
+                        <td style={{ padding: '16px 24px', textAlign: 'right' }}>
+                          <button onClick={() => handleApproveQuestion(q.id)} style={{ background: '#a855f7', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
+                            Approve for AI
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+          )}
+
+        </div>
       </div>
     </div>
   );

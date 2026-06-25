@@ -92,7 +92,54 @@ communityRouter.post('/upload', async (req, res) => {
   }
 });
 
-// 👉 ADDED: DELETE /api/v2/community/problems/:id
+// 👉 ADDED: PUT /api/v2/community/problems/:id (Edit Post Endpoint)
+communityRouter.put('/problems/:id', async (req, res) => {
+  try {
+    const email = req.headers['x-user-email'] as string;
+    if (!email) return res.status(401).json({ error: "Unauthorized. Missing email header." });
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const problemId = req.params.id;
+    const problem = await prisma.problem.findUnique({
+      where: { id: problemId }
+    });
+
+    if (!problem) return res.status(404).json({ error: "Post not found." });
+
+    // Verify the requester is the author (or an admin)
+    if (problem.authorId !== user.id && user.role !== 'ADMIN') {
+      return res.status(403).json({ error: "You can only edit your own posts." });
+    }
+
+    const { title, videoUrl, description } = req.body;
+
+    const updatedPost = await prisma.problem.update({
+      where: { id: problemId },
+      data: {
+        title: title || problem.title,
+        videoUrl: videoUrl !== undefined ? videoUrl : problem.videoUrl,
+        description: description || problem.description
+      },
+      include: { author: true }
+    });
+
+    // Broadcast the updated post to connected clients
+    const io = req.app.get('io');
+    if (io) {
+      // The frontend logic we updated earlier handles replacing the old post with this new one
+      io.emit('new_community_post', updatedPost); 
+    }
+
+    res.json({ success: true, post: updatedPost });
+  } catch (error: any) {
+    console.error("[Community Edit Error]:", error);
+    res.status(500).json({ error: error.message || "Failed to update post." });
+  }
+});
+
+// DELETE /api/v2/community/problems/:id
 communityRouter.delete('/problems/:id', async (req, res) => {
   try {
     const email = req.headers['x-user-email'] as string;

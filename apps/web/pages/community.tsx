@@ -2,6 +2,7 @@ import { CSSProperties, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { io } from 'socket.io-client';
 import toast, { Toaster } from 'react-hot-toast';
+import ReactMarkdown from 'react-markdown'; // 👉 ADDED: For rich text formatting!
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -12,20 +13,27 @@ export default function CommunityHubPage() {
   const [loading, setLoading] = useState(true);
   
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [newPost, setNewPost] = useState({ title: '', videoUrl: '', description: '' });
   const [uploading, setUploading] = useState(false);
+  
+  // 👉 ADDED: Manage both New and Editing states in one form
+  const [formData, setFormData] = useState({ id: '', title: '', videoUrl: '', description: '' });
+  const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
     loadCommunityPosts();
 
-    // Gapless Real-Time Updates
     const socket = io(API_BASE_URL, { transports: ['websocket'] });
     
     socket.on('new_community_post', (post) => {
-      setPosts(prev => [post, ...prev]);
+      setPosts(prev => {
+        // If it already exists, update it (Edit case)
+        if (prev.find(p => p.id === post.id)) {
+            return prev.map(p => p.id === post.id ? post : p);
+        }
+        return [post, ...prev]; // New post case
+      });
     });
     
-    // 👉 ADDED: Listen for post deletions and remove them instantly
     socket.on('post_deleted', ({ id }) => {
       setPosts(prev => prev.filter(p => p.id !== id));
     });
@@ -46,20 +54,38 @@ export default function CommunityHubPage() {
     }
   };
 
-  const handleUploadSubmit = async (e: React.FormEvent) => {
+  const openUploadModal = () => {
+      setIsEditing(false);
+      setFormData({ id: '', title: '', videoUrl: '', description: '' });
+      setShowUploadModal(true);
+  };
+
+  const openEditModal = (post: any) => {
+      setIsEditing(true);
+      setFormData({ id: post.id, title: post.title, videoUrl: post.videoUrl || '', description: post.description });
+      setShowUploadModal(true);
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!session?.user?.email) return toast.error("Must be logged in to upload.");
+    if (!session?.user?.email) return toast.error("Must be logged in to modify posts.");
     
     setUploading(true);
     try {
       const payload = {
-        title: newPost.title,
-        videoUrl: newPost.videoUrl,
-        description: newPost.description
+        title: formData.title,
+        videoUrl: formData.videoUrl,
+        description: formData.description
       };
 
-      const uploadRes = await fetch(`${API_BASE_URL}/api/v2/community/upload`, {
-        method: 'POST',
+      const url = isEditing 
+        ? `${API_BASE_URL}/api/v2/community/problems/${formData.id}` 
+        : `${API_BASE_URL}/api/v2/community/upload`;
+        
+      const method = isEditing ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
         headers: { 
           'Content-Type': 'application/json', 
           'x-user-email': session.user.email 
@@ -67,23 +93,19 @@ export default function CommunityHubPage() {
         body: JSON.stringify(payload)
       });
 
-      const data = await uploadRes.json();
+      const data = await res.json();
 
-      if (!uploadRes.ok) {
-        throw new Error(data.error || "Upload failed on server.");
-      }
+      if (!res.ok) throw new Error(data.error || "Action failed on server.");
       
-      toast.success("Tutorial Published! Global notification sent.");
+      toast.success(isEditing ? "Tutorial Updated!" : "Tutorial Published!");
       setShowUploadModal(false);
-      setNewPost({ title: '', videoUrl: '', description: '' });
     } catch (err: any) {
-      toast.error(err.message || "Upload failed.");
+      toast.error(err.message || "Action failed.");
     } finally {
       setUploading(false);
     }
   };
 
-  // 👉 ADDED: Delete function
   const handleDeletePost = async (postId: string) => {
     if (!confirm("Are you sure you want to delete this tutorial? This cannot be undone.")) return;
     if (!session?.user?.email) return;
@@ -97,7 +119,6 @@ export default function CommunityHubPage() {
       
       if (!res.ok) throw new Error(data.error || "Failed to delete post.");
       toast.success("Tutorial deleted.");
-      // Note: State is updated by the socket automatically!
     } catch (err: any) {
       toast.error(err.message);
     }
@@ -121,7 +142,7 @@ export default function CommunityHubPage() {
       <section style={{ maxWidth: 1200, margin: '0 auto' }}>
         <nav style={nav}>
           <a href="/" style={brand}>🌐 DivineCode Community</a>
-          <button onClick={() => setShowUploadModal(true)} style={button}>+ Upload Tutorial</button>
+          <button onClick={openUploadModal} style={button}>+ Upload Tutorial</button>
         </nav>
 
         <div style={hero}>
@@ -143,15 +164,22 @@ export default function CommunityHubPage() {
               return (
                 <div key={post.id} style={{ ...card, position: 'relative' }}>
                   
-                  {/* 👉 ADDED: Delete button conditionally rendered for the author */}
+                  {/* 👉 ADDED: Action Buttons Container */}
                   {isAuthor && (
-                    <button 
-                      onClick={() => handleDeletePost(post.id)}
-                      style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, background: 'rgba(2, 6, 23, 0.7)', border: '1px solid rgba(248, 113, 113, 0.5)', color: '#f87171', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', backdropFilter: 'blur(4px)' }}
-                      title="Delete Tutorial"
-                    >
-                      🗑️ Delete
-                    </button>
+                    <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, display: 'flex', gap: 8 }}>
+                      <button 
+                        onClick={() => openEditModal(post)}
+                        style={{ background: 'rgba(2, 6, 23, 0.7)', border: '1px solid rgba(56, 189, 248, 0.5)', color: '#38bdf8', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', backdropFilter: 'blur(4px)' }}
+                      >
+                        ✏️ Edit
+                      </button>
+                      <button 
+                        onClick={() => handleDeletePost(post.id)}
+                        style={{ background: 'rgba(2, 6, 23, 0.7)', border: '1px solid rgba(248, 113, 113, 0.5)', color: '#f87171', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', backdropFilter: 'blur(4px)' }}
+                      >
+                        🗑️ Delete
+                      </button>
+                    </div>
                   )}
                   
                   {post.videoUrl ? (
@@ -176,10 +204,13 @@ export default function CommunityHubPage() {
                     <div style={{ color: '#38bdf8', fontSize: 12, marginBottom: 8, fontWeight: 'bold' }}>
                       By {post.author?.username || post.author?.name || 'Community'}
                     </div>
-                    <p style={{ color: '#94a3b8', fontSize: 14, margin: '0 0 16px 0', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {post.description}
-                    </p>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    
+                    {/* 👉 ADDED: Markdown renderer instead of plain <p> tag */}
+                    <div className="markdown-preview" style={{ color: '#94a3b8', fontSize: 14, margin: '0 0 16px 0', lineHeight: 1.5, maxHeight: '80px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                       <ReactMarkdown>{post.description}</ReactMarkdown>
+                    </div>
+                    
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
                       <span style={tag}>Tutorial</span>
                       <a href={`/practice/${post.id}`} style={ghostBtn}>Open Workspace →</a>
                     </div>
@@ -191,37 +222,39 @@ export default function CommunityHubPage() {
         )}
       </section>
 
-      {/* UPLOAD MODAL */}
+      {/* UPLOAD/EDIT MODAL */}
       {showUploadModal && (
         <div style={modalOverlay}>
           <div style={modalContent}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h2 style={{ margin: 0, color: '#fff' }}>Upload Video Tutorial</h2>
+              <h2 style={{ margin: 0, color: '#fff' }}>{isEditing ? 'Edit Tutorial' : 'Upload Video Tutorial'}</h2>
               <button onClick={() => setShowUploadModal(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 24, cursor: 'pointer' }}>×</button>
             </div>
             
-            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 24 }}>Upload your YouTube walkthrough. A global notification will immediately be sent to all online users!</p>
+            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 24 }}>
+              {isEditing ? 'Update your video details or problem description below. Supports Markdown!' : 'Upload your YouTube walkthrough. A global notification will immediately be sent to all online users!'}
+            </p>
             
-            <form onSubmit={handleUploadSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <form onSubmit={handleFormSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
                 <label style={label}>Tutorial Title</label>
-                <input placeholder="e.g. O(N) approach to Kadane's Algorithm" value={newPost.title} onChange={e => setNewPost({...newPost, title: e.target.value})} style={input} required />
+                <input placeholder="e.g. O(N) approach to Kadane's Algorithm" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} style={input} required />
               </div>
               
               <div>
                 <label style={label}>YouTube Video URL</label>
-                <input placeholder="https://youtube.com/watch?v=..." value={newPost.videoUrl} onChange={e => setNewPost({...newPost, videoUrl: e.target.value})} style={input} required />
+                <input placeholder="https://youtube.com/watch?v=..." value={formData.videoUrl} onChange={e => setFormData({...formData, videoUrl: e.target.value})} style={input} required />
               </div>
 
               <div>
-                <label style={label}>Description / Problem Statement</label>
-                <textarea placeholder="Briefly describe the algorithm you are teaching..." value={newPost.description} onChange={e => setNewPost({...newPost, description: e.target.value})} style={{...input, minHeight: 100}} required />
+                <label style={label}>Description (Supports Markdown)</label>
+                <textarea placeholder="Briefly describe the algorithm using markdown formatting (e.g., **bold**, `code`)." value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} style={{...input, minHeight: 120, fontFamily: 'monospace'}} required />
               </div>
 
               <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
                 <button type="button" onClick={() => setShowUploadModal(false)} style={{...ghostBtn, flex: 1}}>Cancel</button>
                 <button type="submit" disabled={uploading} style={{...button, flex: 2, background: uploading ? '#64748b' : 'linear-gradient(135deg,#a5b4fc,#22d3ee)'}}>
-                  {uploading ? 'Publishing...' : 'Publish & Notify Community 🚀'}
+                  {uploading ? 'Saving...' : isEditing ? 'Save Changes' : 'Publish & Notify Community 🚀'}
                 </button>
               </div>
             </form>
@@ -232,6 +265,7 @@ export default function CommunityHubPage() {
   );
 }
 
+// ... Keep existing styles (page, nav, brand, hero, etc.) ...
 const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: '#020617', boxSizing: 'border-box' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 30 };
 const brand: CSSProperties = { color: '#eef2ff', textDecoration: 'none', fontWeight: 950, fontSize: 'clamp(20px, 4vw, 28px)' };

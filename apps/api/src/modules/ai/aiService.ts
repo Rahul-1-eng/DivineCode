@@ -21,7 +21,8 @@ function sanitizeDescriptionForPrompt(html: string) {
   return html.replace(/<img[^>]*src="data:image[^>]*>/g, '[Image omitted for token limits]');
 }
 
-const getAiModel = () => process.env.AI_MODEL || 'gemini-3.5-flash';
+// 👉 FIXED: Changed from 'gemini-3.5-flash' to the actual valid 'gemini-1.5-flash'
+const getAiModel = () => process.env.AI_MODEL || 'gemini-1.5-flash';
 
 export async function analyzeSubmissionLogic(submissionId: string, problemDescription: string, userCode: string) {
   const apiKey = process.env.AI_API_KEY;
@@ -202,11 +203,6 @@ export async function askAiChatbot(query: string): Promise<string> {
   }
 }
 
-// --------------------------------------------------------
-// FAANG Technical Interview AI Engine (With Gapless Live Code Support)
-// --------------------------------------------------------
-
-// 👉 ADDED: The `currentCode` parameter to process what is in their IDE.
 export async function conductAiInterview(problemPrompt: string, userResponse: string, chatHistory: any[] = [], currentCode?: string) {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");

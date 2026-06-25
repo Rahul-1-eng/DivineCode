@@ -4,11 +4,11 @@ import toast from 'react-hot-toast';
 
 export default function VoiceInterviewer({ 
   currentQuestion, 
-  code,              // 👉 ADDED: Capture exact code snapshot
+  code, 
   onSuccess 
 }: { 
   currentQuestion: any, 
-  code?: string,     // 👉 ADDED: Add typing
+  code?: string,
   onSuccess: () => void 
 }) {
   const [isListening, setIsListening] = useState(false);
@@ -16,8 +16,6 @@ export default function VoiceInterviewer({
   const [transcript, setTranscript] = useState('');
   const [chatLog, setChatLog] = useState<{role: string, text: string}[]>([]);
   const [isSupported, setIsSupported] = useState(true);
-  
-  // New State for English Fluency Metrics
   const [metrics, setMetrics] = useState<{tech: number, fluency: number, tips: string} | null>(null);
   
   const recognitionRef = useRef<any>(null);
@@ -27,7 +25,6 @@ export default function VoiceInterviewer({
   useEffect(() => {
     if (typeof window !== 'undefined') {
       synthesisRef.current = window.speechSynthesis;
-      // Preload voices
       window.speechSynthesis.onvoiceschanged = () => {
         synthesisRef.current?.getVoices(); 
       };
@@ -58,7 +55,7 @@ export default function VoiceInterviewer({
         if (event.error === 'not-allowed') {
           toast.error("Microphone access denied. Please allow permissions in your browser.");
         } else if (event.error !== 'no-speech') {
-          toast.error("Audio capture failed. Please check your microphone connection.");
+          toast.error("Audio capture paused.");
         }
       };
 
@@ -69,7 +66,7 @@ export default function VoiceInterviewer({
         if (finalBuffer.length > 10) {
           processAudioToAi(finalBuffer);
         } else if (finalBuffer.length > 0) {
-          toast.error("Didn't catch enough. Please speak a full sentence.");
+          toast.error("Sentence too short to evaluate. Please elaborate.");
           setTranscript('');
           transcriptBuffer.current = '';
         }
@@ -92,7 +89,6 @@ export default function VoiceInterviewer({
       const res = await fetch(`/api/v2/interview/questions/${currentQuestion.id}/mock`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // 👉 ADDED: Pass the live code explicitly to the AI
         body: JSON.stringify({ userResponse: userText, history: chatLog, code })
       });
       const data = await res.json();
@@ -101,7 +97,6 @@ export default function VoiceInterviewer({
         const aiResponseText = data.evaluation.feedback + " " + (data.evaluation.followUpQuestion || "");
         setChatLog(prev => [...prev, { role: 'interviewer', text: aiResponseText }]);
         
-        // Render the Fluency & Technical scores returned from our backend
         setMetrics({
           tech: data.evaluation.technicalScore || 0,
           fluency: data.evaluation.fluencyScore || 0,
@@ -109,14 +104,14 @@ export default function VoiceInterviewer({
         });
 
         if (data.evaluation.isPassed) {
-          toast.success("Module Passed!", { icon: '🏆' });
+          toast.success("Technical Module Passed!", { icon: '🏆' });
           setTimeout(() => onSuccess(), 2000);
         }
         
         speakText(aiResponseText);
       }
     } catch (err) {
-      toast.error("Failed to reach Interviewer AI.");
+      toast.error("Network timeout. AI Recruiter offline.");
       setIsAiSpeaking(false);
     }
   };
@@ -128,14 +123,12 @@ export default function VoiceInterviewer({
     const utterance = new SpeechSynthesisUtterance(text);
     const voices = synthesisRef.current.getVoices();
     
-    // Proactively fetch premium conversational voices instead of the robotic default
     let premiumVoice = voices.find(v => v.name.includes('Google UK English') || v.name.includes('Microsoft Ava') || v.name.includes('Samantha'));
     if (!premiumVoice && voices.length > 0) {
       premiumVoice = voices.find(v => v.lang.startsWith('en')) || voices[0];
     }
     
     if (premiumVoice) utterance.voice = premiumVoice;
-    
     utterance.rate = 1.0; 
     utterance.pitch = 1.05; 
     
@@ -149,7 +142,6 @@ export default function VoiceInterviewer({
     } else {
       if (synthesisRef.current) synthesisRef.current.cancel();
       setIsAiSpeaking(false);
-      
       setTranscript('');
       transcriptBuffer.current = '';
       try {
@@ -161,18 +153,21 @@ export default function VoiceInterviewer({
     }
   };
 
+  // 👉 ADDED: A highly professional fallback for Safari/Firefox users
   if (!isSupported) {
     return (
-      <div style={{ background: '#0f172a', padding: 40, borderRadius: 24, textAlign: 'center', border: '1px solid #ef4444' }}>
-        <h3 style={{ color: '#ef4444' }}>Browser Not Supported</h3>
-        <p style={{ color: '#94a3b8' }}>Voice interviews require a Chromium-based browser (Chrome, Edge, Arc). Please switch browsers to take this module.</p>
+      <div style={{ background: '#020617', padding: 40, borderRadius: 24, textAlign: 'center', border: '1px solid rgba(248, 113, 113, 0.2)' }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🎙️</div>
+        <h3 style={{ color: '#fff', fontSize: 20, marginBottom: 8 }}>Voice Processing Requires Chromium</h3>
+        <p style={{ color: '#94a3b8', maxWidth: 400, margin: '0 auto', lineHeight: 1.5 }}>
+          Our real-time AI audio analysis engine utilizes advanced Web Speech APIs currently only supported on Chrome, Edge, or Arc browsers.
+        </p>
       </div>
     );
   }
 
   return (
     <div style={{ background: '#020617', borderRadius: 24, padding: 30, border: '1px solid #1e293b', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
-      
       <AnimatePresence>
         {isListening && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'radial-gradient(circle at center, rgba(239,68,68,0.1) 0%, transparent 70%)', pointerEvents: 'none' }} />
@@ -212,7 +207,6 @@ export default function VoiceInterviewer({
         {isListening ? '🛑 Stop & Submit Answer' : '🎤 Start Speaking'}
       </button>
 
-      {/* The Dynamic Score Matrix */}
       {metrics && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 30, position: 'relative', zIndex: 2 }}>
           <div style={{ background: 'rgba(34,211,238,0.1)', padding: 15, borderRadius: 12, border: '1px solid rgba(34,211,238,0.3)' }}>
@@ -224,7 +218,7 @@ export default function VoiceInterviewer({
             <div style={{ fontSize: 28, color: '#a855f7', fontWeight: 'bold' }}>{metrics.fluency}/100</div>
           </div>
           <div style={{ gridColumn: '1 / -1', background: 'rgba(255,255,255,0.05)', padding: 12, borderRadius: 12, fontSize: 13, color: '#cbd5e1', textAlign: 'left' }}>
-            <strong style={{ color: '#a855f7' }}>Pronunciation & Grammar:</strong> {metrics.tips}
+            <strong style={{ color: '#a855f7' }}>Evaluation:</strong> {metrics.tips}
           </div>
         </div>
       )}

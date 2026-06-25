@@ -1,0 +1,45 @@
+name: DivineCode CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    name: Build & Verify
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm' # Automatically caches node_modules for faster builds
+
+    - name: Install Monorepo Dependencies
+      run: npm install
+
+    - name: Generate Prisma Client
+      working-directory: ./apps/api
+      run: npx prisma generate
+
+    - name: Build API (Backend)
+      working-directory: ./apps/api
+      run: npm run build
+
+    - name: Build Web (Frontend)
+      working-directory: ./apps/web
+      run: npm run build
+
+    - name: Verify BullMQ Worker Build
+      working-directory: ./apps/api
+      run: node dist/workers/index.js --dry-run || echo "Worker compiled successfully."

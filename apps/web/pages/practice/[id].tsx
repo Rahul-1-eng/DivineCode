@@ -2,24 +2,50 @@ import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
+import { io, Socket } from 'socket.io-client';
 import VoiceInterviewer from '../../components/VoiceInterviewer';
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+
+// 👉 ADDED: Strict Type Safety
+interface Problem {
+  id?: string;
+  title: string;
+  difficulty?: string;
+  rating?: number;
+  descriptionHtml?: string;
+  description?: string;
+  content?: string;
+  originalUrl?: string;
+  testcases?: string | { input?: string; stdin?: string; expectedOutput?: string; output?: string }[];
+  error?: boolean;
+}
+
+interface ExecutionResult {
+  verdict: string;
+  runtimeMs?: number;
+  compileError?: string;
+}
+
+interface ChatPost {
+  author: string;
+  message: string;
+  timestamp: string;
+}
 
 export default function ProblemWorkspace() {
   const router = useRouter();
   const { id } = router.query;
   const { data: session } = useSession();
 
-  const [problem, setProblem] = useState<any>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
   const [code, setCode] = useState('// Implementation source framework entry\n');
   const [language, setLanguage] = useState('cpp');
-  const [outputs, setOutputs] = useState<any[]>([]);
+  const [outputs, setOutputs] = useState<ExecutionResult[]>([]);
   const [running, setRunning] = useState(false);
   const [isKitsMenuOpen, setIsKitsMenuOpen] = useState(false);
   
-  // 👉 ADDED: The new 'voice' tab state
   const [workspaceTab, setWorkspaceTab] = useState<'problem' | 'video' | 'discuss' | 'voice'>('problem');
   const [consoleTab, setConsoleTab] = useState<'output' | 'mentor'>('output');
 
@@ -27,9 +53,12 @@ export default function ProblemWorkspace() {
   const [analyzing, setAnalyzing] = useState(false);
 
   const [discussionInput, setDiscussionInput] = useState('');
-  const [posts, setPosts] = useState([
+  const [posts, setPosts] = useState<ChatPost[]>([
     { author: 'System_Admin', message: 'If executing in O(N), ensure the sparse initialization bounds are checked properly to avoid segment errors.', timestamp: '1 hour ago' }
   ]);
+
+  // 👉 ADDED: Multiplayer Collaboration Groundwork
+  const [socket, setSocket] = useState<Socket | null>(null);
 
   const battleKits = [
     { name: 'IICPC Standard IO Boilerplate', code: '#include <bits/stdc++.h>\nusing namespace std;\n\nvoid solve() {\n    // Implementation here\n}\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n    int t; cin >> t;\n    while(t--) solve();\n    return 0;\n}' },
@@ -47,16 +76,29 @@ export default function ProblemWorkspace() {
 
   useEffect(() => {
     if (!id) return;
+    
+    // Initialize Collaborative Socket connection
+    const newSocket = io(API_BASE_URL, { transports: ['websocket'] });
+    setSocket(newSocket);
+    newSocket.emit('join-workspace', id);
+
+    newSocket.on('remote-code-update', (newCode: string) => {
+      // Logic for CRDT or simple replace for multiplayer mode
+      setCode(newCode);
+    });
+
     fetch(`${API_BASE_URL}/api/v2/ai-dataset`, { headers: { 'x-user-email': session?.user?.email || '' } })
       .then(r => r.json())
       .then(data => {
-        const found = data.problems?.find((p: any) => p.id === id);
+        const found = data.problems?.find((p: Problem) => p.id === id);
         if (found) {
           setProblem(found);
         } else {
           setProblem({ error: true, title: 'Not Found', description: 'Could not find this problem in the database.' });
         }
       }).catch(() => setProblem({ error: true, title: 'Error', description: 'Failed to load.' }));
+
+    return () => { newSocket.disconnect(); };
   }, [id, session]);
 
   const sampleData = useMemo(() => {
@@ -85,7 +127,7 @@ export default function ProblemWorkspace() {
       const data = await res.json();
       setOutputs(data.results || []);
 
-      const allAccepted = data.results?.length > 0 && data.results.every((r: any) => r.verdict === 'ACCEPTED');
+      const allAccepted = data.results?.length > 0 && data.results.every((r: ExecutionResult) => r.verdict === 'ACCEPTED');
       if (allAccepted) {
         playSuccessAudio();
       }
@@ -122,6 +164,13 @@ export default function ProblemWorkspace() {
     setDiscussionInput('');
   };
 
+  const handleEditorChange = (value: string | undefined) => {
+    const val = value || '';
+    setCode(val);
+    // 👉 ADDED: Broadcast code to peers in the room
+    if (socket) socket.emit('local-code-update', { roomId: id, code: val });
+  };
+
   if (!problem) return (
     <main style={{ padding: 40, background: '#070a16', color: 'white', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ width: 50, height: 50, borderTop: '3px solid #22d3ee', borderRadius: '50%', animation: 'spin 1s linear infinite' }}/>
@@ -136,7 +185,6 @@ export default function ProblemWorkspace() {
   return (
     <main style={{ display: 'flex', height: '100vh', background: '#020617', fontFamily: 'Inter, sans-serif' }}>
       
-      {/* Interactive Telemetry Plane (Left Side) */}
       <section style={{ width: '45%', borderRight: '1px solid #1e293b', background: '#0f172a', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '16px 24px', background: '#020617', borderBottom: '1px solid #1e293b' }}>
            <a href="/practice" style={{ color: '#67e8f9', textDecoration: 'none', fontWeight: 900, display: 'inline-block' }}>← Practice Hub</a>
@@ -215,7 +263,6 @@ export default function ProblemWorkspace() {
             </div>
           )}
 
-          {/* 👉 ADDED: Voice AI Interactive Window explicitly passing the code state */}
           {workspaceTab === 'voice' && (
              <VoiceInterviewer 
                 currentQuestion={problem} 
@@ -227,7 +274,6 @@ export default function ProblemWorkspace() {
         </div>
       </section>
 
-      {/* Editor & AI Workspace Plane (Right Side) */}
       <section style={{ width: '55%', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: 12, background: '#020617', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b' }}>
           
@@ -238,7 +284,6 @@ export default function ProblemWorkspace() {
               <option value="c">C</option>
             </select>
 
-            {/* Battle-Kits Injector */}
             <div style={{ position: 'relative' }}>
               <button 
                 onClick={() => setIsKitsMenuOpen(!isKitsMenuOpen)}
@@ -271,7 +316,7 @@ export default function ProblemWorkspace() {
         </div>
         
         <div style={{ height: '60%' }}>
-          <Editor height="100%" theme="vs-dark" language={monacoLanguage} value={code} onChange={v => setCode(v || '')} options={{ fontSize: 15, minimap: { enabled: false }, padding: { top: 16 } }} />
+          <Editor height="100%" theme="vs-dark" language={monacoLanguage} value={code} onChange={handleEditorChange} options={{ fontSize: 15, minimap: { enabled: false }, padding: { top: 16 } }} />
         </div>
         
         <div style={{ height: '40%', background: '#020617', borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column' }}>

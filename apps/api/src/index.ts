@@ -1,15 +1,26 @@
 import './config/env';
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import path from 'path';
 import { Server } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import Redis from 'ioredis';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import { prisma } from './prisma/client';
 import { mountV2Routes } from './routes/v2';
 import { startQueueWorkers } from './workers/index';
 import { setupDuelSockets } from './modules/duel/duelSocketService';
 import { upsertGoogleUser } from './storage';
 import { loginUser } from './modules/auth/authService';
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: jwt.JwtPayload | string;
+    }
+  }
+}
 
 const app = express();
 
@@ -18,7 +29,15 @@ const allowedOrigins = [
   'https://your-production-domain.com' 
 ];
 
-app.use((req, res, next) => {
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000, 
+  max: 15, 
+  message: { error: 'Too many AI requests from this IP, please try again after a minute.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use((req: Request, res: Response, next: NextFunction) => {
   const origin = req.headers.origin;
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -38,12 +57,12 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '10mb' }));
 
-app.use((req: any, res, next) => {
+app.use((req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
     try {
-      const decoded: any = jwt.verify(token, process.env.NEXTAUTH_SECRET || '');
+      const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET || '') as jwt.JwtPayload;
       req.user = decoded; 
       if (decoded.email) req.headers['x-user-email'] = decoded.email;
       if (decoded.name) req.headers['x-user-name'] = decoded.name;
@@ -54,19 +73,39 @@ app.use((req: any, res, next) => {
   next();
 });
 
+app.use('/api/v2/ai', aiLimiter);
+app.use('/api/v2/interview/*/mock', aiLimiter);
+
 const server = http.createServer(app);
 
 const io = new Server(server, { 
   cors: { origin: allowedOrigins, methods: ['GET', 'POST'], credentials: true } 
 });
 
+const pubClient = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+const subClient = pubClient.duplicate();
+io.adapter(createAdapter(pubClient, subClient));
+
 app.set('io', io);
 
-// 👉 ADDED: Personal Notification Rooms
+// 👉 UPDATED: Enhanced WebSocket Pipeline for Multiplayer Coding Rooms
 io.on('connection', (socket) => {
-  socket.on('join-personal-notifications', (email) => {
+  
+  // Account Notifications Room
+  socket.on('join-personal-notifications', (email: string) => {
     socket.join(`user:${email}`);
   });
+
+  // Collaborative Coding Workspace Room
+  socket.on('join-workspace', (problemId: string) => {
+    socket.join(`workspace:${problemId}`);
+  });
+
+  // Broadcast code updates to all peers in the room except the sender
+  socket.on('local-code-update', (data: { roomId: string; code: string }) => {
+    socket.to(`workspace:${data.roomId}`).emit('remote-code-update', data.code);
+  });
+  
 });
 
 startQueueWorkers(io);
@@ -74,21 +113,25 @@ setupDuelSockets(io);
 mountV2Routes(app, io);
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
-app.get('/', (_req, res) => res.json({ status: 'ok', app: 'DivineCode API V2' }));
+app.get('/', (_req: Request, res: Response) => res.json({ status: 'ok', app: 'DivineCode API V2' }));
 
-app.post('/api/auth/google', async (req, res) => { 
-  try { const user = await upsertGoogleUser(req.body); res.json({ ok: true, user }); } 
-  catch (e) { res.status(400).json({ ok: false, error: 'Auth failed' }); } 
+app.post('/api/auth/google', async (req: Request, res: Response) => { 
+  try { 
+    const user = await upsertGoogleUser(req.body); 
+    res.json({ ok: true, user }); 
+  } catch (e) { 
+    res.status(400).json({ ok: false, error: 'Auth failed' }); 
+  } 
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', async (req: Request, res: Response) => {
   try {
     const result = await loginUser(req.body);
     return res.json(result);
-  } catch (err: any) {
+  } catch (err: unknown) {
     return res.status(401).json({ error: 'Invalid username or password.' });
   }
 });
 
 const PORT = Number(process.env.PORT) || 4000;
-server.listen(PORT, () => console.log(`🚀 DivineCode API online at ${PORT} (PostgreSQL/Prisma Foundation Active)`));
+server.listen(PORT, () => console.log(`🚀 DivineCode API online at ${PORT} (Redis-Synced Distributed Sockets Enabled)`));
