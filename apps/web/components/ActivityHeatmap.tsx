@@ -1,112 +1,96 @@
-import { useMemo } from 'react';
+import React, { useMemo } from 'react';
 
-export default function ActivityHeatmap({ submissions = [] }: { submissions: any[] }) {
-  const { grid, maxStreak, currentStreak, activeDays, totalSolves } = useMemo(() => {
-    // 1. Group accepted submissions by date (YYYY-MM-DD)
-    const counts: Record<string, number> = {};
-    const validSubs = submissions.filter(s => String(s.verdict).includes('ACCEPT') || String(s.verdict) === 'OK');
+interface ContributionDay {
+  date: string;
+  count: number;
+  level: 0 | 1 | 2 | 3 | 4;
+}
+
+interface ActivityHeatmapProps {
+  data?: ContributionDay[];
+  loading?: boolean;
+}
+
+export default function ActivityHeatmap({ data = [], loading = false }: ActivityHeatmapProps) {
+  // Generate a reliable fallback array of 365 days if the database has zero records yet
+  const heatmapDays = useMemo(() => {
+    if (data && data.length > 0) return data;
     
-    validSubs.forEach(s => {
-      if (!s.createdAt) return;
-      const dateStr = new Date(s.createdAt).toISOString().split('T')[0];
-      counts[dateStr] = (counts[dateStr] || 0) + 1;
-    });
-
-    // 2. Generate the last 365 days
+    const days: ContributionDay[] = [];
     const today = new Date();
-    const days = [];
-    let total = 0;
-    let active = 0;
-
     for (let i = 364; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
-      const count = counts[dateStr] || 0;
-      days.push({ date: dateStr, count });
-      if (count > 0) {
-        active++;
-        total += count;
-      }
+      const d = new Date();
+      d.setDate(today.getDate() - i);
+      days.push({
+        date: d.toISOString().split('T')[0],
+        count: 0,
+        level: 0
+      });
     }
+    return days;
+  }, [data]);
 
-    // 3. Calculate Streaks
-    let curr = 0;
-    let max = 0;
-    let temp = 0;
+  if (loading) {
+    return (
+      <div style={{ width: '100%', height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#171717', borderRadius: 12, border: '1px solid #262626', animation: 'pulse 2s infinite' }}>
+        <p style={{ fontSize: 14, color: '#a3a3a3' }}>Loading your activity metrics...</p>
+      </div>
+    );
+  }
 
-    for (let i = 0; i < days.length; i++) {
-      if (days[i].count > 0) {
-        temp++;
-        max = Math.max(max, temp);
-      } else {
-        temp = 0;
-      }
-    }
-
-    // Check current streak (counting backwards from today/yesterday)
-    for (let i = days.length - 1; i >= 0; i--) {
-      if (days[i].count > 0) {
-        curr++;
-      } else if (i === days.length - 1) {
-        // If today is 0, we forgive it and check yesterday
-        continue;
-      } else {
-        break;
-      }
-    }
-
-    return { grid: days, maxStreak: max, currentStreak: curr, activeDays: active, totalSolves: total };
-  }, [submissions]);
-
-  const getColor = (count: number) => {
-    if (count === 0) return 'rgba(56, 189, 248, 0.05)'; // Empty (Dark Slate)
-    if (count <= 2) return 'rgba(56, 189, 248, 0.4)';  // Light Cyan
-    if (count <= 5) return 'rgba(56, 189, 248, 0.7)';  // Medium Cyan
-    return 'rgba(56, 189, 248, 1)';                    // Bright Cyan
+  // Modern Utility Colors for the cells
+  const levelColors: Record<number, string> = {
+    0: 'rgba(38, 38, 38, 0.8)', // neutral-800
+    1: '#064e3b', // emerald-950
+    2: '#065f46', // emerald-800
+    3: '#059669', // emerald-600
+    4: '#34d399'  // emerald-400
   };
 
   return (
-    <div className="glass-panel" style={{ borderRadius: 24, padding: 24, margin: 0, border: '1px solid rgba(255,255,255,0.05)' }}>
-      <h3 style={{ margin: '0 0 16px', color: '#e2e8f0', fontSize: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span>🔥</span> Solving Heatmap
-      </h3>
-      
-      <div style={{ display: 'flex', gap: 24, marginBottom: 20 }}>
-        <div>
-          <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>Current Streak</div>
-          <div style={{ fontSize: 22, fontWeight: 'bold', color: '#38bdf8' }}>{currentStreak} <span style={{fontSize: 13, color: '#64748b', fontWeight: 'normal'}}>days</span></div>
-        </div>
-        <div>
-          <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>Max Streak</div>
-          <div style={{ fontSize: 22, fontWeight: 'bold', color: '#eef2ff' }}>{maxStreak} <span style={{fontSize: 13, color: '#64748b', fontWeight: 'normal'}}>days</span></div>
-        </div>
-        <div>
-          <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>Active Days</div>
-          <div style={{ fontSize: 22, fontWeight: 'bold', color: '#4ade80' }}>{activeDays} <span style={{fontSize: 13, color: '#64748b', fontWeight: 'normal'}}>days</span></div>
+    <div style={{ width: '100%', background: 'rgba(23, 23, 23, 0.6)', backdropFilter: 'blur(12px)', padding: 16, borderRadius: 12, border: '1px solid #262626' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div>
+            <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', margin: '0 0 4px 0' }}>Submission History</h3>
+            <p style={{ fontSize: 12, color: '#a3a3a3', margin: 0 }}>Your daily competitive coding consistency matrix</p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#a3a3a3', marginTop: 4 }}>
+            <span>Less</span>
+            <div style={{ width: 12, height: 12, background: levelColors[0], borderRadius: 2 }} />
+            <div style={{ width: 12, height: 12, background: levelColors[1], borderRadius: 2 }} />
+            <div style={{ width: 12, height: 12, background: levelColors[2], borderRadius: 2 }} />
+            <div style={{ width: 12, height: 12, background: levelColors[3], borderRadius: 2 }} />
+            <div style={{ width: 12, height: 12, background: levelColors[4], borderRadius: 2 }} />
+            <span>More</span>
+          </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(52, 1fr)', gridAutoFlow: 'column', gridTemplateRows: 'repeat(7, 1fr)', gap: 4, overflowX: 'auto', paddingBottom: 10 }}>
-        {grid.map((day, i) => (
-          <div 
-            key={i} 
-            title={`${day.count} solves on ${day.date}`}
-            style={{ width: 12, height: 12, background: getColor(day.count), borderRadius: 3, cursor: 'pointer', transition: 'transform 0.1s' }}
-            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.2)'}
-            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          />
-        ))}
+      {/* 📱 RESPONSIVE WRAPPER: Horizontal scroll for mobile devices */}
+      <div style={{ width: '100%', overflowX: 'auto', paddingBottom: 8, WebkitOverflowScrolling: 'touch' }}>
+        <div style={{ minWidth: 760, display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(7, 1fr)', gap: 6, justifyContent: 'flex-start' }}>
+          {heatmapDays.map((day) => (
+            <div
+              key={day.date}
+              title={`${day.count} submissions on ${new Date(day.date).toLocaleDateString()}`}
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: 2,
+                background: levelColors[day.level],
+                transition: 'all 0.2s ease',
+                cursor: 'pointer'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.7'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+            />
+          ))}
+        </div>
       </div>
-      
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 11, color: '#94a3b8' }}>
-        <span>Less</span>
-        <div style={{ width: 10, height: 10, background: 'rgba(56, 189, 248, 0.05)', borderRadius: 2 }}></div>
-        <div style={{ width: 10, height: 10, background: 'rgba(56, 189, 248, 0.4)', borderRadius: 2 }}></div>
-        <div style={{ width: 10, height: 10, background: 'rgba(56, 189, 248, 0.7)', borderRadius: 2 }}></div>
-        <div style={{ width: 10, height: 10, background: 'rgba(56, 189, 248, 1)', borderRadius: 2 }}></div>
-        <span>More</span>
-      </div>
+      <p style={{ fontSize: 11, color: '#737373', marginTop: 8, fontStyle: 'italic', display: 'block' }}>
+        Swipe horizontally to view full yearly calendar metrics grid.
+      </p>
     </div>
   );
 }
