@@ -1,21 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  transpilePackages: ['react-syntax-highlighter', 'refractor', 'ui'],
+  transpilePackages: ['react-syntax-highlighter', 'refractor'],
   images: {
-    domains: [
-      'lh3.googleusercontent.com',
-      'avatars.githubusercontent.com',
-      'res.cloudinary.com'
+    remotePatterns: [ // Updated from 'domains' to 'remotePatterns' for Next.js 14+
+      { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
+      { protocol: 'https', hostname: 'avatars.githubusercontent.com' },
+      { protocol: 'https', hostname: 'res.cloudinary.com' },
     ],
-  },
-  webpack: (config) => {
-    // This ensures CJS versions are used for syntax highlighting to prevent ESM errors
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      'react-syntax-highlighter': 'react-syntax-highlighter/dist/cjs',
-    };
-    return config;
   },
 };
 

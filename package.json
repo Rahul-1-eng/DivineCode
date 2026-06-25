@@ -22,6 +22,7 @@
   "devDependencies": {
     "@types/react-syntax-highlighter": "^15.5.13",
     "concurrently": "^8.2.2",
+    "null-loader": "^4.0.1",
     "prisma": "^5.22.0"
   },
   "dependencies": {

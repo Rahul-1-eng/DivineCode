@@ -5,9 +5,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import jsx from 'react-syntax-highlighter/dist/cjs/languages/prism/jsx';
+import cpp from 'react-syntax-highlighter/dist/cjs/languages/prism/cpp';
 import prism from 'react-syntax-highlighter/dist/cjs/styles/prism/prism';
+import python from 'react-syntax-highlighter/dist/cjs/languages/prism/python';
+import typescript from 'react-syntax-highlighter/dist/cjs/languages/prism/typescript';
 
 SyntaxHighlighter.registerLanguage('jsx', jsx);
+SyntaxHighlighter.registerLanguage('cpp', cpp);
+SyntaxHighlighter.registerLanguage('python', python);
+SyntaxHighlighter.registerLanguage('typescript', typescript);
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 import { io, Socket } from 'socket.io-client';
 import { fetchApi } from '../../lib/api';
