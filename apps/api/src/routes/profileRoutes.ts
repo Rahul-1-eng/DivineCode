@@ -51,7 +51,11 @@ profileRouter.get('/me', async (req, res) => {
             contest: { select: { id: true, title: true, startTime: true, isRated: true } }, 
             standing: true 
           },
-          orderBy: { joinedAt: 'desc' }
+          orderBy: {
+  contest: {
+    startTime: 'desc'
+  }
+}
         }
       }
     });
@@ -69,7 +73,13 @@ profileRouter.get('/me', async (req, res) => {
     // 🔥 Database Aggregation Optimization
     const [totalAttempts, totalAccepted] = await Promise.all([
       prisma.submission.count({ where: { userId: user.id } }),
-      prisma.submission.count({ where: { userId: user.id, verdict: 'ACCEPTED' } })
+      prisma.submission.count({
+  where: {
+    userId: user.id,
+    verdict: 'ACCEPTED',
+    status: 'FINISHED'
+  }
+})
     ]);
 
     const accuracy = totalAttempts > 0 ? Math.round((totalAccepted / totalAttempts) * 100) : 0;
@@ -295,7 +305,11 @@ profileRouter.get('/u/:username', async (req, res) => {
             contest: { select: { id: true, title: true, startTime: true, isRated: true } }, 
             standing: true 
           },
-          orderBy: { joinedAt: 'desc' }
+          orderBy: {
+  contest: {
+    startTime: 'desc'
+  }
+}
         }
       }
     });
@@ -310,7 +324,13 @@ profileRouter.get('/u/:username', async (req, res) => {
     // 🔥 Database Aggregation Optimization
     const [totalAttempts, totalAccepted] = await Promise.all([
       prisma.submission.count({ where: { userId: user.id } }),
-      prisma.submission.count({ where: { userId: user.id, verdict: 'ACCEPTED' } })
+      prisma.submission.count({
+  where: {
+    userId: user.id,
+    verdict: 'ACCEPTED',
+    status: 'FINISHED'
+  }
+})
     ]);
 
     const accuracy = totalAttempts > 0 ? Math.round((totalAccepted / totalAttempts) * 100) : 0;

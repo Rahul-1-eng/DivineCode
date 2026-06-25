@@ -2,7 +2,7 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { prisma } from '../../prisma/client';
-
+import jwt from "jsonwebtoken";
 export async function registerUser({ username, email, name, password }: any) {
   if (!username || !email || !password) throw new Error('Username, email and password are required fields.');
 
@@ -49,13 +49,24 @@ export async function loginUser({ handle, password }: any) {
   const isValid = await bcrypt.compare(password, existingUser.passwordHash);
   if (!isValid) throw new Error('Invalid credentials.');
 
-  return {
+  const token = jwt.sign(
+  {
     id: existingUser.id,
-    username: existingUser.username,
     email: existingUser.email,
-    name: existingUser.name,
-    avatarUrl: existingUser.avatarUrl
-  };
+    name: existingUser.name
+  },
+  process.env.NEXTAUTH_SECRET!,
+  { expiresIn: "7d" }
+);
+
+return {
+  id: existingUser.id,
+  username: existingUser.username,
+  email: existingUser.email,
+  name: existingUser.name,
+  avatarUrl: existingUser.avatarUrl,
+  token
+};
 }
 
 export async function generatePasswordResetToken(email: string) {

@@ -24,13 +24,17 @@ function isWrongAttempt(submission: any) {
 }
 
 export async function recomputeContestStandings(contestId: string) {
-  try {
-    const cacheKey = `contest:standings:${contestId}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached);
-  } catch (err) {
-    console.error("Redis Cache read failed:", err);
+ const cacheKey = `contest:standings:${contestId}`;
+
+try {
+  const cached = await redis.get(cacheKey);
+  if (cached) {
+    console.log(`[STANDINGS] Cache hit for contest ${contestId}`);
+    return JSON.parse(cached);
   }
+} catch (err) {
+  console.error('[STANDINGS] Redis read failed:', err);
+}
 
   return prisma.$transaction(async (tx) => {
     const contest = await tx.contest.findUnique({
@@ -68,8 +72,11 @@ export async function recomputeContestStandings(contestId: string) {
       const tMap = teamState.get(sub.teamId)!;
       const tState = tMap.get(pId) || { wrongAttempts: 0, acceptedAt: undefined, manualPoints: null, isFrozen: false };
       
-      if (!tState.acceptedAt || sub.manualPoints !== null) {
-        if (isAccepted) { tState.acceptedAt = sub.createdAt; tState.isFrozen = isSubmissionFrozen; }
+     if (!tState.acceptedAt) {
+        if (isAccepted && !isSubmissionFrozen) {
+    tState.acceptedAt = sub.createdAt;
+    tState.isFrozen = false;
+}
         else if (isWrongAttempt(sub) && !isSubmissionFrozen) tState.wrongAttempts += 1;
         
         if (sub.manualPoints !== null) tState.manualPoints = sub.manualPoints;
@@ -82,7 +89,7 @@ export async function recomputeContestStandings(contestId: string) {
       const iMap = individualState.get(sub.participantId)!;
       const iState = iMap.get(pId) || { wrongAttempts: 0, acceptedAt: undefined, manualPoints: null };
       
-      if (!iState.acceptedAt || sub.manualPoints !== null) {
+      if (!iState.acceptedAt) {
         if (isAccepted) { iState.acceptedAt = sub.createdAt; }
         else if (isWrongAttempt(sub) && !isSubmissionFrozen) { iState.wrongAttempts += 1; }
         
@@ -141,24 +148,26 @@ export async function recomputeContestStandings(contestId: string) {
       standingRows[i].rank = currentRank;
     }
 
-    for (const row of standingRows) {
-      await tx.contestStanding.upsert({
-        where: { participantId: row.participantId },
-        create: row,
-        update: { 
-          rank: row.rank, 
-          solved: row.solved, 
-          penalty: row.penalty, 
-          score: row.score, 
-          individualScore: row.individualScore, 
-          individualSolved: row.individualSolved, 
-          individualPenalty: row.individualPenalty,
-          testcasePenalty: row.testcasePenalty,
-          solvedProblemIds: row.solvedProblemIds, 
-          lastAcceptedAt: row.lastAcceptedAt 
-        }
-      });
-    }
+  await Promise.all(
+  standingRows.map(row =>
+    tx.contestStanding.upsert({
+      where: { participantId: row.participantId },
+      create: row,
+      update: {
+        rank: row.rank,
+        solved: row.solved,
+        penalty: row.penalty,
+        score: row.score,
+        individualScore: row.individualScore,
+        individualSolved: row.individualSolved,
+        individualPenalty: row.individualPenalty,
+        testcasePenalty: row.testcasePenalty,
+        solvedProblemIds: row.solvedProblemIds,
+        lastAcceptedAt: row.lastAcceptedAt
+      }
+    })
+  )
+);
 
     try {
       const cacheKey = `contest:standings:${contestId}`;

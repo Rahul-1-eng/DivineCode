@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import { prisma } from '../prisma/client';
 import { enqueueJudgeSubmission } from '../queues/queues';
 import { canManageContest, sanitizeContestForViewer, viewerFromRequest } from '../modules/contests/contestRules';
+import { randomUUID } from 'crypto';
 import { 
   createContestV2, listContestsV2, loadContestForViewer, reorderContestProblemV2, 
   addContestProblemV2, removeContestProblemV2, replaceContestProblemV2, registerForContestV2, approveParticipant,
@@ -102,7 +103,7 @@ async function resolveViewerUserId(viewer: ReturnType<typeof viewerFromRequest>,
     create: {
       email,
       name: viewer.name || email.split('@')[0],
-      username: `${usernameSeed}_${Math.random().toString(36).slice(2, 8)}`
+      username: `${usernameSeed}_${randomUUID().slice(0,8)}`
     }
   });
   await ensurePlatformOwnerRole(created);

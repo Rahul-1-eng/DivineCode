@@ -189,7 +189,10 @@ model Submission {
   isFlagged            Boolean              @default(false)
   manualPoints         Int? 
   reports              SubmissionReport[] 
-
+  
+  @@index([participantId])
+  @@index([contestProblemId])
+  @@index([teamId])
   @@unique([source, externalSubmissionId])
   @@index([contestId, createdAt]) 
   @@index([userId])
@@ -447,7 +450,8 @@ model ContestStanding {
   
   contest          Contest            @relation(fields: [contestId], references: [id], onDelete: Cascade)
   participant      ContestParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
-
+  @@index([participantId])
+  @@index([score])
   @@index([contestId, rank])
   @@index([contestId, solved, penalty])
 }

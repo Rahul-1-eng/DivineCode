@@ -1,5 +1,5 @@
 import { prisma } from '../../prisma/client';
-
+    import { randomUUID } from 'crypto';
 export type ViewerContext = {
   userId?: string;
   email?: string;
@@ -47,7 +47,9 @@ export async function resolveViewerUserId(viewer: any, createIfMissing = false) 
     create: {
       email,
       name: viewer.name || email.split('@')[0],
-      username: `${usernameSeed}_${Math.random().toString(36).slice(2, 8)}`
+
+
+username: `${usernameSeed}_${randomUUID().slice(0,8)}`
     }
   })).id;
 }
@@ -192,7 +194,7 @@ export function sanitizeContestForViewer(contest: any, viewer: ViewerContext, no
   const teams = (contest.teams || []).map((team: any) => {
     const teamParticipants = validParticipants.filter((p: any) => p.teamId === team.id);
     const viewerIsTeamLeader = participant?.teamId === team.id && ['OWNER', 'MANAGER'].includes(String(participant?.role || ''));
-    const canSeeInviteCode = canManage || viewerIsTeamLeader;
+    const canSeeInviteCode = canManage;
     return {
       id: team.id,
       name: team.name,
@@ -212,7 +214,7 @@ export function sanitizeContestForViewer(contest: any, viewer: ViewerContext, no
     teamName: p.teamName || 'Individuals',
     teamId: p.teamId || null,
     teamInviteCode: (canManage || (participant?.teamId === p.teamId && ['OWNER', 'MANAGER'].includes(String(participant?.role || '')))) ? p.team?.inviteCode || null : null,
-    email: p.user?.email || '',
+    email: canManage ? p.user?.email || '' : '',
     codeforcesHandle: p.externalHandle?.handle || '',
     handle: p.externalHandle?.handle || '',
     role: p.role || 'PARTICIPANT',
@@ -257,7 +259,7 @@ export function sanitizeContestForViewer(contest: any, viewer: ViewerContext, no
           role: participant.role || 'PARTICIPANT',
           isOfficial: Boolean(participant.isOfficial),
           teamInviteCode: participant.teamId && ['OWNER', 'MANAGER'].includes(String(participant.role || '')) ? participant.team?.inviteCode || null : null,
-          email: participant.user?.email || '',
+          email: canManage ? participant.user?.email || '' : '',
           codeforcesHandle: participant.externalHandle?.handle || '',
           handle: participant.externalHandle?.handle || ''
         }
@@ -314,7 +316,10 @@ export function sanitizeSubmissionForViewer(submission: any, fullAccess: boolean
     judgedAt: submission.judgedAt
   };
 
-  if (!fullAccess) return base;
+  if (!fullAccess) {
+  delete (base as any).judgeMessage;
+  return base;
+}
 
   return {
     ...base,
