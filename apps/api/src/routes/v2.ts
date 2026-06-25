@@ -746,18 +746,19 @@ export function mountV2Routes(app: Express, io: Server) {
         where: { id: req.params.id }
       });
 
-      if (aiProblem) {
-        return res.json({
-          id: aiProblem.id,
-          title: aiProblem.title,
-          type: 'INTERNAL',
-          isMCQ: false,
-          platform: aiProblem.platform || 'DIVINECODE',
-          externalUrl: aiProblem.originalUrl || null,
-          customDescription: aiProblem.descriptionHtml || '', 
-          customTestCases: aiProblem.testcases || []
-        });
-      }
+     if (aiProblem) {
+  return res.json({
+    id: aiProblem.id,
+    title: aiProblem.title,
+    videoUrl: (aiProblem as any).videoUrl || null,
+    type: 'INTERNAL',
+    isMCQ: false,
+    platform: aiProblem.platform || 'DIVINECODE',
+    externalUrl: aiProblem.originalUrl || null,
+    customDescription: aiProblem.descriptionHtml || '', 
+    customTestCases: aiProblem.testcases || []
+  });
+}
 
       // 👉 ADDED: Check the Base Problem Table
       const baseProblem = await prisma.problem.findUnique({
@@ -766,17 +767,18 @@ export function mountV2Routes(app: Express, io: Server) {
       });
 
       if (baseProblem) {
-        return res.json({
-          id: baseProblem.id,
-          title: baseProblem.title,
-          type: 'INTERNAL',
-          isMCQ: false,
-          platform: baseProblem.platform || 'DIVINECODE',
-          externalUrl: baseProblem.url || null,
-          customDescription: baseProblem.description || '', 
-          customTestCases: baseProblem.testcases || []
-        });
-      }
+  return res.json({
+    id: baseProblem.id,
+    title: baseProblem.title,
+    videoUrl: (baseProblem as any).videoUrl || null,
+    type: 'INTERNAL',
+    isMCQ: false,
+    platform: baseProblem.platform || 'DIVINECODE',
+    externalUrl: baseProblem.url || null,
+    customDescription: baseProblem.description || '', 
+    customTestCases: baseProblem.testcases || []
+  });
+}
 
       return res.status(404).json({ error: 'Problem not found' });
     }

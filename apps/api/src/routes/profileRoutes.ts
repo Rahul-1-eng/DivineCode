@@ -28,37 +28,32 @@ profileRouter.get('/me', async (req, res) => {
 
     console.log(`🔍 [PROFILE] Searching for user with email: ${email}`);
     
-    let user = await prisma.user.findUnique({
-      where: { email },
+   let user = await prisma.user.findUnique({
+  where: { email },
+  include: { 
+    externalHandles: true,
+    // 👉 FIXED: Include activity logs so they reach the frontend
+    activityLog: {
+      orderBy: { date: 'desc' }
+    },
+    ratingHistory: { 
+      orderBy: { createdAt: 'asc' }, 
+      include: { contest: { select: { title: true } } } 
+    },
+    submissions: { 
+      select: { id: true, verdict: true, createdAt: true },
+      orderBy: { createdAt: 'desc' }
+    },
+    contestParticipants: {
+      where: { standing: { isNot: null } },
       include: { 
-        externalHandles: true,
-        ratingHistory: { 
-          orderBy: { createdAt: 'asc' }, 
-          include: { contest: { select: { title: true } } } 
-        },
-        // ✅ FIXED: Properly selecting submissions data
-        submissions: { 
-          select: { 
-            id: true,
-            verdict: true, 
-            createdAt: true 
-          },
-          orderBy: { createdAt: 'desc' }
-        },
-        contestParticipants: {
-          where: { standing: { isNot: null } },
-          include: { 
-            contest: { select: { id: true, title: true, startTime: true, isRated: true } }, 
-            standing: true 
-          },
-          orderBy: {
-  contest: {
-    startTime: 'desc'
+        contest: { select: { id: true, title: true, startTime: true, isRated: true } }, 
+        standing: true 
+      },
+      orderBy: { contest: { startTime: 'desc' } }
+    }
   }
-}
-        }
-      }
-    });
+});
     
     if (!user) {
       console.warn(`⚠️ [PROFILE] User not found for email: ${email}`);
@@ -287,33 +282,28 @@ profileRouter.get('/u/:username', async (req, res) => {
     
     console.log(`🔍 [PROFILE] GET /u/${username}`);
     
-    const user = await prisma.user.findFirst({
-      where: { username: { equals: username, mode: 'insensitive' } },
+   const user = await prisma.user.findFirst({
+  where: { username: { equals: username, mode: 'insensitive' } },
+  include: { 
+    externalHandles: true,
+    // 👉 FIXED: Include activity logs here too
+    activityLog: {
+      orderBy: { date: 'desc' }
+    },
+    submissions: { 
+      select: { id: true, verdict: true, createdAt: true },
+      orderBy: { createdAt: 'desc' }
+    },
+    contestParticipants: {
+      where: { standing: { isNot: null } },
       include: { 
-        externalHandles: true,
-        submissions: { 
-          select: { 
-            id: true,
-            verdict: true, 
-            createdAt: true 
-          },
-          orderBy: { createdAt: 'desc' }
-        },
-        contestParticipants: {
-          where: { standing: { isNot: null } },
-          include: { 
-            contest: { select: { id: true, title: true, startTime: true, isRated: true } }, 
-            standing: true 
-          },
-          orderBy: {
-  contest: {
-    startTime: 'desc'
+        contest: { select: { id: true, title: true, startTime: true, isRated: true } }, 
+        standing: true 
+      },
+      orderBy: { contest: { startTime: 'desc' } }
+    }
   }
-}
-        }
-      }
-    });
-    
+});
     if (!user) {
       console.warn(`⚠️ [PROFILE] User not found: ${username}`);
       return res.status(404).json({ error: 'Coder not found in the DivineCode database.' });

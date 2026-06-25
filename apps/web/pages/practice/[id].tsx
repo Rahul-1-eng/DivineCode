@@ -12,6 +12,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4
 interface Problem {
   id?: string;
   title: string;
+  videoUrl?: string;
   difficulty?: string;
   rating?: number;
   descriptionHtml?: string;
@@ -35,6 +36,16 @@ interface ChatPost {
   message: string;
   timestamp: string;
 }
+const getYouTubeEmbedUrl = (url: string) => {
+    let videoId = '';
+    const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
+    const match = url.match(regex);
+    if (match && match[1]) {
+      videoId = match[1];
+      return `https://www.youtube.com/embed/${videoId}`;
+    }
+    return url; 
+};
 
 export default function ProblemWorkspace() {
   const router = useRouter();
@@ -113,6 +124,7 @@ export default function ProblemWorkspace() {
           setProblem({
             id: data.id,
             title: data.title,
+            videoUrl: data.videoUrl,
             difficulty: data.difficulty,
             rating: data.rating,
             descriptionHtml: data.description || data.customDescription,
@@ -323,50 +335,35 @@ export default function ProblemWorkspace() {
             </>
           )}
 
-          {workspaceTab === 'video' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <h3 style={{ color: '#fff', margin: 0 }}>Algorithmic Video Streaming</h3>
-              {!problem.error ? (
-                <div>
-                  {problem.originalUrl?.includes('youtube.com') || problem.originalUrl?.includes('youtu.be') ? (
-                    <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 12, background: '#000', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
-                      <iframe
-                        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
-                        src={`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent((problem.title || 'Coding Problem') + ' solution algorithm explanation')}`}
-                        frameBorder="0"
-                        allowFullScreen
-                      />
-                    </div>
-                  ) : (
-                    <div style={{ padding: 24, background: '#1e293b', borderRadius: 12, border: '1px solid #475569', textAlign: 'center' }}>
-                      <div style={{ fontSize: 48, marginBottom: 12 }}>📹</div>
-                      <h4 style={{ color: '#fff', margin: '0 0 8px' }}>Video Not Available</h4>
-                      <p style={{ color: '#cbd5e1', marginBottom: 16 }}>No direct video link found. Search YouTube manually:</p>
-                      <a
-                        href={`https://www.youtube.com/results?search_query=${encodeURIComponent(problem.title + ' solution algorithm')}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          display: 'inline-block',
-                          background: '#ef4444',
-                          color: '#fff',
-                          padding: '10px 20px',
-                          borderRadius: 8,
-                          textDecoration: 'none',
-                          fontWeight: 'bold'
-                        }}
-                      >
-                        🔍 Search YouTube for "{problem.title}"
-                      </a>
-                    </div>
-                  )}
-                  <p style={{ color: '#64748b', fontSize: 14, textAlign: 'center', marginTop: 12 }}>Streaming the top-rated YouTube editorial for this problem.</p>
-                </div>
-              ) : (
-                <p style={{ color: '#94a3b8' }}>Cannot load video for this problem.</p>
-              )}
-            </div>
-          )}
+         {workspaceTab === 'video' && (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <h3 style={{ color: '#fff', margin: 0 }}>Algorithmic Video Streaming</h3>
+    
+    {/* 👉 FIXED: Prioritize the saved videoUrl from the database first */}
+    {problem.videoUrl ? (
+      <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 12, background: '#000' }}>
+         <iframe 
+            src={getYouTubeEmbedUrl(problem.videoUrl)} 
+            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+            frameBorder="0" 
+            allowFullScreen 
+         />
+      </div>
+    ) : !problem.error ? (
+      // Fallback to search if no videoUrl is saved
+      <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 12, background: '#000' }}>
+        <iframe 
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} 
+          src={`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(problem.title + ' optimal solution algorithm')}`} 
+          frameBorder="0" 
+          allowFullScreen 
+        />
+      </div>
+    ) : (
+      <p style={{ color: '#94a3b8' }}>Cannot load video for this problem.</p>
+    )}
+  </div>
+)}
 
           {workspaceTab === 'discuss' && (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
