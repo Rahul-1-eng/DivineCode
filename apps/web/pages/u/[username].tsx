@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import ActivityHeatmap from '../../components/ActivityHeatmap'; // 👉 ADDED Import
+import ActivityHeatmap from '../../components/ActivityHeatmap';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -12,12 +12,12 @@ interface ContributionDay {
 }
 
 function getRatingColor(rating: number) {
-  if (rating < 1200) return '#94a3b8'; // Gray (Newbie)
-  if (rating < 1400) return '#4ade80'; // Green (Pupil)
-  if (rating < 1600) return '#22d3ee'; // Cyan (Specialist)
-  if (rating < 1900) return '#3b82f6'; // Blue (Expert)
-  if (rating < 2200) return '#a855f7'; // Purple (Candidate Master)
-  return '#ef4444'; // Red (Master/Grandmaster)
+  if (rating < 1200) return '#94a3b8'; // Newbie
+  if (rating < 1400) return '#4ade80'; // Pupil
+  if (rating < 1600) return '#22d3ee'; // Specialist
+  if (rating < 1900) return '#3b82f6'; // Expert
+  if (rating < 2200) return '#a855f7'; // Candidate Master
+  return '#ef4444'; // Master
 }
 
 function getRatingTitle(rating: number) {
@@ -30,19 +30,14 @@ function getRatingTitle(rating: number) {
 }
 
 function transformSubmissionsToHeatmap(submissions: any[]): ContributionDay[] {
-  if (!submissions || submissions.length === 0) {
-    return [];
-  }
+  if (!submissions || submissions.length === 0) return [];
 
-  // Group submissions by date
   const submissionsByDate: Record<string, number> = {};
-  
   submissions.forEach(submission => {
-    const date = new Date(submission.timestamp || submission.date).toISOString().split('T')[0];
+    const date = new Date(submission.timestamp || submission.createdAt || submission.date).toISOString().split('T')[0];
     submissionsByDate[date] = (submissionsByDate[date] || 0) + 1;
   });
 
-  // Convert counts to levels (0-4)
   const counts = Object.values(submissionsByDate);
   const maxCount = Math.max(...counts, 1);
   
@@ -61,7 +56,7 @@ export default function PublicProfile() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!username) return;
+    if (!router.isReady || !username) return;
     
     fetch(`${API_BASE_URL}/api/v2/profile/u/${username}`)
       .then(res => {
@@ -69,16 +64,14 @@ export default function PublicProfile() {
         return res.json();
       })
       .then(data => {
-        console.log('[PublicProfile] Loaded profile:', data);
         setProfile(data);
         setLoading(false);
       })
       .catch(err => {
-        console.error('[PublicProfile] Error:', err);
         setError(err.message);
         setLoading(false);
       });
-  }, [username]);
+  }, [username, router.isReady]);
 
   if (loading) {
     return (
@@ -101,31 +94,29 @@ export default function PublicProfile() {
   }
 
   const ratingColor = getRatingColor(profile.rating || 0);
+  const displayName = profile.name || profile.username || 'DivineCode User';
 
   return (
     <div style={{ minHeight: '100vh', background: '#020617', color: '#eef2ff', fontFamily: 'Inter, sans-serif', paddingBottom: 60 }}>
       <Head>
-        <title>{profile.name} (@{profile.username}) - DivineCode</title>
+        <title>{displayName} (@{profile.username}) - DivineCode</title>
       </Head>
 
-      {/* Hero Banner */}
       <div style={{ width: '100%', height: 200, background: `linear-gradient(to right, #0f172a, ${ratingColor}40)` }} />
       
       <div style={{ maxWidth: 1000, margin: '0 auto', padding: '0 20px', marginTop: -60 }}>
-        {/* Profile Header */}
         <div style={{ display: 'flex', gap: 24, alignItems: 'flex-end', marginBottom: 40 }}>
+          {/* 👉 FIXED: Added structural fallback to prevent undefined string manipulation crashes */}
           <div style={{ width: 120, height: 120, borderRadius: '50%', background: '#1e293b', border: `4px solid ${ratingColor}`, display: 'flex', justifyContent: 'center', alignItems: 'center', fontSize: 48, fontWeight: 'bold', color: ratingColor, boxShadow: `0 0 20px ${ratingColor}40` }}>
-            {profile.name?.charAt(0).toUpperCase()}
+            {(profile.name || profile.username || 'D').charAt(0).toUpperCase()}
           </div>
           <div style={{ paddingBottom: 10 }}>
-            <h1 style={{ margin: 0, fontSize: 36 }}>{profile.name}</h1>
+            <h1 style={{ margin: 0, fontSize: 36 }}>{displayName}</h1>
             <p style={{ margin: '4px 0 0', color: '#94a3b8', fontSize: 18 }}>@{profile.username}</p>
           </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 30 }}>
-          
-          {/* Left Sidebar: Stats & Info */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, padding: 24 }}>
               <div style={{ fontSize: 14, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Global Rating</div>
@@ -162,10 +153,7 @@ export default function PublicProfile() {
             )}
           </div>
 
-          {/* Right Main Column: Activity Heatmap & Contest History */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
-            
-            {/* ✅ FIXED: ActivityHeatmap now receives 'data' prop with transformed submissions */}
             <ActivityHeatmap data={transformSubmissionsToHeatmap(profile.submissions || [])} />
 
             <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12, padding: 24 }}>
@@ -191,7 +179,6 @@ export default function PublicProfile() {
                         <td style={{ padding: '16px 8px', fontWeight: 'bold', color: match.ratingDelta > 0 ? '#4ade80' : match.ratingDelta < 0 ? '#f87171' : '#94a3b8' }}>
                           {match.ratingDelta > 0 ? '+' : ''}{match.ratingDelta}
                         </td>
-                        {/* ✅ ADDED: Coins column */}
                         <td style={{ padding: '16px 8px', fontWeight: 'bold', color: '#fbbf24' }}>
                           +{match.coinsEarned || 0}
                         </td>
@@ -206,7 +193,6 @@ export default function PublicProfile() {
               )}
             </div>
           </div>
-          
         </div>
       </div>
     </div>

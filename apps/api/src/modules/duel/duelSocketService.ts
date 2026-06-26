@@ -141,7 +141,7 @@ export function setupDuelSockets(io: Server) {
     }
   }
 
-  async function saveDuelResults(state: DuelState) {
+ async function saveDuelResults(state: DuelState) {
     const sortedPlayers = [...state.players].sort((a, b) => b.score - a.score);
     const isDraw = sortedPlayers[0].score === sortedPlayers[1].score;
 
@@ -154,13 +154,33 @@ export function setupDuelSockets(io: Server) {
       const coinReward = isDraw ? 10 : (isWinner ? 50 : 5);
 
       try {
+        // 1. Fetch the user's database ID
+        const user = await prisma.user.findUnique({ where: { email: player.email } });
+        if (!user) continue;
+
+        // 2. Update their global balances
         await prisma.user.update({
-          where: { email: player.email },
+          where: { id: user.id },
           data: {
             rating: { increment: ratingChange },
             coins: { increment: coinReward }
           }
         });
+
+        // 👉 FIXED: 3. Create the paper trail in the ActivityLog so it shows on the profile!
+        const opponent = sortedPlayers.find(p => p.id !== player.id);
+        const resultText = isDraw ? 'Draw' : (isWinner ? 'Victory' : 'Defeat');
+        
+        await prisma.activityLog.create({
+          data: {
+            userId: user.id,
+            eventDescription: `1v1 Duel ${resultText} vs ${opponent?.name || 'Opponent'}`,
+            ratingDelta: ratingChange,
+            coinDelta: coinReward,
+            date: new Date()
+          }
+        });
+
       } catch (e) {
         console.error(`Failed to update DB for player ${player.email}`);
       }

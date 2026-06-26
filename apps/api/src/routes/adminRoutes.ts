@@ -151,3 +151,86 @@ adminRouter.get('/plagiarism/scan/:contestId', async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+// 🚀 NEW: Finalize Contest & Distribute Ratings/Coins
+adminRouter.post('/contests/:id/finalize', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const contest = await prisma.contest.findUnique({
+      where: { id },
+      include: {
+        participants: {
+          include: { user: true, standing: true }
+        }
+      }
+    });
+
+    if (!contest) return res.status(404).json({ error: 'Contest not found' });
+    if (!contest.isRated) return res.status(400).json({ error: 'Contest is not marked as Rated.' });
+
+    // 1. Sort participants by their final contest score (descending)
+    const rankedParticipants = contest.participants
+      .filter(p => p.standing)
+      .sort((a, b) => {
+        if (b.standing!.score === a.standing!.score) {
+          return a.standing!.penalty - b.standing!.penalty; // Tie-breaker: lower penalty wins
+        }
+        return b.standing!.score - a.standing!.score;
+      });
+
+    const totalPlayers = rankedParticipants.length;
+    if (totalPlayers === 0) return res.status(400).json({ error: 'No participants to rate.' });
+
+    // 2. Loop through and apply Elo Math
+    for (let i = 0; i < totalPlayers; i++) {
+      const p = rankedParticipants[i];
+      if (!p.user) continue;
+
+      // Simple Elo Math: Top 30% gain rating, middle stay similar, bottom lose rating
+      const percentile = i / totalPlayers;
+      let ratingDelta = 0;
+      let coinsEarned = 10; // Participation award
+
+      if (percentile <= 0.1) { ratingDelta = +45; coinsEarned = 200; }      // Top 10%
+      else if (percentile <= 0.3) { ratingDelta = +20; coinsEarned = 100; } // Top 30%
+      else if (percentile <= 0.6) { ratingDelta = +5; coinsEarned = 50; }   // Middle
+      else if (percentile <= 0.8) { ratingDelta = -10; coinsEarned = 10; }  // Bottom 40%
+      else { ratingDelta = -25; coinsEarned = 5; }                          // Bottom 20%
+
+      // 3. Update the Participant Record (so it shows in Match History)
+      await prisma.contestParticipant.update({
+        where: { id: p.id },
+        data: {
+          ratingBefore: p.user.rating,
+          ratingAfter: p.user.rating + ratingDelta,
+          coinsEarned: coinsEarned
+        }
+      });
+
+      // 4. Update the User's Global Balances
+      await prisma.user.update({
+        where: { id: p.user.id },
+        data: {
+          rating: { increment: ratingDelta },
+          coins: { increment: coinsEarned }
+        }
+      });
+
+      // 5. Create the ActivityLog Receipt! (This makes the table show the data)
+      await prisma.activityLog.create({
+        data: {
+          userId: p.user.id,
+          eventDescription: `Rank #${i + 1} in ${contest.title}`,
+          ratingDelta: ratingDelta,
+          coinDelta: coinsEarned,
+          date: new Date()
+        }
+      });
+    }
+
+    return res.json({ success: true, message: `Successfully rated ${totalPlayers} participants!` });
+
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
