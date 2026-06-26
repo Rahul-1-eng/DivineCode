@@ -7,8 +7,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { useTheme } from 'next-themes';
 import { fetchApi } from '../../../../lib/api';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
 export async function getServerSideProps() { return { props: {} }; }
 
@@ -63,13 +61,11 @@ export default function ContestProblemWorkspace() {
   const [judgeVerdict, setJudgeVerdict] = useState<{ status: string, message: string } | null>(null);
   
   const [aiDebuggerLoading, setAiDebuggerLoading] = useState(false);
-  const [aiError, setAiError] = useState(false);
   const [aiDebugResult, setAiDebugResult] = useState<any>(null);
   const [showCfModal, setShowCfModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  const [mcqData, setMcqData] = useState<any>(null);
   const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
   const [questionTimeLeft, setQuestionTimeLeft] = useState<number>(0);
   const [redirectInfo, setRedirectInfo] = useState<any>(null);
@@ -136,6 +132,59 @@ export default function ContestProblemWorkspace() {
   }, [problem, isMCQ, problemIdStr]);
 
   useEffect(() => {
+    if (!problemIdStr) return;
+    const controller = new AbortController();
+
+    fetchApi(`/api/v2/problems/${problemIdStr}/redirect`, { signal: controller.signal })
+      .then((data) => {
+        setRedirectInfo(data);
+        setProblemType(data?.type || (problem?.isMCQ ? 'MCQ' : (problem?.externalUrl ? 'EXTERNAL' : 'INTERNAL')));
+      })
+      .catch((err) => {
+        setProblemType(problem?.isMCQ ? 'MCQ' : (problem?.externalUrl ? 'EXTERNAL' : 'INTERNAL'));
+      });
+
+    return () => controller.abort();
+  }, [problemIdStr, problem?.isMCQ, problem?.externalUrl]);
+
+  // 👉 FIXED: Aggressive Deep-Search MCQ Data Extractor (Breaks through double-stringification)
+  const mcqData = useMemo(() => {
+    if (!isMCQ) return null;
+    
+    const searchForMcqFields = (obj: any, depth = 0): any => {
+      if (!obj || depth > 5) return null;
+      
+      if (typeof obj === 'string') {
+        try { return searchForMcqFields(JSON.parse(obj), depth + 1); } 
+        catch (e) { return null; }
+      }
+      
+      if (Array.isArray(obj)) {
+        for (const item of obj) {
+          const res = searchForMcqFields(item, depth + 1);
+          if (res) return res;
+        }
+        return null;
+      }
+      
+      if (typeof obj === 'object') {
+        if (Array.isArray(obj.options) && obj.options.length > 0) return obj;
+        
+        if (obj.mcqData) { const res = searchForMcqFields(obj.mcqData, depth + 1); if (res) return res; }
+        if (obj.interviewQuestion) { const res = searchForMcqFields(obj.interviewQuestion, depth + 1); if (res) return res; }
+        if (obj.customData) { const res = searchForMcqFields(obj.customData, depth + 1); if (res) return res; }
+        if (obj.problem) { const res = searchForMcqFields(obj.problem, depth + 1); if (res) return res; }
+      }
+      return null;
+    };
+    
+    return searchForMcqFields(problem) || searchForMcqFields(redirectInfo);
+  }, [isMCQ, problem, redirectInfo]);
+
+  const activeMcqPrompt = mcqData?.prompt || mcqData?.description || problem?.customDescription || problem?.titleSnapshot || 'No description provided';
+  const activeMcqOptions: string[] = Array.isArray(mcqData?.options) ? mcqData.options : [];
+
+  useEffect(() => {
     if (!problem || isMCQ) return;
     let tcs = [];
     try {
@@ -158,39 +207,11 @@ export default function ContestProblemWorkspace() {
     }
   }, [problem, isMCQ]);
 
-  useEffect(() => {
-    if (!problemIdStr) return;
-    const controller = new AbortController();
-
-    fetchApi(`/api/v2/problems/${problemIdStr}/redirect`, { signal: controller.signal })
-      .then((data) => {
-        setRedirectInfo(data);
-        setProblemType(data?.type || (problem?.isMCQ ? 'MCQ' : (problem?.externalUrl ? 'EXTERNAL' : 'INTERNAL')));
-      })
-      .catch((err) => {
-        setProblemType(problem?.isMCQ ? 'MCQ' : (problem?.externalUrl ? 'EXTERNAL' : 'INTERNAL'));
-      });
-
-    return () => controller.abort();
-  }, [problemIdStr, problem?.isMCQ, problem?.externalUrl]);
-
-  // 👉 FIXED: Highly robust MCQ Data Extractor
-  useEffect(() => {
-    if (isMCQ) {
-      let extractedData = null;
-      if (redirectInfo?.interviewQuestion) extractedData = redirectInfo.interviewQuestion;
-      else if (problem?.interviewQuestion) extractedData = problem.interviewQuestion;
-      else if (problem?.problem?.interviewQuestion) extractedData = problem.problem.interviewQuestion;
-      else if (problem?.mcqData) extractedData = typeof problem.mcqData === 'string' ? JSON.parse(problem.mcqData) : problem.mcqData;
-      else if (redirectInfo?.mcqData) extractedData = typeof redirectInfo.mcqData === 'string' ? JSON.parse(redirectInfo.mcqData) : redirectInfo.mcqData;
-      
-      if (extractedData) {
-        setMcqData(extractedData);
-      } else {
-        setMcqData(null);
-      }
-    }
-  }, [isMCQ, problem, redirectInfo]);
+  const isTerminalMode = useMemo(() => {
+    if (isMCQ) return false;
+    const hasTestcases = problem?.customTestCases || problem?.testcases || problem?.problem?.testcases;
+    return (!hasTestcases || (typeof hasTestcases === 'string' && JSON.parse(hasTestcases).length === 0) || (Array.isArray(hasTestcases) && hasTestcases.length === 0));
+  }, [isMCQ, problem]);
 
   const cleanupAudioElement = (socketId: string) => {
     const audio = document.getElementById(`audio-${socketId}`) as HTMLAudioElement;
@@ -402,7 +423,6 @@ export default function ContestProblemWorkspace() {
     }
     if (confirm("Using the AI Tutor deducts 50 points from your score. Proceed?")) {
       setAiDebuggerLoading(true);
-      setAiError(false);
       try {
         const data = await fetchApi(`/api/v2/contests/${id}/problems/${problemIdStr}/ai-debug`, {
           method: 'POST', 
@@ -410,7 +430,6 @@ export default function ContestProblemWorkspace() {
         });
         setAiDebugResult(data.aiDebugData);
       } catch (err: any) { 
-        setAiError(true);
         toast.error(err.message || "AI connection failed. Please retry."); 
       } finally { 
         setAiDebuggerLoading(false); 
@@ -620,33 +639,22 @@ export default function ContestProblemWorkspace() {
   );
 
   if (status === 'loading' || isLoading) return <DynamicLoader />;
-  if (!contest || !problem) return <div style={page}>Problem not found.</div>;
+  if (!contest || !problem) return <div style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-main)', color: 'var(--text-main)', padding: 40}}>Problem not found.</div>;
 
   const monacoLanguage = language === 'cpp' ? 'cpp' : language === 'python' ? 'python' : 'java';
   const externalUrl = redirectInfo?.redirectUrl || redirectInfo?.externalUrl || problem?.externalUrl || '';
   const problemDescriptionHtml = problem?.customDescription || problem?.problem?.description || (problem?.description ? problem.description : 'No description available for this problem.');
-
-  const activeMcqPrompt = mcqData?.prompt || problem?.customDescription || problem?.titleSnapshot || 'No description provided';
-  
-  // 👉 FIXED: Robust Option Parsing
-  let activeMcqOptions: string[] = [];
-  if (Array.isArray(mcqData?.options)) {
-    activeMcqOptions = mcqData.options;
-  } else if (typeof mcqData?.options === 'string') {
-    try { activeMcqOptions = JSON.parse(mcqData.options); } catch (e) { }
-  }
   
   const editorTheme = theme === 'light' ? 'light' : 'vs-dark';
 
  return (
-    <main className="workspace-container">
+    <main style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', overflow: 'hidden', background: 'var(--bg-main)' }}>
       <style>{`
-        .workspace-container {
+        .workspace-content {
           display: flex;
-          height: 100vh;
-          background: var(--bg-main);
-          font-family: Inter, sans-serif;
           flex-direction: row;
+          height: calc(100vh - 60px);
+          width: 100%;
         }
         .workspace-left {
           width: 45%;
@@ -654,7 +662,7 @@ export default function ContestProblemWorkspace() {
           background: var(--bg-panel);
           display: flex;
           flex-direction: column;
-          overflow: hidden;
+          overflow-y: auto;
         }
         .workspace-right {
           width: 55%;
@@ -674,20 +682,21 @@ export default function ContestProblemWorkspace() {
           border-radius: 4px;
         }
         @media (max-width: 768px) {
-          .workspace-container {
+          .workspace-content {
             flex-direction: column;
-            height: auto;
-            min-height: 100vh;
+            overflow-y: auto;
           }
           .workspace-left {
             width: 100%;
             border-right: none;
             border-bottom: 4px solid var(--border-color);
-            height: 55vh;
+            height: auto;
+            min-height: 40vh;
           }
           .workspace-right {
             width: 100%;
-            height: 85vh;
+            height: 60vh;
+            flex-shrink: 0;
           }
         }
         
@@ -844,8 +853,8 @@ export default function ContestProblemWorkspace() {
           </div>
         </div>
       ) : (
-        <div className="workspace-container" style={{ height: 'calc(100vh - 60px)', width: '100%' }}>
-          <section className="workspace-left" style={{ overflowY: 'auto', padding: 20 }}>
+        <div className="workspace-content">
+          <section className="workspace-left" style={{ padding: 20 }}>
             {problemType === 'EXTERNAL' && externalUrl && (
               <div style={{ marginBottom: 20, padding: 20, borderRadius: 14, background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
                 <strong style={{ display: 'block', color: 'var(--accent-primary)', marginBottom: 10, fontSize: 16 }}>External problem detected</strong>
@@ -1041,8 +1050,7 @@ export default function ContestProblemWorkspace() {
 }
 
 // Styles
-const page: CSSProperties = { display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-main)', color: 'var(--text-main)', fontFamily: 'Inter, sans-serif' };
-const headerBar: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', backgroundColor: 'var(--bg-panel-solid)', borderBottom: '1px solid var(--border-color)', height: 'auto', minHeight: 60 };
+const headerBar: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 20px', backgroundColor: 'var(--bg-panel-solid)', borderBottom: '1px solid var(--border-color)', height: 60, minHeight: 60, boxSizing: 'border-box' };
 const btnDark: CSSProperties = { background: 'var(--button-ghost-bg)', border: '1px solid var(--button-ghost-border)', color: 'var(--text-main)', padding: '8px 14px', cursor: 'pointer', fontWeight: 'bold', borderRadius: 4, whiteSpace: 'nowrap' };
 const timerBox: CSSProperties = { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold', whiteSpace: 'nowrap' };
 const submitBtn: CSSProperties = { background: '#10b981', border: 'none', color: '#fff', padding: '8px 16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: 4, whiteSpace: 'nowrap' };
