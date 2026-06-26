@@ -118,3 +118,12 @@ export async function generateTargetedPracticeSet(userId: string) {
     return { success: false, error: err.message };
   }
 }
+// Legacy support for profileSyncService compilation
+export function estimateUnifiedRating(...ratings: any[]): number {
+  const validRatings = ratings.filter(r => typeof r === 'number' && !isNaN(r) && r > 0);
+  if (validRatings.length === 0) return 1200;
+  
+  // Calculate a balanced average of their internal and external ratings
+  const sum = validRatings.reduce((a, b) => a + b, 0);
+  return Math.round(sum / validRatings.length);
+}
