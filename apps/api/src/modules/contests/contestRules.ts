@@ -86,18 +86,14 @@ export function isContestOwner(contest: any, viewer: ViewerContext) {
 
 export function findViewerParticipant(contest: any, viewer: ViewerContext) {
   if (!contest || !contest.participants) return undefined;
-  const viewerUserId = normalize(viewer?.userId);
-  const viewerEmail = normalize(viewer?.email);
-  const viewerName = normalize(viewer?.name);
+  
+  // 🔒 HARDENED: Identify users ONLY by unique userId. 
+  // Never use displayName or handle for identity.
+  const viewerUserId = viewer?.userId;
 
   return contest.participants.find((p: any) => {
     if (!p) return false;
-    return Boolean(
-      (viewerUserId && normalize(p.userId) === viewerUserId) ||
-        (viewerEmail && normalize(p.user?.email) === viewerEmail) ||
-        (viewerName && normalize(p.displayName) === viewerName) ||
-        (viewerName && normalize(p.externalHandle?.handle) === viewerName)
-    );
+    return Boolean(viewerUserId && p.userId === viewerUserId);
   });
 }
 

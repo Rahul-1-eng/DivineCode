@@ -213,59 +213,44 @@ export async function loadContestForViewer(contestId: string) {
   } catch (error) { throw error; }
 }
 
+// Replace your existing registerForContestV2 with this version:
 export async function registerForContestV2(contestId: string, input: MemberInput) {
   const contest = await prisma.contest.findUnique({ where: { id: contestId } });
   if (!contest) throw new Error('Contest not found');
-  if (!contest.allowLateJoin && contest.status !== ContestStatus.SCHEDULED) throw new Error('Late joining is not allowed for this contest.');
   
-  const memberInput = normalizedMember(input);
-  
-  await prisma.$transaction(async (tx) => {
-    const user = await ensureParticipantUser(tx, memberInput);
-    let externalHandle = null;
-    
-    if (memberInput.codeforcesHandle) { 
-        externalHandle = await ensureCodeforcesHandle(tx, user.id, memberInput.codeforcesHandle); 
-    } else { 
-        externalHandle = await tx.externalHandle.findFirst({ where: { userId: user.id, platform: Platform.CODEFORCES } }); 
-    }
+  // Ensure we are working with the unique userId provided from the session
+  if (!input.userId) throw new Error('Registration requires a valid userId.');
 
-    const existing = await tx.contestParticipant.findFirst({ where: { contestId, userId: user.id } });
+  await prisma.$transaction(async (tx) => {
+    // Check if participant already exists for THIS user ID, regardless of name/handle
+    const existing = await tx.contestParticipant.findFirst({ 
+      where: { contestId, userId: input.userId } 
+    });
+    
     if (existing) throw new Error('User is already registered for this contest.');
 
+    // Fetch user directly by ID to ensure we aren't creating duplicates
+    const user = await tx.user.findUnique({ where: { id: input.userId } });
+    if (!user) throw new Error('User account not found.');
+
+    // Handle team registration logic
     let teamId: string | null = null;
-    let isPending = false;
     let role: ContestParticipantRole = ContestParticipantRole.PARTICIPANT;
     
-    if (memberInput.teamInviteCode) {
-      const team = await tx.contestTeam.findFirst({ where: { inviteCode: memberInput.teamInviteCode.trim().toUpperCase(), contestId } });
-      if (!team || team.contestId !== contestId) throw new Error("Invalid or Expired Team Invite Code");
-      teamId = team.id; memberInput.teamName = team.name; isPending = false; 
-    } else if (memberInput.teamName && memberInput.teamName !== 'Individuals' && memberInput.teamName !== 'Solo') {
-      const existingTeam = await tx.contestTeam.findFirst({ where: { contestId, name: memberInput.teamName } });
-      if (existingTeam) {
-        teamId = existingTeam.id;
-        isPending = true;
-      } else {
-        const createdTeam = await tx.contestTeam.create({ data: { contestId, name: memberInput.teamName, inviteCode: inviteCode(memberInput.teamName) } });
-        teamId = createdTeam.id;
-        // 👉 FIXED: Assign MANAGER role so the team creator can approve future join requests
-        role = ContestParticipantRole.MANAGER;
-        isPending = false;
-      }
+    if (input.teamInviteCode) {
+      const team = await tx.contestTeam.findFirst({ where: { inviteCode: input.teamInviteCode.trim().toUpperCase(), contestId } });
+      if (!team) throw new Error("Invalid Team Invite Code");
+      teamId = team.id;
     }
 
-    const needsApproval = isPending && !memberInput.teamInviteCode && (memberInput.teamName && memberInput.teamName !== 'Individuals');
     await tx.contestParticipant.create({
       data: { 
         contestId: contest.id, 
         userId: user.id, 
-        externalHandleId: externalHandle?.id || null, 
-        displayName: memberInput.displayName!, 
-        teamName: memberInput.teamName, 
+        displayName: user.name || user.username, // Use DB name, not user input
         teamId: teamId, 
-        role, 
-        isOfficial: needsApproval ? false : (input.isOfficial ?? false) 
+        role: role, 
+        isOfficial: true 
       }
     });
   });
@@ -651,25 +636,32 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
       where: whereClause, include: { participant: { include: { user: true, externalHandle: true } }, contestProblem: true }, orderBy: { judgedAt: 'desc' }, take: 250
     });
 
-    return submissions.map(sub => {
-      const contestCode = sub.contestProblem?.externalId?.match(/^\d+/)?.[0];
-      const externalSubmissionUrl = sub.externalSubmissionId && contestCode ? `https://codeforces.com/contest/${contestCode}/submission/${sub.externalSubmissionId}` : null;
-      return { 
-          id: sub.id, 
-          contestId: sub.contestId, 
-          memberId: sub.participantId, 
-          userId: sub.participant?.displayName || sub.participant?.user?.name || 'Unknown', 
-          problemId: sub.contestProblemId, 
-          verdict: sub.verdict, 
-          language: sub.language, 
-          source: sub.source, 
-          externalSubmissionId: sub.externalSubmissionId, 
-          externalSubmissionUrl, 
-          createdAt: sub.externalCreatedAt || sub.judgedAt || sub.createdAt, 
-          platform: sub.contestProblem?.platform || 'Codeforces', 
-          code: sub.code 
-      };
-    });
+  return submissions.map(sub => {
+  const contestCode = sub.contestProblem?.externalId?.match(/^\d+/)?.[0];
+  const externalSubmissionUrl = sub.externalSubmissionId && contestCode ? `https://codeforces.com/contest/${contestCode}/submission/${sub.externalSubmissionId}` : null;
+  
+  return { 
+    id: sub.id, 
+    contestId: sub.contestId, 
+    memberId: sub.participantId,
+    
+    // 👉 FIXED: Use the unique ID for identification
+    userId: sub.participant?.userId || 'unknown-id', 
+    
+    // 👉 FIXED: Keep the name for UI purposes only
+    userDisplay: sub.participant?.displayName || sub.participant?.user?.name || 'Unknown', 
+    
+    problemId: sub.contestProblemId, 
+    verdict: sub.verdict, 
+    language: sub.language, 
+    source: sub.source, 
+    externalSubmissionId: sub.externalSubmissionId, 
+    externalSubmissionUrl, 
+    createdAt: sub.externalCreatedAt || sub.judgedAt || sub.createdAt, 
+    platform: sub.contestProblem?.platform || 'Codeforces', 
+    code: sub.code 
+  };
+});
   } catch (error) { throw error; }
 }
 

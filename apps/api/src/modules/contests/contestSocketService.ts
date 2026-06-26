@@ -57,14 +57,16 @@ export function setupContestSockets(io: Server) {
       }
     });
 
-    socket.on('broadcastTeamSolve', (data: { teamId: string, solverName: string, problemLabel: string }) => {
-      if (data.teamId) {
-        io.to(`chatRoom:${data.teamId}`).emit('team_problem_solved', {
-          userId: data.solverName,
-          message: `${data.solverName} just solved Problem ${data.problemLabel}!`
-        });
-      }
+   socket.on('broadcastTeamSolve', (data: { teamId: string, solverId: string, solverName: string, problemLabel: string }) => {
+  if (data.teamId) {
+    io.to(`chatRoom:${data.teamId}`).emit('team_problem_solved', {
+      // ✅ FIXED: Send unique solverId for logic, solverName for display
+      solverId: data.solverId,
+      solverName: data.solverName,
+      message: `${data.solverName} just solved Problem ${data.problemLabel}!`
     });
+  }
+});
 
     // --- WebRTC Voice Signaling ---
     socket.on('join-voice', (roomId) => {
