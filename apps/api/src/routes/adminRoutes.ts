@@ -146,6 +146,7 @@ adminRouter.get('/plagiarism/scan/:contestId', async (req, res) => {
 });
 
 // 🚀 NEW: Finalize Contest & Distribute Ratings/Coins
+// 🚀 NEW: Finalize Contest & Distribute Ratings/Coins
 adminRouter.post('/contests/:id/finalize', async (req, res) => {
   try {
     const { id } = req.params;
@@ -197,9 +198,7 @@ adminRouter.post('/contests/:id/finalize', async (req, res) => {
         where: { id: p.id },
         data: {
           ratingBefore: p.user.rating,
-          ratingAfter: p.user.rating + ratingDelta,
-          // Safely bypassing TS strict types for unmigrated columns if necessary, or just casting
-          ...({ coinsEarned: coinsEarned } as any)
+          ratingAfter: p.user.rating + ratingDelta
         }
       });
 
