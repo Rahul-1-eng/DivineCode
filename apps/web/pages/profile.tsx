@@ -4,29 +4,29 @@ import { fetchApi } from '../lib/api';
 
 const EloGraph = ({ history }: { history: any[] }) => {
   if (!history || history.length < 1) {
-    return <div style={{ color: '#64748b', padding: 40, textAlign: 'center', background: 'rgba(2,6,23,.5)', borderRadius: 16, border: '1px solid rgba(148,163,184,.1)' }}>No rated history yet. Compete to get your initial rating!</div>;
+    return <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center', background: 'var(--bg-card)', borderRadius: 16, border: '1px solid var(--border-color)' }}>No rated history yet. Compete to get your initial rating!</div>;
   }
   const points = history.map(h => h.newRating || h.ratingAfter || h.rating || 1200);
   if (points.length === 1) points.unshift(1200); 
   const min = Math.min(...points) - 50;
   const max = Math.max(...points) + 50;
   const range = max - min;
-  const width = 800;
+  const width = 1000;
   const height = 250;
   const stepX = width / (points.length - 1);
   const pathData = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${i * stepX} ${height - ((p - min) / range) * height}`).join(' ');
 
   return (
-    <div style={{ width: '100%', overflowX: 'auto', background: 'rgba(2,6,23,.5)', padding: '30px 20px', borderRadius: 16, border: '1px solid rgba(148,163,184,.16)' }}>
+    <div style={{ width: '100%', overflowX: 'auto', background: 'var(--bg-card)', padding: '30px 20px', borderRadius: 16, border: '1px solid var(--border-color)' }}>
       <svg viewBox={`-20 -20 ${width + 40} ${height + 40}`} style={{ minWidth: 600, width: '100%', height: 'auto', display: 'block' }}>
         {[0, 0.25, 0.5, 0.75, 1].map(pct => (
-          <line key={pct} x1="0" y1={height * pct} x2={width} y2={height * pct} stroke="rgba(148,163,184,.1)" strokeWidth="1" />
+          <line key={pct} x1="0" y1={height * pct} x2={width} y2={height * pct} stroke="var(--border-color)" strokeWidth="1" />
         ))}
-        <path d={pathData} fill="none" stroke="#22d3ee" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 4px 6px rgba(34,211,238,0.4))' }} />
+        <path d={pathData} fill="none" stroke="var(--accent-primary)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 4px 6px var(--accent-glow))' }} />
         {points.map((p, i) => (
           <g key={i}>
-            <circle cx={i * stepX} cy={height - ((p - min) / range) * height} r="6" fill="#0f172a" stroke="#22d3ee" strokeWidth="3" />
-            <text x={i * stepX} y={height - ((p - min) / range) * height - 16} fill="#e2e8f0" fontSize="13" fontWeight="bold" textAnchor="middle">{p}</text>
+            <circle cx={i * stepX} cy={height - ((p - min) / range) * height} r="6" fill="var(--bg-panel-solid)" stroke="var(--accent-primary)" strokeWidth="3" />
+            <text x={i * stepX} y={height - ((p - min) / range) * height - 16} fill="var(--text-main)" fontSize="13" fontWeight="bold" textAnchor="middle">{p}</text>
           </g>
         ))}
       </svg>
@@ -62,19 +62,19 @@ const TopicRadarChart = ({ data }: { data: { subject: string, score: number }[] 
             const angle = (Math.PI * 2 * i) / data.length - Math.PI / 2;
             return `${center + levelRadius * Math.cos(angle)},${center + levelRadius * Math.sin(angle)}`;
           }).join(' ');
-          return <polygon key={levelIndex} points={levelPoints} fill="none" stroke="rgba(148,163,184,0.15)" strokeWidth="1" />;
+          return <polygon key={levelIndex} points={levelPoints} fill="none" stroke="var(--border-color)" strokeWidth="1" />;
         })}
         {data.map((_, i) => {
           const angle = (Math.PI * 2 * i) / data.length - Math.PI / 2;
           return (
-            <line key={`axis-${i}`} x1={center} y1={center} x2={center + radius * Math.cos(angle)} y2={center + radius * Math.sin(angle)} stroke="rgba(148,163,184,0.2)" strokeWidth="1" />
+            <line key={`axis-${i}`} x1={center} y1={center} x2={center + radius * Math.cos(angle)} y2={center + radius * Math.sin(angle)} stroke="var(--border-color)" strokeWidth="1" />
           );
         })}
-        <path d={polygonPath} fill="rgba(34,211,238,0.2)" stroke="#22d3ee" strokeWidth="2" style={{ filter: 'drop-shadow(0 0 8px rgba(34,211,238,0.4))' }} />
+        <path d={polygonPath} fill="var(--accent-glow)" stroke="var(--accent-primary)" strokeWidth="2" style={{ filter: 'drop-shadow(0 0 8px var(--accent-glow))' }} />
         {points.map((p, i) => (
           <g key={`point-${i}`}>
-            <circle cx={p.x} cy={p.y} r="4" fill="#0f172a" stroke="#22d3ee" strokeWidth="2" />
-            <text x={p.labelX} y={p.labelY} fill="#cbd5e1" fontSize="12" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
+            <circle cx={p.x} cy={p.y} r="4" fill="var(--bg-panel-solid)" stroke="var(--accent-primary)" strokeWidth="2" />
+            <text x={p.labelX} y={p.labelY} fill="var(--text-main)" fontSize="12" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
               {data[i].subject}
             </text>
           </g>
@@ -96,7 +96,6 @@ export default function ProfilePage() {
   const [savingUser, setSavingUser] = useState(false);
   const [savingHandles, setSavingHandles] = useState(false);
 
-  // 👉 ADDED: State for AI Analysis Engine
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiAnalysisResult, setAiAnalysisResult] = useState<any>(null);
 
@@ -136,13 +135,11 @@ export default function ProfilePage() {
       });
   }, [status, session]);
 
-  // 👉 ADDED: Function to trigger AI Weakness Targeting API
   async function handleAnalyzeWeaknesses() {
     setIsAnalyzing(true);
     try {
       const res = await fetchApi('/api/v2/ai/analyze-weaknesses', { method: 'POST' });
       if (res.success) {
-         // Hot-swap the radar chart data for an instant UI update
          setUserData((prev: any) => ({ ...prev, topicMastery: res.newRadarChart }));
          setAiAnalysisResult(res);
          alert("AI Analysis complete! Check your updated radar chart and new recommendations.");
@@ -197,8 +194,8 @@ export default function ProfilePage() {
     <main style={page}>
       <div style={{ maxWidth: 1120, margin: '10vh auto', padding: '0 20px' }}>
         <div style={{ ...card, animation: 'pulse 1.5s infinite' }}>
-          <div style={{ height: 40, width: '40%', background: 'rgba(255,255,255,0.05)', borderRadius: 8, marginBottom: 15 }} />
-          <div style={{ height: 20, width: '70%', background: 'rgba(255,255,255,0.05)', borderRadius: 8 }} />
+          <div style={{ height: 40, width: '40%', background: 'var(--border-color)', borderRadius: 8, marginBottom: 15 }} />
+          <div style={{ height: 20, width: '70%', background: 'var(--border-color)', borderRadius: 8 }} />
         </div>
       </div>
       <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
@@ -209,7 +206,7 @@ export default function ProfilePage() {
     <main style={page}>
       <section style={{...card, maxWidth: 500, margin: '15vh auto', textAlign: 'center'}}>
         <h1 style={{margin: '0 0 10px 0'}}>Sign in required</h1>
-        <p style={{ color: '#94a3b8', marginBottom: 20 }}>Your profile shows your global username, linked handles, and submissions.</p>
+        <p style={{ color: 'var(--text-muted)', marginBottom: 20 }}>Your profile shows your global username, linked handles, and submissions.</p>
         <a href="/signin" style={primary}>Sign in</a>
       </section>
     </main>
@@ -230,26 +227,26 @@ export default function ProfilePage() {
           <div style={{ flex: '1 1 250px', minWidth: 0 }}>
             <p style={eyebrow}>Global Profile</p>
             <h1 style={{ fontSize: 'clamp(28px, 6vw, 48px)', margin: '10px 0', wordBreak: 'break-word', lineHeight: 1.1 }}>{name}</h1>
-            <p style={{ color: '#a8b3c7', margin: 0, wordBreak: 'break-word' }}>{session.user?.email}</p>
+            <p style={{ color: 'var(--text-muted)', margin: 0, wordBreak: 'break-word' }}>{session.user?.email}</p>
           </div>
           {session.user?.image && <img src={session.user.image} alt="Profile" style={avatar} />}
         </section>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 15, marginTop: 18 }}>
           <div style={{ ...card, textAlign: 'center', padding: '24px 15px' }}>
-            <div style={{ color: '#94a3b8', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Global Rating</div>
-            <div style={{ color: '#22d3ee', fontSize: 38, fontWeight: 900 }}>{userData?.rating || 1200}</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Global Rating</div>
+            <div style={{ color: 'var(--accent-primary)', fontSize: 38, fontWeight: 900 }}>{userData?.rating || 1200}</div>
           </div>
           <div style={{ ...card, textAlign: 'center', padding: '24px 15px' }}>
-            <div style={{ color: '#94a3b8', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Problems Solved</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Problems Solved</div>
             <div style={{ color: '#4ade80', fontSize: 38, fontWeight: 900 }}>{userData?.stats?.totalAccepted || 0}</div>
           </div>
           <div style={{ ...card, textAlign: 'center', padding: '24px 15px' }}>
-            <div style={{ color: '#94a3b8', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Accuracy</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Accuracy</div>
             <div style={{ color: userData?.stats?.accuracy >= 50 ? '#4ade80' : '#fbbf24', fontSize: 38, fontWeight: 900 }}>{userData?.stats?.accuracy || 0}%</div>
           </div>
           <div style={{ ...card, textAlign: 'center', padding: '24px 15px' }}>
-            <div style={{ color: '#94a3b8', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Total Coins</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Total Coins</div>
             <div style={{ color: '#fcd34d', fontSize: 38, fontWeight: 900 }}>{userData?.coins || 0}</div>
           </div>
         </div>
@@ -264,30 +261,28 @@ export default function ProfilePage() {
           <section style={{ ...card, display: 'flex', flexDirection: 'column' }}>
             <h2 style={{ margin: '0 0 16px 0', fontSize: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               Topic Mastery Tracker
-              {/* 👉 ADDED: Button to trigger AI Weakness Analysis */}
               <button 
                  onClick={handleAnalyzeWeaknesses} 
                  disabled={isAnalyzing}
-                 style={{ fontSize: 12, background: 'rgba(34,211,238,0.1)', color: '#22d3ee', padding: '6px 12px', borderRadius: 8, fontWeight: 'bold', border: '1px solid rgba(34,211,238,0.3)', cursor: isAnalyzing ? 'not-allowed' : 'pointer' }}
+                 style={{ fontSize: 12, background: 'var(--accent-glow)', color: 'var(--accent-primary)', padding: '6px 12px', borderRadius: 8, fontWeight: 'bold', border: '1px solid var(--accent-glow)', cursor: isAnalyzing ? 'not-allowed' : 'pointer' }}
               >
                 {isAnalyzing ? 'Analyzing...' : '🤖 Analyze Weaknesses'}
               </button>
             </h2>
             
-            <div style={{ flex: 1, background: 'rgba(2,6,23,.5)', borderRadius: 16, border: '1px solid rgba(148,163,184,.16)', display: 'grid', placeItems: 'center', padding: '10px 0' }}>
+            <div style={{ flex: 1, background: 'var(--bg-card)', borderRadius: 16, border: '1px solid var(--border-color)', display: 'grid', placeItems: 'center', padding: '10px 0' }}>
                <TopicRadarChart data={userData?.topicMastery?.length > 0 ? userData.topicMastery : defaultRadarData} />
             </div>
 
-            {/* 👉 ADDED: Render AI Recommendations Box if present */}
             {aiAnalysisResult && (
                <div style={{ marginTop: 15, padding: 15, background: 'rgba(168, 85, 247, 0.1)', borderRadius: 12, border: '1px solid rgba(168, 85, 247, 0.3)' }}>
                   <h3 style={{ margin: '0 0 10px', color: '#a855f7', fontSize: 16 }}>🎯 AI Recommendations</h3>
-                  <div style={{ fontSize: 13, color: '#e2e8f0', marginBottom: 10 }}>
+                  <div style={{ fontSize: 13, color: 'var(--text-main)', marginBottom: 10 }}>
                     <strong>Weakness Identified:</strong> {aiAnalysisResult.analysis?.weaknesses?.[0]?.topic || 'General Problem Solving'}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                      {aiAnalysisResult.recommendedProblems?.map((p: any, i: number) => (
-                        <a key={i} href={`/practice?tags=${p.tags?.[0] || ''}`} style={{ padding: '10px 12px', background: '#020617', borderRadius: 8, color: '#38bdf8', textDecoration: 'none', display: 'flex', justifyContent: 'space-between', border: '1px solid #1e293b' }}>
+                        <a key={i} href={`/practice?tags=${p.tags?.[0] || ''}`} style={{ padding: '10px 12px', background: 'var(--bg-panel-solid)', borderRadius: 8, color: 'var(--accent-primary)', textDecoration: 'none', display: 'flex', justifyContent: 'space-between', border: '1px solid var(--border-color)' }}>
                            <span>{p.title}</span>
                            <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>Elo {p.rating}</span>
                         </a>
@@ -302,7 +297,7 @@ export default function ProfilePage() {
         <div style={grid}>
           <section style={card}>
             <h2 style={{ margin: '0 0 10px 0', fontSize: 20 }}>DivineCode Identity</h2>
-            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 16 }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>
               This is your primary identity on the platform. Group owners will use this to add you to contests.
             </p>
             <input 
@@ -318,7 +313,7 @@ export default function ProfilePage() {
 
           <section style={card}>
             <h2 style={{ margin: '0 0 10px 0', fontSize: 20 }}>Security Settings</h2>
-            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 16 }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>
               Update your password here. Leave current password blank if you initially signed up using Google.
             </p>
             <form onSubmit={handlePasswordUpdate} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -326,7 +321,7 @@ export default function ProfilePage() {
               <input type="password" placeholder="New Password" value={newPassword} onChange={e => setNewPassword(e.target.value)} style={input} required minLength={6} />
               
               {pwMessage.text && (
-                <div style={{ color: pwMessage.type === 'error' ? '#f87171' : pwMessage.type === 'success' ? '#4ade80' : '#38bdf8', fontSize: 13, marginTop: 5 }}>
+                <div style={{ color: pwMessage.type === 'error' ? '#f87171' : pwMessage.type === 'success' ? '#4ade80' : 'var(--accent-primary)', fontSize: 13, marginTop: 5 }}>
                   {pwMessage.text}
                 </div>
               )}
@@ -339,15 +334,15 @@ export default function ProfilePage() {
 
           <section style={card}>
             <h2 style={{ margin: '0 0 10px 0', fontSize: 20 }}>Linked External Handles</h2>
-            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 16 }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>
               Link your competitive programming accounts. Handles are strictly verified against your email.
             </p>
 
             {userData?.externalHandles && userData.externalHandles.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
                 {userData.externalHandles.map((h: any) => (
-                  <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(2,6,23,.5)', padding: 12, borderRadius: 8, border: '1px solid rgba(148,163,184,.1)' }}>
-                    <span style={{ fontSize: 14 }}>{h.platform}: <b style={{ color: '#67e8f9' }}>{h.handle}</b></span>
+                  <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-card)', padding: 12, borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                    <span style={{ fontSize: 14 }}>{h.platform}: <b style={{ color: 'var(--accent-primary)' }}>{h.handle}</b></span>
                     <button onClick={() => unlinkHandle(h.platform, h.handle)} style={{ color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: 13 }}>Unlink</button>
                   </div>
                 ))}
@@ -368,9 +363,9 @@ export default function ProfilePage() {
         <section style={{ ...card, marginTop: 18 }}>
           <h2 style={{ margin: '0 0 16px 0', fontSize: 20 }}>Transaction & Rating Logs</h2>
           
-          <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid rgba(148,163,184,.16)' }}>
+          <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid var(--border-color)' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead style={{ background: 'rgba(2,6,23,.5)' }}>
+              <thead style={{ background: 'var(--bg-card)' }}>
                 <tr>
                   <th style={th}>Date</th>
                   <th style={th}>Event</th>
@@ -381,7 +376,7 @@ export default function ProfilePage() {
               <tbody>
                 {userData?.activityLog?.length > 0 ? (
                   userData.activityLog.map((act: any, i: number) => (
-                    <tr key={i} style={{ borderBottom: '1px solid rgba(148,163,184,.12)' }}>
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
                       <td style={td}>{new Date(act.date).toLocaleDateString()}</td>
                       <td style={td}>{act.eventDescription}</td>
                       <td style={{ ...td, color: act.ratingDelta >= 0 ? '#4ade80' : '#f87171' }}>
@@ -394,7 +389,7 @@ export default function ProfilePage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={4} style={{ ...td, textAlign: 'center', color: '#64748b' }}>No transactions or rating changes yet.</td>
+                    <td colSpan={4} style={{ ...td, textAlign: 'center', color: 'var(--text-muted)' }}>No transactions or rating changes yet.</td>
                   </tr>
                 )}
               </tbody>
@@ -408,16 +403,16 @@ export default function ProfilePage() {
 }
 
 // 📱 CSS
-const page: CSSProperties = { minHeight: '100vh', width: '100%', maxWidth: '100vw', overflowX: 'hidden', padding: 'clamp(16px, 4vw, 32px)', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.32), transparent 34rem), #070a16', boxSizing: 'border-box' };
+const page: CSSProperties = { minHeight: '100vh', width: '100%', maxWidth: '100vw', overflowX: 'hidden', padding: 'clamp(16px, 4vw, 32px)', fontFamily: 'Inter, Arial, sans-serif', color: 'var(--text-main)', background: 'transparent', boxSizing: 'border-box' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 };
-const brand: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900, fontSize: 18 };
-const ghost: CSSProperties = { padding: '11px 16px', borderRadius: 999, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', cursor: 'pointer', fontWeight: 'bold' };
+const brand: CSSProperties = { color: 'var(--accent-primary)', textDecoration: 'none', fontWeight: 900, fontSize: 18 };
+const ghost: CSSProperties = { padding: '11px 16px', borderRadius: 999, border: '1px solid var(--button-ghost-border)', background: 'var(--button-ghost-bg)', color: 'var(--text-main)', cursor: 'pointer', fontWeight: 'bold' };
 const primary: CSSProperties = { display: 'inline-block', padding: '12px 24px', borderRadius: 999, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', textDecoration: 'none', fontWeight: 900, border: 'none', textAlign: 'center' };
-const hero: CSSProperties = { padding: 'clamp(20px, 4vw, 30px)', borderRadius: 30, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)', display: 'flex', justifyContent: 'space-between', gap: 24, alignItems: 'center', flexWrap: 'wrap-reverse', boxSizing: 'border-box', overflow: 'hidden' };
-const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 900, letterSpacing: '.14em', textTransform: 'uppercase', margin: 0 };
-const avatar: CSSProperties = { width: 'clamp(80px, 20vw, 110px)', height: 'clamp(80px, 20vw, 110px)', borderRadius: 999, border: '3px solid rgba(34,211,238,.5)', objectFit: 'cover' };
+const hero: CSSProperties = { padding: 'clamp(20px, 4vw, 30px)', borderRadius: 30, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', gap: 24, alignItems: 'center', flexWrap: 'wrap-reverse', boxSizing: 'border-box', overflow: 'hidden' };
+const eyebrow: CSSProperties = { color: 'var(--accent-primary)', fontWeight: 900, letterSpacing: '.14em', textTransform: 'uppercase', margin: 0 };
+const avatar: CSSProperties = { width: 'clamp(80px, 20vw, 110px)', height: 'clamp(80px, 20vw, 110px)', borderRadius: 999, border: '3px solid var(--accent-glow)', objectFit: 'cover' };
 const grid: CSSProperties = { marginTop: 18, display: 'flex', flexWrap: 'wrap', gap: 18 };
-const card: CSSProperties = { flex: '1 1 300px', minWidth: 0, padding: 'clamp(16px, 4vw, 24px)', borderRadius: 26, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)', boxShadow: '0 24px 70px rgba(0,0,0,.28)', boxSizing: 'border-box', overflow: 'hidden' };
-const input: CSSProperties = { width: '100%', padding: 14, borderRadius: 14, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', outline: 'none', boxSizing: 'border-box' };
-const th: CSSProperties = { padding: '16px 20px', color: '#94a3b8', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 };
+const card: CSSProperties = { flex: '1 1 300px', minWidth: 0, padding: 'clamp(16px, 4vw, 24px)', borderRadius: 26, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', boxShadow: '0 24px 70px rgba(0,0,0,.1)', boxSizing: 'border-box', overflow: 'hidden' };
+const input: CSSProperties = { width: '100%', padding: 14, borderRadius: 14, border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-main)', outline: 'none', boxSizing: 'border-box' };
+const th: CSSProperties = { padding: '16px 20px', color: 'var(--text-muted)', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 };
 const td: CSSProperties = { padding: '16px 20px', fontSize: 14 };

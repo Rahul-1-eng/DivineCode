@@ -3,7 +3,6 @@ import { useSession } from 'next-auth/react';
 import { io } from 'socket.io-client';
 import toast, { Toaster } from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown'; 
-// 👉 ADDED: Import fetchApi wrapper
 import { fetchApi } from '../lib/api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -41,7 +40,6 @@ export default function CommunityHubPage() {
     return () => { socket.disconnect(); };
   }, []);
 
-  // 👉 FIXED: Replaced raw fetch with fetchApi (bypasses auth for viewing public feed)
   const loadCommunityPosts = async () => {
     setLoading(true);
     try {
@@ -67,7 +65,6 @@ export default function CommunityHubPage() {
       setShowUploadModal(true);
   };
 
-  // 👉 FIXED: Replaced raw fetch with authenticated fetchApi wrapper
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!session?.user?.email) return toast.error("Must be logged in to modify posts.");
@@ -100,7 +97,6 @@ export default function CommunityHubPage() {
     }
   };
 
-  // 👉 FIXED: Replaced raw fetch with authenticated fetchApi wrapper
   const handleDeletePost = async (postId: string) => {
     if (!confirm("Are you sure you want to delete this tutorial? This cannot be undone.")) return;
     if (!session?.user?.email) return;
@@ -129,7 +125,7 @@ export default function CommunityHubPage() {
 
   return (
     <main style={page}>
-      <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
+      <Toaster position="top-center" toastOptions={{ style: { background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)' } }} />
       
       <section style={{ maxWidth: 1200, margin: '0 auto' }}>
         <nav style={nav}>
@@ -139,14 +135,14 @@ export default function CommunityHubPage() {
 
         <div style={hero}>
           <p style={eyebrow}>Learn from the Best</p>
-          <h1 style={{ fontSize: 'clamp(32px, 5vw, 58px)', margin: '10px 0', color: '#fff' }}>Developer Video Hub.</h1>
-          <p style={{ color: '#a8b3c7', maxWidth: 600 }}>Watch algorithms broken down by top competitive programmers in the community, or share your own approaches to earn profile badges.</p>
+          <h1 style={{ fontSize: 'clamp(32px, 5vw, 58px)', margin: '10px 0', color: 'var(--text-main)' }}>Developer Video Hub.</h1>
+          <p style={{ color: 'var(--text-muted)', maxWidth: 600 }}>Watch algorithms broken down by top competitive programmers in the community, or share your own approaches to earn profile badges.</p>
         </div>
 
         {loading ? (
-          <div style={{ textAlign: 'center', padding: 100, color: '#94a3b8' }}>Loading videos...</div>
+          <div style={{ textAlign: 'center', padding: 100, color: 'var(--text-muted)' }}>Loading videos...</div>
         ) : posts.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 100, background: '#0f172a', borderRadius: 24, border: '1px solid #1e293b', color: '#94a3b8' }}>
+          <div style={{ textAlign: 'center', padding: 100, background: 'var(--bg-panel)', borderRadius: 24, border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
             No community videos uploaded yet. Be the first!
           </div>
         ) : (
@@ -160,13 +156,13 @@ export default function CommunityHubPage() {
                     <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, display: 'flex', gap: 8 }}>
                       <button 
                         onClick={() => openEditModal(post)}
-                        style={{ background: 'rgba(2, 6, 23, 0.7)', border: '1px solid rgba(56, 189, 248, 0.5)', color: '#38bdf8', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', backdropFilter: 'blur(4px)' }}
+                        style={{ background: 'var(--bg-panel-solid)', border: '1px solid var(--accent-primary)', color: 'var(--accent-primary)', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', opacity: 0.9 }}
                       >
                         ✏️ Edit
                       </button>
                       <button 
                         onClick={() => handleDeletePost(post.id)}
-                        style={{ background: 'rgba(2, 6, 23, 0.7)', border: '1px solid rgba(248, 113, 113, 0.5)', color: '#f87171', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', backdropFilter: 'blur(4px)' }}
+                        style={{ background: 'var(--bg-panel-solid)', border: '1px solid rgba(248, 113, 113, 0.5)', color: '#f87171', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', opacity: 0.9 }}
                       >
                         🗑️ Delete
                       </button>
@@ -185,22 +181,22 @@ export default function CommunityHubPage() {
                       />
                     </div>
                   ) : (
-                    <div style={{ ...videoContainer, background: '#1e293b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <span style={{ color: '#64748b' }}>No Video Attached</span>
+                    <div style={{ ...videoContainer, background: 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>No Video Attached</span>
                     </div>
                   )}
                   
-                  <div style={{ padding: 20 }}>
-                    <h3 style={{ margin: '0 0 4px 0', color: '#eef2ff', fontSize: 18 }}>{post.title}</h3>
-                    <div style={{ color: '#38bdf8', fontSize: 12, marginBottom: 8, fontWeight: 'bold' }}>
+                  <div style={{ padding: 20, flex: 1, display: 'flex', flexDirection: 'column' }}>
+                    <h3 style={{ margin: '0 0 4px 0', color: 'var(--text-main)', fontSize: 18 }}>{post.title}</h3>
+                    <div style={{ color: 'var(--accent-primary)', fontSize: 12, marginBottom: 8, fontWeight: 'bold' }}>
                       By {post.author?.username || post.author?.name || 'Community'}
                     </div>
                     
-                    <div className="markdown-preview" style={{ color: '#94a3b8', fontSize: 14, margin: '0 0 16px 0', lineHeight: 1.5, maxHeight: '80px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div className="markdown-preview" style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 16px 0', lineHeight: 1.5, maxHeight: '80px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                        <ReactMarkdown>{post.description}</ReactMarkdown>
                     </div>
                     
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: 10 }}>
                       <span style={tag}>Tutorial</span>
                       <a href={`/practice/${post.id}`} style={ghostBtn}>Open Workspace →</a>
                     </div>
@@ -216,11 +212,11 @@ export default function CommunityHubPage() {
         <div style={modalOverlay}>
           <div style={modalContent}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h2 style={{ margin: 0, color: '#fff' }}>{isEditing ? 'Edit Tutorial' : 'Upload Video Tutorial'}</h2>
-              <button onClick={() => setShowUploadModal(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 24, cursor: 'pointer' }}>×</button>
+              <h2 style={{ margin: 0, color: 'var(--text-main)' }}>{isEditing ? 'Edit Tutorial' : 'Upload Video Tutorial'}</h2>
+              <button onClick={() => setShowUploadModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 24, cursor: 'pointer' }}>×</button>
             </div>
             
-            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 24 }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 24 }}>
               {isEditing ? 'Update your video details or problem description below. Supports Markdown!' : 'Upload your YouTube walkthrough. A global notification will immediately be sent to all online users!'}
             </p>
             
@@ -237,12 +233,12 @@ export default function CommunityHubPage() {
 
               <div>
                 <label style={label}>Description (Supports Markdown)</label>
-                <textarea placeholder="Briefly describe the algorithm using markdown formatting (e.g., **bold**, `code`)." value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} style={{...input, minHeight: 120, fontFamily: 'monospace'}} required />
+                <textarea placeholder="Briefly describe the algorithm using markdown formatting (e.g., **bold**, `code`)." value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} style={{...input, minHeight: 120, fontFamily: 'monospace', resize: 'vertical'}} required />
               </div>
 
               <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
                 <button type="button" onClick={() => setShowUploadModal(false)} style={{...ghostBtn, flex: 1}}>Cancel</button>
-                <button type="submit" disabled={uploading} style={{...button, flex: 2, background: uploading ? '#64748b' : 'linear-gradient(135deg,#a5b4fc,#22d3ee)'}}>
+                <button type="submit" disabled={uploading} style={{...button, flex: 2, background: uploading ? 'var(--border-color)' : 'linear-gradient(135deg,#a5b4fc,#22d3ee)'}}>
                   {uploading ? 'Saving...' : isEditing ? 'Save Changes' : 'Publish & Notify Community 🚀'}
                 </button>
               </div>
@@ -254,18 +250,18 @@ export default function CommunityHubPage() {
   );
 }
 
-const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: '#020617', boxSizing: 'border-box' };
+const page: CSSProperties = { minHeight: '100vh', padding: 'clamp(16px, 4vw, 32px)', fontFamily: 'Inter, Arial, sans-serif', color: 'var(--text-main)', background: 'var(--bg-main)', boxSizing: 'border-box' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 30 };
-const brand: CSSProperties = { color: '#eef2ff', textDecoration: 'none', fontWeight: 950, fontSize: 'clamp(20px, 4vw, 28px)' };
-const hero: CSSProperties = { padding: 'clamp(30px, 5vw, 60px)', borderRadius: 32, border: '1px solid #1e293b', background: 'radial-gradient(circle at bottom right, rgba(34,211,238,.1), transparent 400px), #0f172a', marginBottom: 40, boxSizing: 'border-box' };
-const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 900, letterSpacing: '.14em', textTransform: 'uppercase', margin: 0 };
+const brand: CSSProperties = { color: 'var(--text-main)', textDecoration: 'none', fontWeight: 950, fontSize: 'clamp(20px, 4vw, 28px)' };
+const hero: CSSProperties = { padding: 'clamp(30px, 5vw, 60px)', borderRadius: 32, border: '1px solid var(--border-color)', background: 'var(--bg-panel)', marginBottom: 40, boxSizing: 'border-box' };
+const eyebrow: CSSProperties = { color: 'var(--accent-primary)', fontWeight: 900, letterSpacing: '.14em', textTransform: 'uppercase', margin: 0 };
 const grid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 24 };
-const card: CSSProperties = { borderRadius: 16, border: '1px solid #1e293b', background: '#0f172a', overflow: 'hidden', display: 'flex', flexDirection: 'column', transition: 'transform 0.2s', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' };
+const card: CSSProperties = { borderRadius: 16, border: '1px solid var(--border-color)', background: 'var(--bg-card)', overflow: 'hidden', display: 'flex', flexDirection: 'column', transition: 'transform 0.2s', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' };
 const videoContainer: CSSProperties = { position: 'relative', width: '100%', paddingTop: '56.25%', background: '#000' };
-const tag: CSSProperties = { color: '#020617', background: '#a5b4fc', padding: '4px 10px', borderRadius: 6, fontWeight: 800, fontSize: 12 };
-const button: CSSProperties = { padding: '12px 24px', borderRadius: 999, border: 0, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', fontWeight: 900, cursor: 'pointer', fontSize: 15 };
-const ghostBtn: CSSProperties = { padding: '8px 16px', borderRadius: 999, border: '1px solid rgba(148,163,184,.3)', background: 'rgba(2,6,23,.5)', color: '#eef2ff', fontWeight: 800, cursor: 'pointer', fontSize: 13, textDecoration: 'none' };
-const label: CSSProperties = { display: 'block', color: '#94a3b8', fontSize: 13, fontWeight: 'bold', marginBottom: 6 };
-const input: CSSProperties = { width: '100%', padding: 14, borderRadius: 12, background: '#020617', color: '#eef2ff', border: '1px solid #334155', boxSizing: 'border-box', outline: 'none', fontSize: 15, fontFamily: 'inherit' };
+const tag: CSSProperties = { color: 'var(--accent-primary)', background: 'var(--accent-glow)', padding: '4px 10px', borderRadius: 6, fontWeight: 800, fontSize: 12, border: '1px solid var(--accent-primary)' };
+const button: CSSProperties = { padding: '12px 24px', borderRadius: 999, border: 0, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#000', fontWeight: 900, cursor: 'pointer', fontSize: 15 };
+const ghostBtn: CSSProperties = { padding: '8px 16px', borderRadius: 999, border: '1px solid var(--border-color)', background: 'var(--bg-panel-solid)', color: 'var(--text-main)', fontWeight: 800, cursor: 'pointer', fontSize: 13, textDecoration: 'none', textAlign: 'center' };
+const label: CSSProperties = { display: 'block', color: 'var(--text-muted)', fontSize: 13, fontWeight: 'bold', marginBottom: 6 };
+const input: CSSProperties = { width: '100%', padding: 14, borderRadius: 12, background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)', boxSizing: 'border-box', outline: 'none', fontSize: 15, fontFamily: 'inherit' };
 const modalOverlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 100, padding: 20 };
-const modalContent: CSSProperties = { background: '#0f172a', padding: 32, borderRadius: 24, width: '100%', maxWidth: 550, border: '1px solid rgba(148,163,184,.2)', boxShadow: '0 40px 100px rgba(0,0,0,0.5)' };
+const modalContent: CSSProperties = { background: 'var(--bg-panel)', padding: 'clamp(20px, 4vw, 32px)', borderRadius: 24, width: '100%', maxWidth: 550, border: '1px solid var(--border-color)', boxShadow: '0 40px 100px rgba(0,0,0,0.5)', boxSizing: 'border-box' };

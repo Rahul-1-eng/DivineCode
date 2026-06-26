@@ -39,7 +39,6 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
                 name: user.name,
                 email: user.email,
                 handle: user.username,
-                // Ensure this key matches the property name returned by your API
                 accessToken: user.token 
               }; 
             }
@@ -79,8 +78,8 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
       async jwt({ token, user, trigger, session }) {
         if (trigger === "update" && session?.handle) token.handle = session.handle;
         
-        // When user is defined, it means this is the initial sign-in
         if (user) {
+          token.sub = (user as any).id; 
           token.handle = (user as any).handle;
           token.accessToken = (user as any).accessToken; 
         }
@@ -90,9 +89,6 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
         if (session.user) {
           (session.user as any).id = token.sub;
           (session.user as any).handle = token.handle;
-          
-          // Ensure the token is attached to the session object
-          // This is what your bridge API uses to verify identity
           (session as any).accessToken = token.accessToken; 
         }
         return session;

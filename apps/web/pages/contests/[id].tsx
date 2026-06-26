@@ -36,14 +36,14 @@ export function PostContestAiRecommendations({ contestId, contestStatus }: { con
   return (
     <div style={{ marginBottom: '18px', background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.3)', padding: '24px', borderRadius: '16px' }}>
       <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#a5b4fc', margin: '0 0 10px 0' }}>🤖 AI Tutor Recommendations</h2>
-      <p style={{ color: '#94a3b8', marginBottom: '20px' }}>Based on the mechanics of today's problems, practice these to level up:</p>
-      {loading ? ( <div style={{ color: '#64748b' }}>Analyzing contest data...</div> ) : (
+      <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>Based on the mechanics of today's problems, practice these to level up:</p>
+      {loading ? ( <div style={{ color: 'var(--text-muted)' }}>Analyzing contest data...</div> ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '15px' }}>
           {recommendations.map((prob) => (
-            <a key={prob.id} href={prob.originalUrl || prob.externalUrl || prob.link || '#'} target="_blank" rel="noreferrer" style={{ display: 'block', background: '#0f172a', border: '1px solid #1e293b', padding: '16px', borderRadius: '12px', textDecoration: 'none' }}>
-              <h3 style={{ margin: '0 0 8px 0', color: '#e2e8f0', fontSize: '16px' }}>{prob.title}</h3>
+            <a key={prob.id} href={prob.originalUrl || prob.externalUrl || prob.link || '#'} target="_blank" rel="noreferrer" style={{ display: 'block', background: 'var(--bg-panel-solid)', border: '1px solid var(--border-color)', padding: '16px', borderRadius: '12px', textDecoration: 'none' }}>
+              <h3 style={{ margin: '0 0 8px 0', color: 'var(--text-main)', fontSize: '16px' }}>{prob.title}</h3>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '11px', background: '#3b82f633', color: '#38bdf8', padding: '2px 8px', borderRadius: '12px', fontWeight: 'bold' }}>{prob.difficulty}</span>
+                <span style={{ fontSize: '11px', background: 'rgba(56, 189, 248, 0.2)', color: 'var(--accent-primary)', padding: '2px 8px', borderRadius: '12px', fontWeight: 'bold' }}>{prob.difficulty}</span>
               </div>
             </a>
           ))}
@@ -123,7 +123,6 @@ export default function ContestRoomPage() {
 
   const playSuccessSound = () => { try { new Audio('/accepted.mp3').play().catch(()=>{}); } catch (e) {} };
 
-  // 👉 FIXED: Chat Persistence - Load existing messages on mount
   useEffect(() => {
     if (id) {
       const savedTeam = localStorage.getItem(`team_chat_${id}`);
@@ -133,7 +132,6 @@ export default function ContestRoomPage() {
     }
   }, [id]);
 
-  // 👉 FIXED: Chat Persistence - Update local storage when messages change
   useEffect(() => {
     if (id && messages.length > 0) localStorage.setItem(`team_chat_${id}`, JSON.stringify(messages));
   }, [messages, id]);
@@ -411,7 +409,6 @@ export default function ContestRoomPage() {
     if (!id || !session || !confirm('End this contest immediately and calculate final ratings/coins? This cannot be undone.')) return;
     setLoadingText('Calculating Final Ratings & Coins...'); setSyncing(true); 
     try {
-      // 👉 FIXED: Replaced raw fetch with authenticated fetchApi 
       const data = await fetchApi(`/api/v2/contests/${id}/finalize`, { method: 'POST' });
       playSuccessSound(); toast.success(data.message || 'Contest finalized!'); router.push(`/contests/${id}/final`);
     } catch (err: any) {
@@ -452,7 +449,6 @@ export default function ContestRoomPage() {
     setChatInput('');
   };
 
-  // 👉 FIXED: Modular cleanup function to erase leaked audio nodes from the DOM
   const cleanupAudioElement = (peerId: string) => {
     const audio = document.getElementById(`audio-${peerId}`) as HTMLAudioElement;
     if (audio) {
@@ -556,7 +552,6 @@ export default function ContestRoomPage() {
         
         localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
         
-        // 👉 FIXED: Injecting Peer ID so we can track and delete the audio node later
         pc.ontrack = (event) => { 
             let globalAudioNode = document.getElementById(`audio-${peerId}`) as HTMLAudioElement;
             if (!globalAudioNode) {
@@ -597,7 +592,6 @@ export default function ContestRoomPage() {
         
         localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
         
-        // 👉 FIXED: Same cleanup identifier assigned on the receiving end
         pc.ontrack = (event) => { 
             let globalAudioNode = document.getElementById(`audio-${from}`) as HTMLAudioElement;
             if (!globalAudioNode) {
@@ -786,19 +780,19 @@ export default function ContestRoomPage() {
 
   const CentralSpinner = ({ text }: { text: string }) => (
     <main style={{ ...page, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-      <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ width: 48, height: 48, border: '4px solid rgba(103, 232, 249, 0.2)', borderTopColor: '#67e8f9', borderRadius: '50%' }} />
-      <h2 style={{ color: '#a8b3c7', marginTop: 16 }}>{text}</h2>
+      <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ width: 48, height: 48, border: '4px solid var(--accent-glow)', borderTopColor: 'var(--accent-primary)', borderRadius: '50%' }} />
+      <h2 style={{ color: 'var(--text-muted)', marginTop: 16 }}>{text}</h2>
     </main>
   );
 
   if (status === 'loading') return <CentralSpinner text="Checking account..." />;
-  if (!session) return <main style={page}><section style={gate}><h1>Sign in required</h1><p style={{ color: '#a8b3c7' }}>Sign in first.</p><a href="/signin" style={primaryLink}>Sign in with Google</a></section></main>;
+  if (!session) return <main style={page}><section style={gate}><h1>Sign in required</h1><p style={{ color: 'var(--text-muted)' }}>Sign in first.</p><a href="/signin" style={primaryLink}>Sign in with Google</a></section></main>;
   if (error) return <main style={page}><h1>{error}</h1><a href="/contests" style={link}>Back to contests</a></main>;
   if (!contest) return <CentralSpinner text="Loading contest room..." />;
 
   return (
     <main style={page}>
-      <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
+      <Toaster position="top-center" toastOptions={{ style: { background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)' } }} />
 
       <AnimatePresence>
         {syncing && (
@@ -806,8 +800,8 @@ export default function ContestRoomPage() {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(8px)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
           >
-            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ width: 64, height: 64, border: '5px solid rgba(103, 232, 249, 0.2)', borderTopColor: '#67e8f9', borderRadius: '50%' }} />
-            <motion.h2 initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={{ color: '#67e8f9', marginTop: 24, fontSize: 24 }}>{loadingText}</motion.h2>
+            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ width: 64, height: 64, border: '5px solid var(--accent-glow)', borderTopColor: 'var(--accent-primary)', borderRadius: '50%' }} />
+            <motion.h2 initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={{ color: 'var(--accent-primary)', marginTop: 24, fontSize: 24 }}>{loadingText}</motion.h2>
           </motion.div>
         )}
       </AnimatePresence>
@@ -816,11 +810,11 @@ export default function ContestRoomPage() {
         <div style={overlay}>
           <div style={{...overlayModal, width: '90%', maxWidth: 900, maxHeight: '85vh', display: 'flex', flexDirection: 'column'}}>
             <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
-              <h2 style={{margin: 0, color: '#fff'}}>{selectedMember.name}'s Submissions</h2>
+              <h2 style={{margin: 0, color: 'var(--text-main)'}}>{selectedMember.name}'s Submissions</h2>
               <button onClick={() => setSelectedMember(null)} style={{background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 24, fontWeight: 'bold'}}>✖</button>
             </div>
             <div style={{overflowY: 'auto', flex: 1}}>
-               {memberSubmissions.length === 0 ? <p style={{color: '#94a3b8'}}>No visible submissions found.</p> : (
+               {memberSubmissions.length === 0 ? <p style={{color: 'var(--text-muted)'}}>No visible submissions found.</p> : (
                  <table style={table}>
                    <thead><tr><th style={th}>Time</th><th style={th}>Problem</th><th style={th}>Verdict</th><th style={th}>Language</th><th style={th}>Action</th></tr></thead>
                    <tbody>
@@ -846,9 +840,9 @@ export default function ContestRoomPage() {
           <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
             <a href="/" style={link}>DivineCode</a>
             {isOwner && !isFinal && (
-              <div style={{ background: '#0f172a', borderRadius: 8, padding: 4, display: 'flex', border: '1px solid #334155' }}>
-                <button onClick={() => setOwnerMode('ADMIN')} style={{ ...ghostButton, margin: 0, background: ownerMode === 'ADMIN' ? '#38bdf8' : 'transparent', color: ownerMode === 'ADMIN' ? '#000' : '#94a3b8', border: 'none' }}>🛡️ Edit Mode</button>
-                <button onClick={() => setOwnerMode('PARTICIPANT')} style={{ ...ghostButton, margin: 0, background: ownerMode === 'PARTICIPANT' ? '#38bdf8' : 'transparent', color: ownerMode === 'PARTICIPANT' ? '#000' : '#94a3b8', border: 'none' }}>🎮 Play Mode</button>
+              <div style={{ background: 'var(--bg-panel-solid)', borderRadius: 8, padding: 4, display: 'flex', border: '1px solid var(--border-color)' }}>
+                <button onClick={() => setOwnerMode('ADMIN')} style={{ ...ghostButton, margin: 0, background: ownerMode === 'ADMIN' ? 'var(--accent-primary)' : 'transparent', color: ownerMode === 'ADMIN' ? '#000' : 'var(--text-muted)', border: 'none' }}>🛡️ Edit Mode</button>
+                <button onClick={() => setOwnerMode('PARTICIPANT')} style={{ ...ghostButton, margin: 0, background: ownerMode === 'PARTICIPANT' ? 'var(--accent-primary)' : 'transparent', color: ownerMode === 'PARTICIPANT' ? '#000' : 'var(--text-muted)', border: 'none' }}>🎮 Play Mode</button>
               </div>
             )}
           </div>
@@ -856,9 +850,9 @@ export default function ContestRoomPage() {
         </nav>
 
         {isFinal && viewerMember && (
-          <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(34,211,238,0.2))', border: '1px solid #22d3ee', padding: 24, borderRadius: 20, marginBottom: 32, textAlign: 'center', marginTop: 24 }}>
-            <h2 style={{ margin: '0 0 8px', color: '#fff' }}>🏆 Contest Allocation Finalized!</h2>
-            <p style={{ color: '#cbd5e1', margin: 0 }}>
+          <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(34,211,238,0.2))', border: '1px solid var(--accent-primary)', padding: 24, borderRadius: 20, marginBottom: 32, textAlign: 'center', marginTop: 24 }}>
+            <h2 style={{ margin: '0 0 8px', color: 'var(--text-main)' }}>🏆 Contest Allocation Finalized!</h2>
+            <p style={{ color: 'var(--text-muted)', margin: 0 }}>
               Rating Delta: <strong style={{ color: '#4ade80' }}>{ratingDelta >= 0 ? '+' : ''}{ratingDelta} Elo</strong> | 
               Tokens Awarded: <strong style={{ color: '#fbbf24' }}>🪙 {earnedCoins} Coins</strong>
             </p>
@@ -877,14 +871,14 @@ export default function ContestRoomPage() {
             <h1 style={{ fontSize: 46, margin: 0 }}>{contest.title}</h1>
             
             {viewerMember?.teamInviteCode && (
-              <div style={{ background: 'rgba(2,6,23,0.5)', border: '1px dashed #38bdf8', padding: '8px 16px', borderRadius: 8, display: 'inline-block', marginTop: 12 }}>
-                <span style={{ color: '#94a3b8', fontSize: 12, marginRight: 8, textTransform: 'uppercase' }}>TEAM INVITE CODE:</span>
-                <strong style={{ color: '#38bdf8', letterSpacing: 2, fontSize: 16 }}>{viewerMember.teamInviteCode}</strong>
+              <div style={{ background: 'var(--bg-card)', border: '1px dashed var(--accent-primary)', padding: '8px 16px', borderRadius: 8, display: 'inline-block', marginTop: 12 }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: 12, marginRight: 8, textTransform: 'uppercase' }}>TEAM INVITE CODE:</span>
+                <strong style={{ color: 'var(--accent-primary)', letterSpacing: 2, fontSize: 16 }}>{viewerMember.teamInviteCode}</strong>
               </div>
             )}
 
-            <p style={{ color: '#a8b3c7', marginTop: 12 }}>{isActuallyOwnerMode ? 'You are viewing as Admin. You can edit, sync, and delete this mashup.' : 'Problem ratings and hidden tests are sealed during the live contest.'}</p>
-            <p style={{ color: '#67e8f9' }}>{isFinal ? 'Read-only final board' : `Last sync: ${lastSync}`}</p>
+            <p style={{ color: 'var(--text-muted)', marginTop: 12 }}>{isActuallyOwnerMode ? 'You are viewing as Admin. You can edit, sync, and delete this mashup.' : 'Problem ratings and hidden tests are sealed during the live contest.'}</p>
+            <p style={{ color: 'var(--accent-primary)' }}>{isFinal ? 'Read-only final board' : `Last sync: ${lastSync}`}</p>
           </div>
           <div style={timerCard}>
             <strong>{displayStatus === 'ENDED' || isFinal ? 'FINAL' : isScheduledLockScreen ? 'WAITING' : `${Math.floor(timeLeft / 60)}:${String(timeLeft % 60).padStart(2, '0')}`}</strong>
@@ -931,43 +925,43 @@ export default function ContestRoomPage() {
         )}
 
         {isFinal && viewerMember && (
-          <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ ...panel, marginBottom: 18, background: 'linear-gradient(145deg, #0f172a, #1e1b4b)', border: '1px solid #6366f1' }}>
+          <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ ...panel, marginBottom: 18, background: 'linear-gradient(145deg, var(--bg-panel-solid), var(--bg-panel))', border: '1px solid #6366f1' }}>
             <h2 style={{ color: '#a5b4fc', margin: '0 0 15px 0' }}>🏆 Post-Contest Performance Report</h2>
             
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 15, marginBottom: 20 }}>
-              <div style={{ background: '#020617', padding: 15, borderRadius: 12, border: '1px solid #334155', textAlign: 'center' }}>
-                <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 5 }}>Final Rank</div>
+              <div style={{ background: 'var(--bg-panel-solid)', padding: 15, borderRadius: 12, border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 5 }}>Final Rank</div>
                 <div style={{ color: '#fbbf24', fontSize: 32, fontWeight: 'bold' }}>#{myRank}</div>
               </div>
-              <div style={{ background: '#020617', padding: 15, borderRadius: 12, border: '1px solid #334155', textAlign: 'center' }}>
-                <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 5 }}>Percentile</div>
+              <div style={{ background: 'var(--bg-panel-solid)', padding: 15, borderRadius: 12, border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 5 }}>Percentile</div>
                 <div style={{ color: percentile >= 80 ? '#4ade80' : '#fbbf24', fontSize: 32, fontWeight: 'bold' }}>Top {100 - percentile}%</div>
               </div>
-              <div style={{ background: '#020617', padding: 15, borderRadius: 12, border: '1px solid #334155', textAlign: 'center' }}>
-                <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 5 }}>Rating Update</div>
-                <div style={{ color: ratingDelta > 0 ? '#4ade80' : ratingDelta < 0 ? '#f87171' : '#cbd5e1', fontSize: 32, fontWeight: 'bold' }}>
+              <div style={{ background: 'var(--bg-panel-solid)', padding: 15, borderRadius: 12, border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 5 }}>Rating Update</div>
+                <div style={{ color: ratingDelta > 0 ? '#4ade80' : ratingDelta < 0 ? '#f87171' : 'var(--text-main)', fontSize: 32, fontWeight: 'bold' }}>
                   {ratingAfter} <span style={{ fontSize: 16 }}>{ratingDelta > 0 ? `(+${ratingDelta})` : ratingDelta < 0 ? `(${ratingDelta})` : ''}</span>
                 </div>
               </div>
-              <div style={{ background: '#020617', padding: 15, borderRadius: 12, border: '1px solid #334155', textAlign: 'center' }}>
-                <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 5 }}>Coins Earned</div>
+              <div style={{ background: 'var(--bg-panel-solid)', padding: 15, borderRadius: 12, border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 5 }}>Coins Earned</div>
                 <div style={{ color: '#fcd34d', fontSize: 32, fontWeight: 'bold' }}>+💰{earnedCoins}</div>
               </div>
             </div>
 
-            <h3 style={{ color: '#cbd5e1', margin: '0 0 10px 0' }}>Problem Matrix</h3>
+            <h3 style={{ color: 'var(--text-main)', margin: '0 0 10px 0' }}>Problem Matrix</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 10 }}>
               {performanceMatrix.map(pm => (
-                <div key={pm.label} style={{ background: pm.status === 'Correct' ? 'rgba(74, 222, 128, 0.15)' : pm.status === 'Wrong' ? 'rgba(248, 113, 113, 0.15)' : 'rgba(30, 41, 59, 0.5)', border: `1px solid ${pm.status === 'Correct' ? '#4ade80' : pm.status === 'Wrong' ? '#f87171' : '#334155'}`, padding: 12, borderRadius: 8, textAlign: 'center' }}>
-                  <strong style={{ display: 'block', color: '#e2e8f0', fontSize: 18 }}>{pm.label}</strong>
-                  <span style={{ fontSize: 12, color: pm.status === 'Correct' ? '#4ade80' : pm.status === 'Wrong' ? '#f87171' : '#64748b' }}>{pm.status}</span>
+                <div key={pm.label} style={{ background: pm.status === 'Correct' ? 'rgba(74, 222, 128, 0.15)' : pm.status === 'Wrong' ? 'rgba(248, 113, 113, 0.15)' : 'var(--bg-card)', border: `1px solid ${pm.status === 'Correct' ? '#4ade80' : pm.status === 'Wrong' ? '#f87171' : 'var(--border-color)'}`, padding: 12, borderRadius: 8, textAlign: 'center' }}>
+                  <strong style={{ display: 'block', color: 'var(--text-main)', fontSize: 18 }}>{pm.label}</strong>
+                  <span style={{ fontSize: 12, color: pm.status === 'Correct' ? '#4ade80' : pm.status === 'Wrong' ? '#f87171' : 'var(--text-muted)' }}>{pm.status}</span>
                 </div>
               ))}
             </div>
 
-            <div style={{ background: 'rgba(56, 189, 248, 0.05)', border: '1px solid rgba(56, 189, 248, 0.3)', padding: 15, borderRadius: 12, marginTop: 20 }}>
-              <h3 style={{ margin: '0 0 10px 0', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 8 }}>🤖 AI Mentor Analysis</h3>
-              <p style={{ color: '#e2e8f0', margin: 0, lineHeight: 1.6 }}>
+            <div style={{ background: 'var(--accent-glow)', border: '1px solid var(--accent-primary)', padding: 15, borderRadius: 12, marginTop: 20 }}>
+              <h3 style={{ margin: '0 0 10px 0', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>🤖 AI Mentor Analysis</h3>
+              <p style={{ color: 'var(--text-main)', margin: 0, lineHeight: 1.6 }}>
                 {myAccuracy >= 80 
                   ? "Excellent problem-solving accuracy! To reach the next rating tier, focus on speed and minimizing testcase penalties on the hardest problems." 
                   : "Your accuracy can be improved. You spent significant time on edge cases. Review the hidden test cases generated by the AI and practice the recommended problems below."}
@@ -981,18 +975,18 @@ export default function ContestRoomPage() {
         )}
 
         {!isActuallyOwnerMode && !viewerMember && displayStatus !== 'ENDED' && (
-          <section style={{ ...panel, marginBottom: 18, border: '1px solid #38bdf8', background: 'linear-gradient(180deg, #0f172a, rgba(56, 189, 248, 0.05))', textAlign: 'center' }}>
-            <h2 style={{color: '#38bdf8', margin: '0 0 10px 0', fontSize: 28}}>Register for {contest.title}</h2>
-            <p style={{color: '#a8b3c7', marginBottom: 25}}>Configure your play style to enter the lobby.</p>
+          <section style={{ ...panel, marginBottom: 18, border: '1px solid var(--accent-primary)', background: 'linear-gradient(180deg, var(--bg-panel-solid), var(--accent-glow))', textAlign: 'center' }}>
+            <h2 style={{color: 'var(--accent-primary)', margin: '0 0 10px 0', fontSize: 28}}>Register for {contest.title}</h2>
+            <p style={{color: 'var(--text-muted)', marginBottom: 25}}>Configure your play style to enter the lobby.</p>
             
             {availableTeams.length > 0 && (
-              <div style={{ textAlign: 'left', maxWidth: 720, margin: '0 auto 20px', padding: 14, background: 'rgba(2,6,23,.45)', border: '1px solid rgba(148,163,184,.16)', borderRadius: 12 }}>
-                <strong style={{ color: '#e2e8f0', display: 'block', marginBottom: 10 }}>Groups already formed</strong>
+              <div style={{ textAlign: 'left', maxWidth: 720, margin: '0 auto 20px', padding: 14, background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12 }}>
+                <strong style={{ color: 'var(--text-main)', display: 'block', marginBottom: 10 }}>Groups already formed</strong>
                 <div style={{ display: 'grid', gap: 8 }}>
                   {availableTeams.map((team: any) => (
                     <button key={team.id} onClick={() => { setRegMode('TEAM_REQUEST'); setRegTeamId(team.id); setRegTeamName(team.name); }} style={{ ...inactiveTabBox, textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>{team.name}</span>
-                      <span style={{ color: '#64748b', fontSize: 12 }}>{team.membersCount || 0} joined{team.pendingCount ? `, ${team.pendingCount} pending` : ''}</span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{team.membersCount || 0} joined{team.pendingCount ? `, ${team.pendingCount} pending` : ''}</span>
                     </button>
                   ))}
                 </div>
@@ -1050,7 +1044,7 @@ export default function ContestRoomPage() {
                   onChange={e => setIsOfficial(e.target.checked)} 
                   style={{ width: 16, height: 16, cursor: 'pointer' }} 
                 />
-                <label htmlFor="ratedCb" style={{ color: '#eef2ff', cursor: 'pointer', fontSize: 14 }}>
+                <label htmlFor="ratedCb" style={{ color: 'var(--text-main)', cursor: 'pointer', fontSize: 14 }}>
                   Participate as Rated (Earn Coins & Rating Leaderboard)
                 </label>
               </div>
@@ -1063,25 +1057,25 @@ export default function ContestRoomPage() {
         {viewerMember && !isActuallyOwnerMode && (
           <section style={{ ...panel, marginBottom: 18 }}>
             <h2 style={{ marginTop: 0 }}>Groups</h2>
-            {availableTeams.length === 0 ? <p style={{ color: '#94a3b8' }}>No groups have been created yet.</p> : (
+            {availableTeams.length === 0 ? <p style={{ color: 'var(--text-muted)' }}>No groups have been created yet.</p> : (
               <div style={{ display: 'grid', gap: 10 }}>
                 {availableTeams.map((team: any) => {
                   const teamMembers = (contest.members || []).filter((m: any) => m.teamId === team.id);
                   const pendingMembers = teamMembers.filter((m: any) => !m.isOfficial);
                   return (
-                    <div key={team.id} style={{ padding: 14, borderRadius: 12, background: 'rgba(2,6,23,.45)', border: '1px solid rgba(148,163,184,.16)' }}>
+                    <div key={team.id} style={{ padding: 14, borderRadius: 12, background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                        <strong style={{ color: '#e2e8f0' }}>{team.name}</strong>
-                        <span style={{ color: '#94a3b8', fontSize: 13 }}>{team.membersCount || 0} joined{team.pendingCount ? `, ${team.pendingCount} pending` : ''}</span>
+                        <strong style={{ color: 'var(--text-main)' }}>{team.name}</strong>
+                        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{team.membersCount || 0} joined{team.pendingCount ? `, ${team.pendingCount} pending` : ''}</span>
                       </div>
                       {team.inviteCode && viewerMember?.teamId === team.id && (
-                        <div style={{ marginTop: 8, color: '#38bdf8', fontWeight: 'bold', letterSpacing: 2 }}>Invite: {team.inviteCode}</div>
+                        <div style={{ marginTop: 8, color: 'var(--accent-primary)', fontWeight: 'bold', letterSpacing: 2 }}>Invite: {team.inviteCode}</div>
                       )}
                       {pendingMembers.length > 0 && (
                         <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
                           {pendingMembers.map((m: any) => (
-                            <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, color: '#cbd5e1' }}>
-                              <span>{m.name || m.displayName} <span style={{ color: '#64748b', fontSize: 12 }}>({m.codeforcesHandle || 'missing handle'})</span></span>
+                            <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, color: 'var(--text-main)' }}>
+                              <span>{m.name || m.displayName} <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>({m.codeforcesHandle || 'missing handle'})</span></span>
                               {canApproveMember(m) && <button onClick={() => approveMember(m.id)} style={{ ...primaryButton, width: 'auto', margin: 0, padding: '7px 12px', fontSize: 12 }}>Approve</button>}
                             </div>
                           ))}
@@ -1096,16 +1090,16 @@ export default function ContestRoomPage() {
         )}
 
         {isPendingViewer && !isActuallyOwnerMode ? (
-          <section style={{...panel, textAlign: 'center', padding: '50px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(251,191,36,0.05))'}}>
+          <section style={{...panel, textAlign: 'center', padding: '50px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, var(--bg-panel-solid), rgba(251,191,36,0.05))'}}>
             <h2 style={{ color: '#fbbf24', marginTop: 0 }}>Approval pending</h2>
-            <p style={{ color: '#a8b3c7', fontSize: 17 }}>Your request to join {viewerMember.teamName || 'this group'} is waiting for the group owner or contest owner.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: 17 }}>Your request to join {viewerMember.teamName || 'this group'} is waiting for the group owner or contest owner.</p>
             <button onClick={unregisterFromContest} style={{...dangerButton, width: 'auto', marginTop: 20}}>Cancel request</button>
           </section>
         ) : isScheduledLockScreen && !isActuallyOwnerMode ? (
-          <section style={{...panel, textAlign: 'center', padding: '60px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, rgba(15,23,42,0.9), rgba(251,191,36,0.05))'}}>
+          <section style={{...panel, textAlign: 'center', padding: '60px 20px', border: '1px solid rgba(251, 191, 36, 0.4)', background: 'linear-gradient(180deg, var(--bg-panel-solid), rgba(251,191,36,0.05))'}}>
              <h2 style={{ fontSize: 32, marginBottom: 10, color: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>Contest has not started yet</h2>
-             <p style={{color: '#a8b3c7', fontSize: 18}}>Problems will be revealed when the countdown reaches zero.</p>
-             <div style={{fontSize: 48, fontWeight: 'bold', color: '#67e8f9', marginTop: 20, fontFamily: 'monospace'}}>{formatCountdown(startTimeMs - nowTick)}</div>
+             <p style={{color: 'var(--text-muted)', fontSize: 18}}>Problems will be revealed when the countdown reaches zero.</p>
+             <div style={{fontSize: 48, fontWeight: 'bold', color: 'var(--accent-primary)', marginTop: 20, fontFamily: 'monospace'}}>{formatCountdown(startTimeMs - nowTick)}</div>
              
              {canUnregister && (
                <div style={{ marginTop: 30 }}>
@@ -1117,7 +1111,7 @@ export default function ContestRoomPage() {
           <>
             {canUnregister && (
               <section style={{ ...panel, marginBottom: 18, padding: 16 }}>
-                <p style={{ color: '#94a3b8', display: 'inline-block', marginRight: 15 }}>Not ready? You can unregister before half-time.</p>
+                <p style={{ color: 'var(--text-muted)', display: 'inline-block', marginRight: 15 }}>Not ready? You can unregister before half-time.</p>
                 <button onClick={unregisterFromContest} style={{...dangerButton, width: 'auto', marginBottom: 0}}>Unregister from Contest</button>
               </section>
             )}
@@ -1143,11 +1137,11 @@ export default function ContestRoomPage() {
 
                 <h2>Players</h2>
                 {(contest.participants || contest.members || []).map((m: any) => (
-                  <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '8px 12px', borderRadius: 8, marginBottom: 8, border: '1px solid rgba(148,163,184,.1)' }}>
-                    <p style={{ color: '#cbd5e1', margin: 0, lineHeight: '1.4' }}>
-                      <strong style={{ color: m.isOfficial ? '#fff' : '#94a3b8' }}>{m.user?.name || m.name || m.displayName || 'Unknown Player'}</strong>
+                  <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-card)', padding: '8px 12px', borderRadius: 8, marginBottom: 8, border: '1px solid var(--border-color)' }}>
+                    <p style={{ color: 'var(--text-main)', margin: 0, lineHeight: '1.4' }}>
+                      <strong style={{ color: m.isOfficial ? 'var(--text-main)' : 'var(--text-muted)' }}>{m.user?.name || m.name || m.displayName || 'Unknown Player'}</strong>
                       {!m.isOfficial && <span style={{ color: '#f87171', fontSize: 12, marginLeft: 8 }}>[PENDING APPROVAL]</span>}<br/>
-                      <span style={{ color: '#67e8f9', fontSize: 13 }}>{m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}</span>
+                      <span style={{ color: 'var(--accent-primary)', fontSize: 13 }}>{m.teamName || m.team || 'Individuals'} - CF: {m.externalHandle?.handle || m.codeforcesHandle || m.handle || 'missing'}</span>
                     </p>
                    {canApproveMember(m) && (
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1173,9 +1167,9 @@ export default function ContestRoomPage() {
                 
                 <h3 style={{ marginTop: 20 }}>Group Invite Codes</h3>
                 {availableTeams.map((team: any) => (
-                   <div key={team.id} style={{ padding: '8px 12px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#eef2ff' }}>{team.name}</span>
-                      <strong style={{ color: '#38bdf8', letterSpacing: 2 }}>{team.inviteCode}</strong>
+                   <div key={team.id} style={{ padding: '8px 12px', background: 'var(--accent-glow)', border: '1px solid var(--accent-primary)', borderRadius: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-main)' }}>{team.name}</span>
+                      <strong style={{ color: 'var(--accent-primary)', letterSpacing: 2 }}>{team.inviteCode}</strong>
                    </div>
                 ))}
               </section>}
@@ -1183,16 +1177,16 @@ export default function ContestRoomPage() {
               <section style={isActuallyOwnerMode && !isFinal ? panelWide : { ...panelWide, gridColumn: '1 / -1' }}>
                 <h2>Problems</h2>
                 
-                <div style={{ marginBottom: '20px', padding: '15px', background: '#0f172a', borderRadius: '8px', border: '1px solid #334155' }}>
-                  <h3 style={{ margin: '0 0 10px 0', color: '#94a3b8' }}>Contest Breakdown</h3>
+                <div style={{ marginBottom: '20px', padding: '15px', background: 'var(--bg-panel-solid)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                  <h3 style={{ margin: '0 0 10px 0', color: 'var(--text-muted)' }}>Contest Breakdown</h3>
                   <div style={{ display: 'flex', gap: '20px' }}>
-                    <span style={{ color: '#fff' }}>Coding Problems: <strong style={{ color: '#38bdf8'}}>{codingCount}</strong></span>
-                    <span style={{ color: '#fff' }}>Theory / MCQs: <strong style={{ color: '#fbbf24'}}>{mcqCount}</strong></span>
+                    <span style={{ color: 'var(--text-main)' }}>Coding Problems: <strong style={{ color: 'var(--accent-primary)'}}>{codingCount}</strong></span>
+                    <span style={{ color: 'var(--text-main)' }}>Theory / MCQs: <strong style={{ color: '#fbbf24'}}>{mcqCount}</strong></span>
                   </div>
                 </div>
 
                 {contest.problems.length === 0 ? (
-                  <p style={{ color: '#94a3b8' }}>No problems queued yet.</p>
+                  <p style={{ color: 'var(--text-muted)' }}>No problems queued yet.</p>
                 ) : (
                   <div style={{ display: 'grid', gap: 12 }}>
                     {contest.problems.map((p: any, index: number) => {
@@ -1202,11 +1196,11 @@ export default function ContestRoomPage() {
                       const safeProblemHref = `/contests/${contest.id}/problems/${p.id}`; 
                       const isSolvedByTeam = teamSolvedProblemIds.has(p.id);
 
-                      return <div key={p.id} style={{ ...problemRow, borderColor: isSolvedByTeam ? 'rgba(74, 222, 128, 0.4)' : 'rgba(148,163,184,.16)' }}>
-                        <strong style={{ color: '#67e8f9', fontSize: 22 }}>{label}</strong>
+                      return <div key={p.id} style={{ ...problemRow, borderColor: isSolvedByTeam ? 'rgba(74, 222, 128, 0.4)' : 'var(--border-color)' }}>
+                        <strong style={{ color: 'var(--accent-primary)', fontSize: 22 }}>{label}</strong>
                         <div>
-                          <a href={safeProblemHref} style={{ color: '#eef2ff', fontWeight: 900, textDecoration: 'none' }}>{visibleTitle}</a>
-                          <p style={{ margin: '6px 0 0', color: '#94a3b8' }}>
+                          <a href={safeProblemHref} style={{ color: 'var(--text-main)', fontWeight: 900, textDecoration: 'none' }}>{visibleTitle}</a>
+                          <p style={{ margin: '6px 0 0', color: 'var(--text-muted)' }}>
                             {canSeeProblemMeta ? `${p.platform} - Rating ${p.problem?.rating || p.rating || p.difficulty || 'Practice'} · ${p.points || 1000} pts` : `${p.platform} - rating hidden during contest`}
                           </p>
                         </div>
@@ -1240,9 +1234,9 @@ export default function ContestRoomPage() {
             <section style={{ ...panel, marginTop: 18 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <h2 style={{ margin: 0 }}>Leaderboard</h2>
-                <div style={{ display: 'flex', background: '#020617', borderRadius: 8, padding: 4, border: '1px solid rgba(148,163,184,.22)' }}>
-                  <button onClick={() => setStandingsMode('team')} style={{ ...ghostButton, margin: 0, border: 'none', background: standingsMode === 'team' ? 'rgba(34, 211, 238, 0.1)' : 'transparent', color: standingsMode === 'team' ? '#67e8f9' : '#94a3b8' }}>Teams</button>
-                  <button onClick={() => setStandingsMode('individual')} style={{ ...ghostButton, margin: 0, border: 'none', background: standingsMode === 'individual' ? 'rgba(34, 211, 238, 0.1)' : 'transparent', color: standingsMode === 'individual' ? '#67e8f9' : '#94a3b8' }}>Individuals</button>
+                <div style={{ display: 'flex', background: 'var(--bg-panel-solid)', borderRadius: 8, padding: 4, border: '1px solid var(--border-color)' }}>
+                  <button onClick={() => setStandingsMode('team')} style={{ ...ghostButton, margin: 0, border: 'none', background: standingsMode === 'team' ? 'var(--accent-glow)' : 'transparent', color: standingsMode === 'team' ? 'var(--accent-primary)' : 'var(--text-muted)' }}>Teams</button>
+                  <button onClick={() => setStandingsMode('individual')} style={{ ...ghostButton, margin: 0, border: 'none', background: standingsMode === 'individual' ? 'var(--accent-glow)' : 'transparent', color: standingsMode === 'individual' ? 'var(--accent-primary)' : 'var(--text-muted)' }}>Individuals</button>
                 </div>
               </div>
 
@@ -1254,8 +1248,8 @@ export default function ContestRoomPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {standingsMode === 'team' && teamStandings.length === 0 && <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#94a3b8' }}>No teams on the board yet.</td></tr>}
-                    {standingsMode === 'individual' && individualStandings.length === 0 && <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: '#94a3b8' }}>No individuals on the board yet.</td></tr>}
+                    {standingsMode === 'team' && teamStandings.length === 0 && <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: 'var(--text-muted)' }}>No teams on the board yet.</td></tr>}
+                    {standingsMode === 'individual' && individualStandings.length === 0 && <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: 'var(--text-muted)' }}>No individuals on the board yet.</td></tr>}
 
                     {standingsMode === 'team' 
                       ? teamStandings.map((team: any, i: number) => (
@@ -1272,7 +1266,7 @@ export default function ContestRoomPage() {
                         ))
                       : individualStandings.map((player: any) => (
                           <tr key={player.memberId} onClick={() => canInspectMember(player.memberId) && setSelectedMember(player)} style={canInspectMember(player.memberId) ? clickRow : mutedRow}>
-                            <td style={td}>#{player.rank}</td><td style={td}>{player.name} <span style={{ color: '#94a3b8', fontSize: 12 }}>({player.team})</span></td><td style={td}>{player.solved || 0}</td><td style={td}>{player.penalty || 0}</td><td style={{...td, color: '#fbbf24', fontWeight: 'bold'}}>{player.score || 0}</td>
+                            <td style={td}>#{player.rank}</td><td style={td}>{player.name} <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>({player.team})</span></td><td style={td}>{player.solved || 0}</td><td style={td}>{player.penalty || 0}</td><td style={{...td, color: '#fbbf24', fontWeight: 'bold'}}>{player.score || 0}</td>
                           </tr>
                         ))
                     }
@@ -1285,7 +1279,7 @@ export default function ContestRoomPage() {
               <h2>
                 {isFinal || timeLeft === 0 ? 'All submissions' : isActuallyOwnerMode ? 'All submissions' : contest.visibility?.submissionScope === 'team' ? 'Team submissions' : 'Your submissions'}
               </h2>
-              {visibleSubmissions.length === 0 && <p style={{ color: '#94a3b8' }}>No visible submissions yet.</p>}
+              {visibleSubmissions.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No visible submissions yet.</p>}
               
               {visibleSubmissions.length > 0 && (
                 <div style={{ overflowX: 'auto' }}>
@@ -1301,7 +1295,7 @@ export default function ContestRoomPage() {
                     </thead>
                     <tbody>
                       {visibleSubmissions.map((sub: any, index: number) => (
-                        <tr key={sub.id || index} style={{ borderBottom: '1px solid #334155' }}>
+                        <tr key={sub.id || index} style={{ borderBottom: '1px solid var(--border-color)' }}>
                           <td style={td}>{new Date(sub.createdAt).toLocaleTimeString()}</td>
                           <td style={td}>{sub.userId}</td>
                           <td style={td}>{problemById[sub.problemId]?.label || sub.problemId}</td>
@@ -1314,7 +1308,7 @@ export default function ContestRoomPage() {
                             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                               <button onClick={() => setSelectedSubmission(sub)} style={{...ghostButton, margin: 0, padding: '5px 10px', fontSize: 12}}>View Code</button>
                               {sub.externalSubmissionUrl && (
-                                <a href={sub.externalSubmissionUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', textDecoration: 'underline', fontSize: '12px' }}>
+                                <a href={sub.externalSubmissionUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)', textDecoration: 'underline', fontSize: '12px' }}>
                                   👉 View original
                                 </a>
                               )}
@@ -1339,9 +1333,9 @@ export default function ContestRoomPage() {
                 
                 {selectedSubmission.code && (
                   <div style={{marginTop: 12}}>
-                    <strong style={{color: '#cbd5e1'}}>Source Code:</strong>
-                    <div style={{ marginTop: 8, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(148,163,184,.2)' }}>
-                      <SyntaxHighlighter language={selectedSubmission.language?.toLowerCase().includes('python') ? 'python' : selectedSubmission.language?.toLowerCase().includes('java') ? 'java' : 'cpp'} style={vscDarkPlus} customStyle={{ margin: 0, padding: 16, maxHeight: 400, background: '#020617' }} showLineNumbers={true}>{selectedSubmission.code}</SyntaxHighlighter>
+                    <strong style={{color: 'var(--text-main)'}}>Source Code:</strong>
+                    <div style={{ marginTop: 8, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                      <SyntaxHighlighter language={selectedSubmission.language?.toLowerCase().includes('python') ? 'python' : selectedSubmission.language?.toLowerCase().includes('java') ? 'java' : 'cpp'} style={vscDarkPlus} customStyle={{ margin: 0, padding: 16, maxHeight: 400, background: 'var(--bg-panel-solid)' }} showLineNumbers={true}>{selectedSubmission.code}</SyntaxHighlighter>
                     </div>
                   </div>
                 )}
@@ -1351,7 +1345,7 @@ export default function ContestRoomPage() {
                 {isActuallyOwnerMode && selectedSubmission.externalSubmissionId && <a href={`https://codeforces.com/contest/${problemById[selectedSubmission.problemId]?.contestCode}/submission/${selectedSubmission.externalSubmissionId}`} target="_blank" rel="noreferrer" style={{...primaryLink, marginTop: 10}}>Open Codeforces submission</a>}
                 
                 {isFinal && !isActuallyOwnerMode && selectedSubmission.userId !== (session?.user?.name || session?.user?.email) && (
-                  <div style={{ marginTop: 16, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 16 }}>
+                  <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 16 }}>
                     <h4 style={{ margin: '0 0 8px 0', color: '#f87171' }}>Report Discrepancy</h4>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <input style={{...smallInput, marginBottom: 0}} placeholder="Suspected AI, Hardcoded, etc." value={reportReason} onChange={e => setReportReason(e.target.value)} />
@@ -1361,7 +1355,7 @@ export default function ContestRoomPage() {
                 )}
 
                 {isActuallyOwnerMode && (
-                  <div style={{ marginTop: 16, borderTop: '1px solid rgba(148,163,184,.2)', paddingTop: 16 }}>
+                  <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 16 }}>
                     <h4 style={{ margin: '0 0 8px 0', color: '#fbbf24' }}>Owner Controls</h4>
                     {selectedSubmission.reports?.length > 0 && (
                       <div style={{ marginBottom: 12, padding: 12, background: 'rgba(248,113,113,.1)', borderRadius: 8, border: '1px solid rgba(248,113,113,.3)' }}>
@@ -1384,13 +1378,13 @@ export default function ContestRoomPage() {
       {!isFinal && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
           {isChatOpen ? (
-            <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+            <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 320, height: 400, background: 'var(--bg-panel-solid)', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
               
-              <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
+              <div style={{ background: 'var(--bg-panel)', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)' }}>
                 <strong style={{ color: '#a5b4fc' }}>{contest?.viewerMember?.teamId ? 'Team Chat' : 'Global Contest Chat'}</strong>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {contest?.viewerMember?.teamId && (
-                    <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)', color: voiceStatus === 'connected' ? '#4ade80' : '#fff', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
+                    <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'var(--bg-card)', color: voiceStatus === 'connected' ? '#4ade80' : 'var(--text-main)', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
                       {voiceStatus === 'connected' ? '🟢 Voice On' : voiceStatus === 'connecting' ? '⏳ Connecting...' : '🎤 Join Voice'}
                     </button>
                   )}
@@ -1398,14 +1392,14 @@ export default function ContestRoomPage() {
                 </div>
               </div>
 
-              <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
+              <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: 'var(--text-muted)', fontSize: 14 }}>
                 {viewerMember?.teamId ? (
                   messages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No messages yet. Say hi!</p> : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {messages.map(msg => (
-                        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}><strong style={{ color: '#67e8f9' }}>{msg.sender?.username || 'Teammate'}</strong><span style={{ color: '#64748b' }}>{new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
-                          <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.content}</div>
+                        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ background: 'var(--bg-card)', padding: '8px 12px', borderRadius: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}><strong style={{ color: 'var(--accent-primary)' }}>{msg.sender?.username || 'Teammate'}</strong><span style={{ color: 'var(--text-muted)' }}>{new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+                          <div style={{ color: 'var(--text-main)', wordBreak: 'break-word' }}>{msg.content}</div>
                         </motion.div>
                       ))}
                       <div ref={messagesEndRef} />
@@ -1415,9 +1409,9 @@ export default function ContestRoomPage() {
                   lobbyMessages.length === 0 ? <p style={{ textAlign: 'center', marginTop: '40%' }}>No global messages yet.</p> : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {lobbyMessages.map((msg, i) => (
-                        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={i} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
+                        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={i} style={{ background: 'var(--bg-card)', padding: '8px 12px', borderRadius: 8 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}><strong style={{ color: '#a5b4fc' }}>{msg.sender}</strong></div>
-                          <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.text}</div>
+                          <div style={{ color: 'var(--text-main)', wordBreak: 'break-word' }}>{msg.text}</div>
                         </motion.div>
                       ))}
                       <div ref={messagesEndRef} />
@@ -1425,7 +1419,7 @@ export default function ContestRoomPage() {
                   )
                 )}
               </div>
-              <div style={{ padding: 12, borderTop: '1px solid #334155', display: 'flex', gap: 8 }}>
+              <div style={{ padding: 12, borderTop: '1px solid var(--border-color)', display: 'flex', gap: 8 }}>
                 <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleSendMessage(); }} placeholder="Type a message..." style={{ ...smallInput, margin: 0, flex: 1 }} />
                 <button onClick={handleSendMessage} style={{ ...primaryButton, width: 'auto', margin: 0 }}>Send</button>
               </div>
@@ -1441,36 +1435,36 @@ export default function ContestRoomPage() {
   );
 }
 
-const page: CSSProperties = { minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.32), transparent 34rem), #070a16' };
+const page: CSSProperties = { minHeight: '100vh', padding: 28, fontFamily: 'Inter, Arial, sans-serif', color: 'var(--text-main)', background: 'transparent' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 };
-const userPill: CSSProperties = { padding: '10px 14px', borderRadius: 999, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.22)' };
-const gate: CSSProperties = { maxWidth: 620, margin: '15vh auto', padding: 34, borderRadius: 28, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)' };
-const link: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 800 };
+const userPill: CSSProperties = { padding: '10px 14px', borderRadius: 999, background: 'var(--bg-panel)', border: '1px solid var(--border-color)' };
+const gate: CSSProperties = { maxWidth: 620, margin: '15vh auto', padding: 34, borderRadius: 28, border: '1px solid var(--border-color)', background: 'var(--bg-panel)' };
+const link: CSSProperties = { color: 'var(--accent-primary)', textDecoration: 'none', fontWeight: 800 };
 const primaryLink: CSSProperties = { display: 'inline-block', padding: '11px 15px', borderRadius: 999, border: 0, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', fontWeight: 900, cursor: 'pointer', textDecoration: 'none' };
 const primaryButton: CSSProperties = { ...primaryLink, width: '100%', marginBottom: 10 };
-const ghostButton: CSSProperties = { padding: '11px 15px', borderRadius: 999, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', fontWeight: 800, cursor: 'pointer', marginBottom: 10 };
+const ghostButton: CSSProperties = { padding: '11px 15px', borderRadius: 999, border: '1px solid var(--button-ghost-border)', background: 'var(--button-ghost-bg)', color: 'var(--text-main)', fontWeight: 800, cursor: 'pointer', marginBottom: 10 };
 const dangerButton: CSSProperties = { ...ghostButton, width: '100%', border: '1px solid rgba(248,113,113,.4)', color: '#fecaca' };
-const smallInput: CSSProperties = { width: '100%', padding: 11, marginBottom: 10, border: '1px solid rgba(148,163,184,.25)', borderRadius: 12, background: 'rgba(15,23,42,.8)', color: '#eef2ff', outline: 'none' };
-const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase' };
+const smallInput: CSSProperties = { width: '100%', padding: 11, marginBottom: 10, border: '1px solid var(--border-color)', borderRadius: 12, background: 'var(--bg-card)', color: 'var(--text-main)', outline: 'none' };
+const eyebrow: CSSProperties = { color: 'var(--accent-primary)', fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase' };
 const hero: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, flexWrap: 'wrap', margin: '24px 0' };
 const timerCard: CSSProperties = { minWidth: 170, padding: 22, borderRadius: 24, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#020617', display: 'grid', gap: 4, textAlign: 'center' };
-const grid: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(260px, .8fr) minmax(320px, 1.7fr)', gap: 18 };
-const panel: CSSProperties = { padding: 24, borderRadius: 26, border: '1px solid rgba(148,163,184,.22)', background: 'rgba(15,23,42,.82)' };
+const grid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18 };
+const panel: CSSProperties = { padding: 24, borderRadius: 26, border: '1px solid var(--border-color)', background: 'var(--bg-panel)' };
 const panelWide: CSSProperties = { ...panel };
-const problemRow: CSSProperties = { display: 'grid', gridTemplateColumns: '40px 1fr auto', gap: 14, alignItems: 'center', padding: 16, borderRadius: 18, background: 'rgba(2,6,23,.5)', border: '1px solid rgba(148,163,184,.16)' };
+const problemRow: CSSProperties = { display: 'grid', gridTemplateColumns: '40px 1fr auto', gap: 14, alignItems: 'center', padding: 16, borderRadius: 18, background: 'var(--bg-card)', border: '1px solid var(--border-color)' };
 const table: CSSProperties = { width: '100%', borderCollapse: 'collapse' };
-const th: CSSProperties = { textAlign: 'left', padding: 12, color: '#67e8f9', borderBottom: '1px solid rgba(148,163,184,.18)' };
-const td: CSSProperties = { padding: 12, borderBottom: '1px solid rgba(148,163,184,.12)' };
+const th: CSSProperties = { textAlign: 'left', padding: 12, color: 'var(--accent-primary)', borderBottom: '1px solid var(--border-color)' };
+const td: CSSProperties = { padding: 12, borderBottom: '1px solid var(--border-color)' };
 const clickRow: CSSProperties = { cursor: 'pointer' };
-const subRow: CSSProperties = { cursor: 'pointer', background: 'rgba(34,211,238,.05)' };
+const subRow: CSSProperties = { cursor: 'pointer', background: 'var(--accent-glow)' };
 const mutedRow: CSSProperties = { opacity: .58, cursor: 'not-allowed' };
-const detailCard: CSSProperties = { marginTop: 10, padding: 16, borderRadius: 18, background: 'rgba(2,6,23,.55)', border: '1px solid rgba(148,163,184,.16)', display: 'grid', gap: 6 };
+const detailCard: CSSProperties = { marginTop: 10, padding: 16, borderRadius: 18, background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'grid', gap: 6 };
 const overlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 50 };
-const overlayModal: CSSProperties = { padding: 30, backgroundColor: '#0f172a', border: '1px solid rgba(103,232,249,0.3)', borderRadius: 20, textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.5)' };
+const overlayModal: CSSProperties = { padding: 30, backgroundColor: 'var(--bg-panel-solid)', border: '1px solid var(--accent-glow)', borderRadius: 20, textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.5)' };
 
 const badgeScheduled: CSSProperties = { background: 'rgba(251, 191, 36, 0.1)', color: '#fbbf24', padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(251, 191, 36, 0.4)', fontSize: 12, fontWeight: 'bold' };
 const badgeLive: CSSProperties = { background: 'rgba(248, 113, 113, 0.1)', color: '#f87171', padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(248, 113, 113, 0.4)', fontSize: 12, fontWeight: 'bold' };
 const badgeEnded: CSSProperties = { background: 'rgba(74, 222, 128, 0.1)', color: '#4ade80', padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(74, 222, 128, 0.4)', fontSize: 12, fontWeight: 'bold' };
-const activeTabBox: CSSProperties = { padding: '12px 18px', background: '#38bdf8', color: '#000', borderRadius: 12, fontWeight: 'bold', border: 'none', cursor: 'pointer', flex: 1 };
-const inactiveTabBox: CSSProperties = { padding: '12px 18px', background: 'rgba(2,6,23,0.5)', color: '#94a3b8', borderRadius: 12, border: '1px solid #334155', cursor: 'pointer', flex: 1 };
-const tcLabel: CSSProperties = { fontSize: 12, color: '#94a3b8', marginBottom: 4, display: 'block' };
+const activeTabBox: CSSProperties = { padding: '12px 18px', background: 'var(--accent-primary)', color: '#000', borderRadius: 12, fontWeight: 'bold', border: 'none', cursor: 'pointer', flex: 1 };
+const inactiveTabBox: CSSProperties = { padding: '12px 18px', background: 'var(--bg-card)', color: 'var(--text-muted)', borderRadius: 12, border: '1px solid var(--border-color)', cursor: 'pointer', flex: 1 };
+const tcLabel: CSSProperties = { fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, display: 'block' };

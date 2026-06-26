@@ -219,73 +219,70 @@ export default function GlobalNavigationAndMashupCreator() {
     <div style={page}>
       <Toaster />
       <style dangerouslySetInnerHTML={{__html: `
-        @keyframes pulseGlow { 0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.4); } 70% { box-shadow: 0 0 0 20px rgba(56, 189, 248, 0); } 100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); } }
+        @keyframes pulseGlow { 0% { box-shadow: 0 0 0 0 var(--accent-glow); } 70% { box-shadow: 0 0 0 20px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
         @keyframes spin { 100% { transform: rotate(360deg); } }
       `}} />
 
       {isCreating && (
         <div style={overlay}>
           <div style={overlayModal}>
-            <div style={{ width: 50, height: 50, border: '4px solid #1e293b', borderTopColor: '#38bdf8', borderRadius: '50%', margin: '0 auto 20px', animation: 'spin 1s linear infinite, pulseGlow 2s infinite' }} />
-            <h2 style={{ color: '#fff', marginBottom: 10 }}>Forging Mashup Array</h2>
-            <p style={{ color: '#38bdf8', fontWeight: 'bold' }}>{loadingContext}</p>
+            <div style={{ width: 50, height: 50, border: '4px solid var(--border-color)', borderTopColor: 'var(--accent-primary)', borderRadius: '50%', margin: '0 auto 20px', animation: 'spin 1s linear infinite, pulseGlow 2s infinite' }} />
+            <h2 style={{ color: 'var(--text-main)', marginBottom: 10 }}>Forging Mashup Array</h2>
+            <p style={{ color: 'var(--accent-primary)', fontWeight: 'bold' }}>{loadingContext}</p>
           </div>
         </div>
       )}
 
-      <nav style={{ display: 'flex', gap: 15, background: '#1e293b', padding: '15px 30px', borderBottom: '1px solid #334155' }}>
+      <nav style={{ display: 'flex', gap: 15, background: 'var(--bg-panel-solid)', padding: '15px 30px', borderBottom: '1px solid var(--border-color)', overflowX: 'auto', whiteSpace: 'nowrap' }}>
         <button onClick={() => setNavTab('mashup')} style={navTab === 'mashup' ? actNav : pasNav}>Mashup Control Room</button>
         <button onClick={() => { setNavTab('duel'); router.push('/duel'); }} style={navTab === 'duel' ? actNav : pasNav}>1v1 Realtime Duel Matrix</button>
         <button onClick={() => { setNavTab('interview'); router.push('/interview'); }} style={navTab === 'interview' ? actNav : pasNav}>Interview Coding Modules</button>
       </nav>
 
       {navTab === 'mashup' && (
-        <div style={{ maxWidth: 1000, margin: '40px auto', background: '#0f172a', borderRadius: 16, border: '1px solid #1e293b', overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
+        <div style={{ maxWidth: 1000, margin: '40px auto', background: 'var(--bg-panel)', borderRadius: 16, border: '1px solid var(--border-color)', overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
           
-          {/* STEPPER HEADER */}
-          <div style={{ display: 'flex', borderBottom: '1px solid #1e293b', background: '#020617' }}>
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-panel-solid)', flexWrap: 'wrap' }}>
             {[1, 2, 3].map(num => (
-              <div key={num} onClick={() => setStep(num)} style={{ flex: 1, padding: 20, textAlign: 'center', cursor: 'pointer', borderBottom: step === num ? '3px solid #38bdf8' : '3px solid transparent', color: step === num ? '#38bdf8' : '#64748b', fontWeight: 'bold', transition: '0.3s' }}>
+              <div key={num} onClick={() => setStep(num)} style={{ flex: '1 1 auto', padding: 20, textAlign: 'center', cursor: 'pointer', borderBottom: step === num ? '3px solid var(--accent-primary)' : '3px solid transparent', color: step === num ? 'var(--accent-primary)' : 'var(--text-muted)', fontWeight: 'bold', transition: '0.3s' }}>
                 Step {num}: {num === 1 ? 'Contest Details' : num === 2 ? 'Select Problems' : 'Review & Launch'}
               </div>
             ))}
           </div>
 
-          <div style={{ padding: 40 }}>
+          <div style={{ padding: 'clamp(20px, 4vw, 40px)' }}>
             <AnimatePresence mode="wait">
-              {/* STEP 1: Details */}
               {step === 1 && (
                 <motion.div key="step1" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
-                  <h2 style={{ color: '#fff', marginTop: 0 }}>Basic Configurations</h2>
-                  <div style={{ display: 'flex', gap: 10, marginBottom: 25, background: '#1e293b', padding: 10, borderRadius: 8 }}>
-                    <button onClick={() => setContestMode('SOLO')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'SOLO' ? '#38bdf8' : 'transparent', color: contestMode === 'SOLO' ? '#000' : '#94a3b8' }}>👤 Solo Standings</button>
-                    <button onClick={() => setContestMode('GROUP')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'GROUP' ? '#38bdf8' : 'transparent', color: contestMode === 'GROUP' ? '#000' : '#94a3b8' }}>👥 Team Mode</button>
+                  <h2 style={{ color: 'var(--text-main)', marginTop: 0 }}>Basic Configurations</h2>
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 25, background: 'var(--bg-panel-solid)', padding: 10, borderRadius: 8, flexWrap: 'wrap' }}>
+                    <button onClick={() => setContestMode('SOLO')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'SOLO' ? 'var(--accent-primary)' : 'transparent', color: contestMode === 'SOLO' ? '#000' : 'var(--text-muted)' }}>👤 Solo Standings</button>
+                    <button onClick={() => setContestMode('GROUP')} style={{ flex: 1, padding: 10, borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', background: contestMode === 'GROUP' ? 'var(--accent-primary)' : 'transparent', color: contestMode === 'GROUP' ? '#000' : 'var(--text-muted)' }}>👥 Team Mode</button>
                   </div>
-                  <label>Contest Title</label>
+                  <label style={{ color: 'var(--text-muted)', fontWeight: 'bold' }}>Contest Title</label>
                   <input value={title} onChange={e => setTitle(e.target.value)} style={{...inputBox, marginBottom: 20}} />
                   
-                  <div style={{ display: 'flex', gap: 20 }}>
-                    <div style={{ flex: 1 }}><label>Duration (mins)</label><input type="number" value={duration} onChange={e => setDuration(Number(e.target.value))} style={inputBox} /></div>
-                    <div style={{ flex: 1 }}><label>Start Time</label><input type="datetime-local" value={startTimeStr} onChange={e => setStartTimeStr(e.target.value)} style={{ ...inputBox, colorScheme: 'dark' }} /></div>
+                  <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 200px' }}><label style={{ color: 'var(--text-muted)', fontWeight: 'bold' }}>Duration (mins)</label><input type="number" value={duration} onChange={e => setDuration(Number(e.target.value))} style={inputBox} /></div>
+                    <div style={{ flex: '1 1 200px' }}><label style={{ color: 'var(--text-muted)', fontWeight: 'bold' }}>Start Time</label><input type="datetime-local" value={startTimeStr} onChange={e => setStartTimeStr(e.target.value)} style={inputBox} /></div>
                   </div>
                   <button onClick={() => setStep(2)} style={{ ...primaryBtn, width: '100%', marginTop: 30 }}>Next: Add Problems →</button>
                 </motion.div>
               )}
 
-              {/* STEP 2: Add Problems */}
               {step === 2 && (
                 <motion.div key="step2" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} style={{ display: 'flex', gap: 30, flexWrap: 'wrap' }}>
                   <div style={{ flex: '1 1 500px' }}>
-                     <div style={{ display: 'flex', gap: 10, marginBottom: 20, borderBottom: '1px solid #1e293b', paddingBottom: 10 }}>
+                     <div style={{ display: 'flex', gap: 10, marginBottom: 20, borderBottom: '1px solid var(--border-color)', paddingBottom: 10, overflowX: 'auto' }}>
                        {['URL', 'CUSTOM', 'MCQ'].map(t => (
-                         <button key={t} onClick={() => setActiveTab(t as any)} style={{ padding: '8px 16px', background: activeTab === t ? '#38bdf8' : '#1e293b', color: activeTab === t ? '#000' : '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}>{t}</button>
+                         <button key={t} onClick={() => setActiveTab(t as any)} style={{ padding: '8px 16px', background: activeTab === t ? 'var(--accent-primary)' : 'var(--bg-card)', color: activeTab === t ? '#000' : 'var(--text-main)', border: '1px solid var(--border-color)', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}>{t}</button>
                        ))}
                      </div>
                      
                      {activeTab === 'URL' && (
                        <div>
                           <input value={urlProblem} onChange={e => setUrlProblem(e.target.value)} style={inputBox} placeholder="Paste Link or Codeforces Code (e.g. 1500A)" />
-                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#94a3b8', marginTop: 10 }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--text-muted)', marginTop: 10 }}>
                                <input type="checkbox" checked={generateAiTests} onChange={e => setGenerateAiTests(e.target.checked)} />
                                🤖 Check scraped tests AND automatically generate tougher hidden system tests via AI
                           </label>
@@ -295,37 +292,37 @@ export default function GlobalNavigationAndMashupCreator() {
                      {activeTab === 'CUSTOM' && (
                        <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
                          <div>
-                           <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Custom Problem Title</label>
+                           <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 'bold' }}>Custom Problem Title</label>
                            <input placeholder="e.g. Find the Missing Integer" value={customTitle} onChange={e => setCustomTitle(e.target.value)} style={inputBox} />
                          </div>
                          <div>
-                           <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Problem Description (Supports Markdown/HTML)</label>
+                           <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 'bold' }}>Problem Description (Supports Markdown/HTML)</label>
                            <textarea placeholder="Describe the problem, input formats, and constraints..." value={customDesc} onChange={e => setCustomDesc(e.target.value)} style={{...inputBox, minHeight: '150px', resize: 'vertical'}} />
                          </div>
                          <div>
-                           <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Optional Image Attachment</label>
-                           <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'block', marginTop: 5, color: '#fff' }} />
+                           <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 'bold' }}>Optional Image Attachment</label>
+                           <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'block', marginTop: 5, color: 'var(--text-main)' }} />
                          </div>
                          <div>
-                           <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Time Limit (Seconds, 0 for infinite)</label>
+                           <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 'bold' }}>Time Limit (Seconds, 0 for infinite)</label>
                            <input type="number" placeholder="e.g. 120" value={customTimeLimit} onChange={e => setCustomTimeLimit(Number(e.target.value))} style={inputBox} />
                          </div>
                          
-                         <h4 style={{ color: '#94a3b8', margin: '10px 0 0 0' }}>Custom Test Cases</h4>
+                         <h4 style={{ color: 'var(--text-muted)', margin: '10px 0 0 0' }}>Custom Test Cases</h4>
                          {customCases.map((tc, i) => (
-                             <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                             <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                                  <input placeholder="Input" value={tc.input} onChange={e => {
                                      const newCases = [...customCases];
                                      newCases[i].input = e.target.value;
                                      setCustomCases(newCases);
-                                 }} style={{...inputBox, flex: 1, marginTop: 0}} />
+                                 }} style={{...inputBox, flex: '1 1 100px', marginTop: 0}} />
                                  <input placeholder="Expected Output" value={tc.expectedOutput} onChange={e => {
                                      const newCases = [...customCases];
                                      newCases[i].expectedOutput = e.target.value;
                                      setCustomCases(newCases);
-                                 }} style={{...inputBox, flex: 1, marginTop: 0}} />
+                                 }} style={{...inputBox, flex: '1 1 100px', marginTop: 0}} />
                                  
-                                 <label style={{display: 'flex', alignItems: 'center', gap: 5, color: '#94a3b8', fontSize: 12, width: '120px', cursor: 'pointer'}}>
+                                 <label style={{display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-muted)', fontSize: 12, width: '120px', cursor: 'pointer'}}>
                                      <input type="checkbox" checked={tc.isPublic} onChange={e => {
                                          const newCases = [...customCases];
                                          newCases[i].isPublic = e.target.checked;
@@ -346,9 +343,9 @@ export default function GlobalNavigationAndMashupCreator() {
                      {activeTab === 'MCQ' && (
                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                          <input value={mcqPrompt} onChange={e => setMcqPrompt(e.target.value)} style={inputBox} placeholder="Question Option Evaluation Prompt" />
-                         <label style={{ fontSize: 12, fontWeight: 'bold' }}>Time Limit (Seconds)</label>
+                         <label style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text-muted)' }}>Time Limit (Seconds)</label>
                          <input type="number" value={mcqTimeLimit} onChange={e => setMcqTimeLimit(Number(e.target.value))} style={inputBox} placeholder="e.g. 120" />
-                         <p style={{fontSize: 12, color: '#94a3b8', margin: 0}}>Check the box next to correct options.</p>
+                         <p style={{fontSize: 12, color: 'var(--text-muted)', margin: 0}}>Check the box next to correct options.</p>
                          {mcqOptions.map((o, idx) => (
                            <div key={idx} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                              <input type="checkbox" checked={mcqCorrect.includes(idx)} onChange={() => setMcqCorrect(prev => prev.includes(idx) ? prev.filter(x => x !== idx) : [...prev, idx])} style={{transform: 'scale(1.5)', cursor: 'pointer'}} />
@@ -360,23 +357,24 @@ export default function GlobalNavigationAndMashupCreator() {
                      )}
 
                      <button onClick={queueProblem} style={{ ...primaryBtn, width: '100%', marginTop: 25 }}>Append Problem</button>
-                     <button onClick={() => setStep(1)} style={{ ...ghostBtn, width: '100%', marginTop: 15, color: '#64748b', borderColor: '#334155' }}>← Back to Details</button>
+                     <button onClick={() => setStep(1)} style={{ ...ghostBtn, width: '100%', marginTop: 15, color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}>← Back to Details</button>
                   </div>
 
-                  <div style={{ flex: '1 1 350px', background: '#020617', padding: 20, borderRadius: 12, border: '1px solid #1e293b' }}>
-                    <h3 style={{ color: '#a5b4fc', marginTop: 0 }}>Queued Batch ({compiledProblems.length})</h3>
+                  <div style={{ flex: '1 1 350px', background: 'var(--bg-panel-solid)', padding: 20, borderRadius: 12, border: '1px solid var(--border-color)' }}>
+                    <h3 style={{ color: 'var(--accent-primary)', marginTop: 0 }}>Queued Batch ({compiledProblems.length})</h3>
+                    {compiledProblems.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No problems added yet.</p>}
                     {compiledProblems.map((p, i) => (
-                      <div key={i} style={{ padding: 10, background: '#1e293b', borderRadius: 6, margin: '8px 0', border: '1px solid #334155' }}>
-                        <span style={{ fontWeight: 'bold' }}>{i + 1}. {p.displayTitle}</span>
+                      <div key={i} style={{ padding: 10, background: 'var(--bg-card)', borderRadius: 6, margin: '8px 0', border: '1px solid var(--border-color)' }}>
+                        <span style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>{i + 1}. {p.displayTitle}</span>
                         <div style={{ display: 'flex', gap: 5, justifyContent: 'flex-end', marginTop: 10 }}>
                           <button onClick={() => moveProblem(i, 'UP')} disabled={i === 0} style={iconBtn}>↑</button>
                           <button onClick={() => moveProblem(i, 'DOWN')} disabled={i === compiledProblems.length - 1} style={iconBtn}>↓</button>
-                          <button onClick={() => editProblem(i)} style={{...iconBtn, color: '#38bdf8', borderColor: '#38bdf8'}}>Edit</button>
+                          <button onClick={() => editProblem(i)} style={{...iconBtn, color: 'var(--accent-primary)', borderColor: 'var(--accent-primary)'}}>Edit</button>
                           <button onClick={() => removeProblem(i)} style={{...iconBtn, color: '#f87171', borderColor: '#f87171'}}>✕</button>
                         </div>
                       </div>
                     ))}
-                    <button onClick={() => setStep(3)} style={{ ...ghostBtn, width: '100%', marginTop: 20, background: 'rgba(56,189,248,0.1)' }}>Review Mashup →</button>
+                    <button onClick={() => setStep(3)} style={{ ...ghostBtn, width: '100%', marginTop: 20, background: 'var(--accent-glow)', border: '1px solid var(--accent-primary)' }}>Review Mashup →</button>
                   </div>
                 </motion.div>
               )}
@@ -384,16 +382,18 @@ export default function GlobalNavigationAndMashupCreator() {
               {/* STEP 3: Review */}
               {step === 3 && (
                 <motion.div key="step3" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} style={{ textAlign: 'center' }}>
-                  <h2 style={{ color: '#fff', marginTop: 0 }}>Final Review</h2>
-                  <div style={{ background: '#1e293b', padding: 24, borderRadius: 12, display: 'inline-block', textAlign: 'left', minWidth: 400, marginBottom: 30, border: '1px solid #334155' }}>
-                    <p style={{ margin: '8px 0' }}><strong style={{ color: '#94a3b8' }}>Title:</strong> {title}</p>
-                    <p style={{ margin: '8px 0' }}><strong style={{ color: '#94a3b8' }}>Mode:</strong> {contestMode}</p>
-                    <p style={{ margin: '8px 0' }}><strong style={{ color: '#94a3b8' }}>Duration:</strong> {duration} mins</p>
-                    <p style={{ margin: '8px 0' }}><strong style={{ color: '#94a3b8' }}>Total Problems:</strong> {compiledProblems.length}</p>
+                  <h2 style={{ color: 'var(--text-main)', marginTop: 0 }}>Final Review</h2>
+                  <div style={{ background: 'var(--bg-panel-solid)', padding: 24, borderRadius: 12, display: 'inline-block', textAlign: 'left', width: '100%', maxWidth: 500, marginBottom: 30, border: '1px solid var(--border-color)', boxSizing: 'border-box' }}>
+                    <p style={{ margin: '8px 0', color: 'var(--text-main)' }}><strong style={{ color: 'var(--text-muted)' }}>Title:</strong> {title}</p>
+                    <p style={{ margin: '8px 0', color: 'var(--text-main)' }}><strong style={{ color: 'var(--text-muted)' }}>Mode:</strong> {contestMode}</p>
+                    <p style={{ margin: '8px 0', color: 'var(--text-main)' }}><strong style={{ color: 'var(--text-muted)' }}>Duration:</strong> {duration} mins</p>
+                    <p style={{ margin: '8px 0', color: 'var(--text-main)' }}><strong style={{ color: 'var(--text-muted)' }}>Total Problems:</strong> {compiledProblems.length}</p>
                   </div>
                   <br/>
-                  <button onClick={() => setStep(2)} style={{ ...ghostBtn, marginRight: 15 }}>← Go Back</button>
-                  <button onClick={createContest} style={{ background: '#10b981', color: '#fff', padding: '12px 30px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}>Deploy Mashup Room 🚀</button>
+                  <div style={{ display: 'flex', gap: 15, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <button onClick={() => setStep(2)} style={{ ...ghostBtn }}>← Go Back</button>
+                    <button onClick={createContest} style={{ background: '#10b981', color: '#fff', padding: '12px 30px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}>Deploy Mashup Room 🚀</button>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -404,12 +404,12 @@ export default function GlobalNavigationAndMashupCreator() {
   );
 }
 
-const page: CSSProperties = { minHeight: '100vh', background: '#020617', color: '#e2e8f0', fontFamily: 'sans-serif' };
-const actNav: CSSProperties = { padding: '10px 15px', background: '#38bdf8', color: '#000', borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer' };
-const pasNav: CSSProperties = { padding: '10px 15px', background: 'transparent', color: '#94a3b8', borderRadius: 6, border: 'none', cursor: 'pointer' };
-const inputBox = { width: '100%', padding: '12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#fff', boxSizing: 'border-box' as const, marginTop: 5 };
-const primaryBtn = { background: '#38bdf8', color: '#000', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 'bold' as const, cursor: 'pointer' };
-const ghostBtn = { background: 'transparent', color: '#38bdf8', border: '1px solid #38bdf8', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' as const };
-const iconBtn = { background: 'transparent', border: '1px solid #64748b', color: '#cbd5e1', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12 };
-const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999, flexDirection: 'column' as const };
-const overlayModal = { background: '#0f172a', padding: 40, borderRadius: 12, border: '1px solid #38bdf8', textAlign: 'center' as const, boxShadow: '0 0 30px rgba(56, 189, 248, 0.2)' };
+const page: CSSProperties = { minHeight: '100vh', background: 'var(--bg-main)', color: 'var(--text-main)', fontFamily: 'sans-serif', boxSizing: 'border-box' };
+const actNav: CSSProperties = { padding: '10px 15px', background: 'var(--accent-primary)', color: '#000', borderRadius: 6, fontWeight: 'bold', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' };
+const pasNav: CSSProperties = { padding: '10px 15px', background: 'transparent', color: 'var(--text-muted)', borderRadius: 6, border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' };
+const inputBox = { width: '100%', padding: '12px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-main)', boxSizing: 'border-box' as const, marginTop: 5, outline: 'none' };
+const primaryBtn = { background: 'var(--accent-primary)', color: '#000', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 'bold' as const, cursor: 'pointer' };
+const ghostBtn = { background: 'transparent', color: 'var(--accent-primary)', border: '1px solid var(--accent-primary)', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' as const };
+const iconBtn = { background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-muted)', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12 };
+const overlay: CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999, flexDirection: 'column' as const };
+const overlayModal = { background: 'var(--bg-panel-solid)', padding: 40, borderRadius: 12, border: '1px solid var(--accent-primary)', textAlign: 'center' as const, boxShadow: '0 0 30px var(--accent-glow)' };

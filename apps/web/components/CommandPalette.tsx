@@ -72,34 +72,34 @@ export default function CommandPalette() {
   return (
     <AnimatePresence>
       {isOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '10vh', background: 'rgba(2, 6, 23, 0.7)', backdropFilter: 'blur(4px)' }} onClick={() => setIsOpen(false)}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '10vh', background: 'rgba(0, 0, 0, 0.6)', backdropFilter: 'blur(4px)' }} onClick={() => setIsOpen(false)}>
           <motion.div 
             initial={{ opacity: 0, scale: 0.95, y: -20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
             transition={{ duration: 0.15 }}
             onClick={(e) => e.stopPropagation()}
-            style={{ width: '100%', maxWidth: 600, background: '#0f172a', borderRadius: 16, border: '1px solid #1e293b', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+            style={{ width: '90%', maxWidth: 600, background: 'var(--bg-panel-solid)', borderRadius: 16, border: '1px solid var(--border-color)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
           >
             {/* Input Area */}
-            <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid #1e293b' }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border-color)' }}>
               <span style={{ fontSize: 20, marginRight: 12 }}>🔍</span>
               <input
                 ref={inputRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search users, problems, or contests..."
-                style={{ flex: 1, background: 'transparent', border: 'none', color: '#eef2ff', fontSize: 18, outline: 'none' }}
+                style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-main)', fontSize: 18, outline: 'none' }}
               />
-              <span style={{ background: '#1e293b', color: '#94a3b8', padding: '4px 8px', borderRadius: 6, fontSize: 12, fontWeight: 600 }}>ESC</span>
+              <span style={{ background: 'var(--bg-card)', color: 'var(--text-muted)', padding: '4px 8px', borderRadius: 6, fontSize: 12, fontWeight: 600, border: '1px solid var(--border-color)' }}>ESC</span>
             </div>
 
             {/* Results Area */}
             <div style={{ maxHeight: '60vh', overflowY: 'auto', padding: 12 }}>
-              {loading && <div style={{ padding: 20, textAlign: 'center', color: '#64748b' }}>Searching the arena...</div>}
+              {loading && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Searching the arena...</div>}
               
               {!loading && query.length >= 2 && !hasResults && (
-                <div style={{ padding: 20, textAlign: 'center', color: '#64748b' }}>No results found for "{query}"</div>
+                <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>No results found for "{query}"</div>
               )}
 
               {!loading && hasResults && (
@@ -108,11 +108,11 @@ export default function CommandPalette() {
                   {/* Coders */}
                   {results.users.length > 0 && (
                     <div>
-                      <div style={{ padding: '0 12px 8px', fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>Coders</div>
+                      <div style={{ padding: '0 12px 8px', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Coders</div>
                       {results.users.map((u: any) => (
-                        <div key={u.id} onClick={() => navigateTo(`/u/${u.username}`)} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderRadius: 8, cursor: 'pointer', background: 'transparent' }} onMouseEnter={(e) => e.currentTarget.style.background = '#1e293b'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                          <div style={{ color: '#eef2ff', fontWeight: 500 }}>{u.name} <span style={{ color: '#94a3b8', fontWeight: 400 }}>@{u.username}</span></div>
-                          <div style={{ color: '#38bdf8', fontSize: 14 }}>Rating: {u.rating || 0}</div>
+                        <div key={u.id} onClick={() => navigateTo(`/u/${u.username}`)} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderRadius: 8, cursor: 'pointer', background: 'transparent', transition: 'background 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.background = 'var(--table-hover)'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                          <div style={{ color: 'var(--text-main)', fontWeight: 500 }}>{u.name} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>@{u.username}</span></div>
+                          <div style={{ color: 'var(--accent-primary)', fontSize: 14 }}>Rating: {u.rating || 0}</div>
                         </div>
                       ))}
                     </div>
@@ -121,11 +121,11 @@ export default function CommandPalette() {
                   {/* Contests */}
                   {results.contests.length > 0 && (
                     <div>
-                      <div style={{ padding: '0 12px 8px', fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>Contests</div>
+                      <div style={{ padding: '0 12px 8px', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Contests</div>
                       {results.contests.map((c: any) => (
-                        <div key={c.id} onClick={() => navigateTo(`/contests/${c.id}`)} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderRadius: 8, cursor: 'pointer', background: 'transparent' }} onMouseEnter={(e) => e.currentTarget.style.background = '#1e293b'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                          <div style={{ color: '#eef2ff', fontWeight: 500 }}>{c.title}</div>
-                          <div style={{ color: c.status === 'RUNNING' ? '#4ade80' : '#94a3b8', fontSize: 14 }}>{c.status}</div>
+                        <div key={c.id} onClick={() => navigateTo(`/contests/${c.id}`)} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderRadius: 8, cursor: 'pointer', background: 'transparent', transition: 'background 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.background = 'var(--table-hover)'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                          <div style={{ color: 'var(--text-main)', fontWeight: 500 }}>{c.title}</div>
+                          <div style={{ color: c.status === 'RUNNING' ? '#4ade80' : 'var(--text-muted)', fontSize: 14, fontWeight: 'bold' }}>{c.status}</div>
                         </div>
                       ))}
                     </div>
@@ -134,10 +134,10 @@ export default function CommandPalette() {
                   {/* Problems */}
                   {results.problems.length > 0 && (
                     <div>
-                      <div style={{ padding: '0 12px 8px', fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>Practice Problems</div>
+                      <div style={{ padding: '0 12px 8px', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Practice Problems</div>
                       {results.problems.map((p: any) => (
-                        <div key={p.id} onClick={() => navigateTo(`/practice/${p.id}`)} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderRadius: 8, cursor: 'pointer', background: 'transparent' }} onMouseEnter={(e) => e.currentTarget.style.background = '#1e293b'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                          <div style={{ color: '#eef2ff', fontWeight: 500 }}>{p.title}</div>
+                        <div key={p.id} onClick={() => navigateTo(`/practice/${p.id}`)} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderRadius: 8, cursor: 'pointer', background: 'transparent', transition: 'background 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.background = 'var(--table-hover)'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                          <div style={{ color: 'var(--text-main)', fontWeight: 500 }}>{p.title}</div>
                           <div style={{ color: p.difficultyLabel === 'Easy' ? '#4ade80' : p.difficultyLabel === 'Medium' ? '#fbbf24' : '#f87171', fontSize: 14 }}>{p.difficultyLabel || 'Unrated'}</div>
                         </div>
                       ))}

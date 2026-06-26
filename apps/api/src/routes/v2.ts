@@ -241,7 +241,8 @@ export function mountV2Routes(app: Express, io: Server) {
   });
 
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {
-    const viewer = viewerFromRequest(req);
+    // 👉 FIXED: Explicitly resolve identity to guarantee ID linkage during registration
+    const viewer = await resolvedViewerFromRequest(req, true);
     const contest = await registerForContestV2(req.params.id, {
       ...req.body,
       userId: viewer.userId,
@@ -433,10 +434,12 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
-  router.get('/contests', async (req, res) => {
+  // 👉 FIXED: Fully resolve Viewer Identity so Owner Controls are enabled on the GET route!
+  router.get('/contests', asyncRoute(async (req, res) => {
+    const viewer = await resolvedViewerFromRequest(req);
     const contests = await listContestsV2();
-    res.json(contests.map(c => sanitizeContestForViewer(c, viewerFromRequest(req))));
-  });
+    res.json(contests.map(c => sanitizeContestForViewer(c, viewer)));
+  }));
 
   router.post('/contests', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req, true);
@@ -477,6 +480,7 @@ export function mountV2Routes(app: Express, io: Server) {
         where: { id: req.params.id }, 
         data: { status: ContestStatus.ENDED } 
     });
+    
     await recomputeContestStandings(req.params.id);
     const rewards = await processContestRewards(req.params.id);
     const updatedContest = await loadContestForViewer(req.params.id);
@@ -514,10 +518,12 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
+  // 👉 FIXED: Fully resolve Viewer Identity so Owner Controls are enabled on the GET route!
   router.get('/contests/:id', asyncRoute(async (req, res) => {
+    const viewer = await resolvedViewerFromRequest(req);
     const contest = await loadContestForViewer(req.params.id);
     if (!contest) throw new Error('Contest not found');
-    res.json(sanitizeContestForViewer(contest, viewerFromRequest(req)));
+    res.json(sanitizeContestForViewer(contest, viewer));
   }));
 
   router.post('/contests/:id/problems/mashup', asyncRoute(async (req, res) => {
@@ -662,14 +668,16 @@ export function mountV2Routes(app: Express, io: Server) {
   }));
 
   router.post('/contests/:id/problems/:problemId/unlock-testcase', asyncRoute(async (req, res) => {
-    const testcase = await unlockHiddenTestCase(req.params.id, req.params.problemId, viewerFromRequest(req));
+    const viewer = await resolvedViewerFromRequest(req);
+    const testcase = await unlockHiddenTestCase(req.params.id, req.params.problemId, viewer);
     res.json({ success: true, testcase });
   }));
 
   router.post('/contests/:id/submissions', asyncRoute(async (req, res) => {
+    const viewer = await resolvedViewerFromRequest(req);
     const submission = await createQueuedContestSubmission({
       contestId: req.params.id, contestProblemId: String(req.body.contestProblemId || req.body.problemId || ''),
-      viewer: viewerFromRequest(req), language: req.body.language, code: req.body.code
+      viewer: viewer, language: req.body.language, code: req.body.code
     });
     res.status(201).json(submission);
   }));
@@ -746,39 +754,38 @@ export function mountV2Routes(app: Express, io: Server) {
         where: { id: req.params.id }
       });
 
-     if (aiProblem) {
-  return res.json({
-    id: aiProblem.id,
-    title: aiProblem.title,
-    videoUrl: (aiProblem as any).videoUrl || null,
-    type: 'INTERNAL',
-    isMCQ: false,
-    platform: aiProblem.platform || 'DIVINECODE',
-    externalUrl: aiProblem.originalUrl || null,
-    customDescription: aiProblem.descriptionHtml || '', 
-    customTestCases: aiProblem.testcases || []
-  });
-}
+      if (aiProblem) {
+        return res.json({
+          id: aiProblem.id,
+          title: aiProblem.title,
+          videoUrl: (aiProblem as any).videoUrl || null,
+          type: 'INTERNAL',
+          isMCQ: false,
+          platform: aiProblem.platform || 'DIVINECODE',
+          externalUrl: aiProblem.originalUrl || null,
+          customDescription: aiProblem.descriptionHtml || '', 
+          customTestCases: aiProblem.testcases || []
+        });
+      }
 
-      // 👉 ADDED: Check the Base Problem Table
       const baseProblem = await prisma.problem.findUnique({
         where: { id: req.params.id },
         include: { testcases: true }
       });
 
       if (baseProblem) {
-  return res.json({
-    id: baseProblem.id,
-    title: baseProblem.title,
-    videoUrl: (baseProblem as any).videoUrl || null,
-    type: 'INTERNAL',
-    isMCQ: false,
-    platform: baseProblem.platform || 'DIVINECODE',
-    externalUrl: baseProblem.url || null,
-    customDescription: baseProblem.description || '', 
-    customTestCases: baseProblem.testcases || []
-  });
-}
+        return res.json({
+          id: baseProblem.id,
+          title: baseProblem.title,
+          videoUrl: (baseProblem as any).videoUrl || null,
+          type: 'INTERNAL',
+          isMCQ: false,
+          platform: baseProblem.platform || 'DIVINECODE',
+          externalUrl: baseProblem.url || null,
+          customDescription: baseProblem.description || '', 
+          customTestCases: baseProblem.testcases || []
+        });
+      }
 
       return res.status(404).json({ error: 'Problem not found' });
     }

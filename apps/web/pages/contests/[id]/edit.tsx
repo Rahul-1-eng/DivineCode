@@ -34,7 +34,6 @@ export default function ContestEditPage() {
   const [durationMinutes, setDurationMinutes] = useState(120);
   const [startTimeStr, setStartTimeStr] = useState('');
   
-  // 👉 NEW: Open Editing State to allow others to add problems
   const [openEditing, setOpenEditing] = useState(false);
 
   const [newProblemCode, setNewProblemCode] = useState('');
@@ -105,12 +104,12 @@ export default function ContestEditPage() {
     toast.success('Settings saved successfully!');
   }
 
-  // 👉 FIXED: Toggle open editing correctly connects to v2 settings API
+  // 👉 FIXED: API path fixed. We hit the standard PUT route to correctly update the setting.
   const toggleOpenEditing = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVal = e.target.checked;
     setOpenEditing(newVal);
     try {
-      await fetch(`${API_V2_BASE_URL}/contests/${id}/settings`, {
+      await fetch(`${API_V2_BASE_URL}/contests/${id}`, {
         method: 'PUT',
         headers: viewerHeaders(session),
         body: JSON.stringify({ openEditing: newVal })
@@ -121,7 +120,6 @@ export default function ContestEditPage() {
     }
   };
 
-  // 👉 FIXED: Upgraded to /v2/problems/lookup and implemented viewerHeaders for authorization.
   async function lookupProblem(platform: string, code: string) {
     const res = await fetch(`${API_V2_BASE_URL}/problems/lookup?platform=${encodeURIComponent(platform)}&code=${encodeURIComponent(code)}`, {
       headers: viewerHeaders(session)
@@ -374,11 +372,11 @@ export default function ContestEditPage() {
   if (!session) return <main style={page}><section style={panel}><h1>Sign in required</h1><a href="/signin" style={primary}>Sign in</a></section></main>;
   if (error) return <main style={page}><section style={panel}><h1>{error}</h1><a href="/contests" style={link}>Back to contests</a></section></main>;
   if (!contest) return <main style={page}>Loading editor...</main>;
-  if (!contest.canManage) return <main style={page}><section style={panel}><h1>Owner only</h1><p style={{ color: '#94a3b8' }}>Only the contest creator can open the editing page.</p><a href={`/contests/${id}`} style={primary}>Back to contest</a></section></main>;
+  if (!contest.canManage) return <main style={page}><section style={panel}><h1>Owner only</h1><p style={{ color: 'var(--text-muted)' }}>Only the contest creator can open the editing page.</p><a href={`/contests/${id}`} style={primary}>Back to contest</a></section></main>;
 
   return (
     <main style={page}>
-      <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
+      <Toaster position="top-center" toastOptions={{ style: { background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)' } }} />
       <section style={{ maxWidth: 1120, margin: '0 auto' }}>
         <nav style={nav}>
           <a href={`/contests/${id}`} style={link}>← Back to live room</a>
@@ -387,24 +385,24 @@ export default function ContestEditPage() {
         
         <div style={hero}>
           <p style={eyebrow}>Owner editing page</p>
-          <h1 style={{ margin: 0, fontSize: 44 }}>{contest.title}</h1>
+          <h1 style={{ margin: 0, fontSize: 44, color: 'var(--text-main)' }}>{contest.title}</h1>
         </div>
 
         <section style={panel}>
-          <h2>Contest settings</h2>
-          <label>Title</label>
+          <h2 style={{ color: 'var(--text-main)' }}>Contest settings</h2>
+          <label style={{ color: 'var(--text-muted)' }}>Title</label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} style={input} />
           
-          <label>Description</label>
+          <label style={{ color: 'var(--text-muted)' }}>Description</label>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} style={{ ...input, minHeight: 90 }} />
           
-          <label>Duration minutes</label>
+          <label style={{ color: 'var(--text-muted)' }}>Duration minutes</label>
           <input type="number" value={durationMinutes} onChange={(e) => setDurationMinutes(Number(e.target.value))} style={{ ...input, maxWidth: 180 }} />
           
-          <label style={{display: 'block', marginTop: 10}}>Scheduled Start Time</label>
+          <label style={{display: 'block', marginTop: 10, color: 'var(--text-muted)'}}>Scheduled Start Time</label>
           <input type="datetime-local" value={startTimeStr} onChange={(e) => setStartTimeStr(e.target.value)} style={{ ...input, maxWidth: 220 }} />
           
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 15, marginBottom: 15 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 15, marginBottom: 15, color: 'var(--text-main)' }}>
             <input type="checkbox" checked={openEditing} onChange={toggleOpenEditing} />
             Open Editing (Allow others to add problems during the contest)
           </label>
@@ -413,10 +411,10 @@ export default function ContestEditPage() {
         </section>
 
         <section style={panel}>
-          <h2>Add problem</h2>
+          <h2 style={{ color: 'var(--text-main)' }}>Add problem</h2>
           
           <div style={{ marginBottom: 20 }}>
-            <label style={{ display: 'block', marginBottom: 5, color: '#94a3b8' }}>Option 1: Add by Platform & Code</label>
+            <label style={{ display: 'block', marginBottom: 5, color: 'var(--text-muted)' }}>Option 1: Add by Platform & Code</label>
             <div style={inline}>
               <select value={newProblemPlatform} onChange={(e) => setNewProblemPlatform(e.target.value)} style={{...input, width: 'auto', marginBottom: 0}}>
                 <option>Codeforces</option><option>LeetCode</option><option>AtCoder</option><option>CodeChef</option>
@@ -426,32 +424,32 @@ export default function ContestEditPage() {
             </div>
           </div>
 
-          <div style={{ borderTop: '1px solid #1e293b', paddingTop: 20, marginBottom: 20 }}>
-            <label style={{ display: 'block', marginBottom: 5, color: '#94a3b8' }}>Option 2: Smart Scrape via URL (Extracts Code & Test Cases)</label>
+          <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 20, marginBottom: 20 }}>
+            <label style={{ display: 'block', marginBottom: 5, color: 'var(--text-muted)' }}>Option 2: Smart Scrape via URL (Extracts Code & Test Cases)</label>
             <div style={{ display: 'flex', gap: 12 }}>
               <input value={newProblemUrl} onChange={(e) => setNewProblemUrl(e.target.value)} placeholder="https://codeforces.com/problemset/problem/..." style={{ ...input, flex: 1, margin: 0 }} />
               <button onClick={addProblemFromUrl} style={primary}>Scrape & Add</button>
             </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#94a3b8', marginTop: 10 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--text-muted)', marginTop: 10 }}>
                <input type="checkbox" checked={urlGenerateAiTests} onChange={e => setUrlGenerateAiTests(e.target.checked)} />
                🤖 Check scraped tests AND automatically generate tougher hidden system tests via AI
             </label>
           </div>
 
-          <div style={{ borderTop: '1px solid #1e293b', paddingTop: 20 }}>
-            <label style={{ display: 'block', marginBottom: 5, color: '#94a3b8' }}>Option 3: Create Custom Problem</label>
+          <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 20 }}>
+            <label style={{ display: 'block', marginBottom: 5, color: 'var(--text-muted)' }}>Option 3: Create Custom Problem</label>
             <input value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} placeholder="Custom Problem Title" style={input} />
             
-            <div style={{ background: '#020617', padding: 10, borderRadius: '12px 12px 0 0', border: '1px solid #334155', borderBottom: 'none', display: 'flex', gap: 10, alignItems: 'center' }}>
-              <span style={{ fontSize: 13, color: '#94a3b8' }}>Insert Image:</span>
+            <div style={{ background: 'var(--border-color)', padding: 10, borderRadius: '12px 12px 0 0', display: 'flex', gap: 10, alignItems: 'center' }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Insert Image:</span>
               <input 
                 type="file" 
                 accept="image/*" 
                 onChange={handleImageUpload} 
-                style={{ fontSize: 13, color: '#e2e8f0', width: 220 }} 
+                style={{ fontSize: 13, color: 'var(--text-main)', width: 220 }} 
                 disabled={uploadingImage}
               />
-              {uploadingImage && <span style={{ color: '#38bdf8', fontSize: 12 }}>Uploading...</span>}
+              {uploadingImage && <span style={{ color: 'var(--accent-primary)', fontSize: 12 }}>Uploading...</span>}
             </div>
             <textarea 
               value={customDescription} 
@@ -461,11 +459,11 @@ export default function ContestEditPage() {
             />
             
             <div>
-               <label style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold' }}>Time Limit (Seconds, 0 for infinite)</label>
+               <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 'bold' }}>Time Limit (Seconds, 0 for infinite)</label>
                <input type="number" placeholder="e.g. 120" value={customTimeLimit} onChange={e => setCustomTimeLimit(Number(e.target.value))} style={input} />
             </div>
 
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#94a3b8', marginTop: 5, marginBottom: 15 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--text-muted)', marginTop: 5, marginBottom: 15 }}>
                <input type="checkbox" checked={customGenerateAiTests} onChange={e => setCustomGenerateAiTests(e.target.checked)} />
                🤖 Automatically generate tougher hidden system tests for this problem via AI
             </label>
@@ -476,10 +474,10 @@ export default function ContestEditPage() {
         </section>
 
         <section style={panel}>
-          <h2>Problems</h2>
+          <h2 style={{ color: 'var(--text-main)' }}>Problems</h2>
           {contest.problems.map((problem: any, index: number) => (
             <div key={problem.id} style={row}>
-              <strong style={{ fontSize: 24, color: '#e2e8f0', minWidth: 30 }}>{String.fromCharCode(65 + index)}</strong>
+              <strong style={{ fontSize: 24, color: 'var(--text-main)', minWidth: 30 }}>{String.fromCharCode(65 + index)}</strong>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginRight: 15 }}>
                  <button onClick={() => moveProblem(problem.id, 'UP')} disabled={index === 0} style={{...ghost, padding: '2px 6px', fontSize: 10}}>▲</button>
@@ -487,19 +485,19 @@ export default function ContestEditPage() {
               </div>
 
               <div style={{ flex: 1 }}>
-                <b style={{ fontSize: 18 }}>{problem.titleSnapshot || problem.title}</b>
-                <p style={{ margin: '4px 0 0', color: '#94a3b8' }}>{problem.platform} - Rating {problem.rating || problem.difficulty || 'Practice'}</p>
+                <b style={{ fontSize: 18, color: 'var(--text-main)' }}>{problem.titleSnapshot || problem.title}</b>
+                <p style={{ margin: '4px 0 0', color: 'var(--text-muted)' }}>{problem.platform} - Rating {problem.rating || problem.difficulty || 'Practice'}</p>
               </div>
               <button onClick={() => replaceProblem(problem.id)} style={ghost}>Replace</button>
               <button onClick={() => removeProblem(problem.id)} style={danger}>Remove</button>
             </div>
           ))}
-          {contest.problems.length === 0 && <p style={{ color: '#64748b' }}>No problems added yet.</p>}
+          {contest.problems.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No problems added yet.</p>}
         </section>
 
         <section style={panel}>
-          <h2>Players</h2>
-          <div style={{...playerRow, fontWeight: 'bold', color: '#fff', borderBottom: '2px solid #1e293b'}}>
+          <h2 style={{ color: 'var(--text-main)' }}>Players</h2>
+          <div style={{...playerRow, fontWeight: 'bold', color: 'var(--text-main)', borderBottom: '2px solid var(--border-color)'}}>
             <span>Name</span><span>Team</span><span>Handle</span>
           </div>
           {contest.members?.map((member: any) => (
@@ -509,24 +507,24 @@ export default function ContestEditPage() {
               <span>{member.codeforcesHandle || member.externalHandle?.handle || 'missing handle'}</span>
             </div>
           ))}
-          {(!contest.members || contest.members.length === 0) && <p style={{ color: '#64748b', marginTop: 15 }}>No players registered yet.</p>}
+          {(!contest.members || contest.members.length === 0) && <p style={{ color: 'var(--text-muted)', marginTop: 15 }}>No players registered yet.</p>}
         </section>
       </section>
     </main>
   );
 }
 
-// Styles
-const page: CSSProperties = { minHeight: '100vh', width: '100%', maxWidth: '100vw', overflowX: 'hidden', padding: 'clamp(16px, 4vw, 32px)', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(99,102,241,.15), transparent 34rem), #070a16', boxSizing: 'border-box' };
+// 👉 FIXED: Fully integrated Dark/Light mode theme CSS variables
+const page: CSSProperties = { minHeight: '100vh', width: '100%', maxWidth: '100vw', overflowX: 'hidden', padding: 'clamp(16px, 4vw, 32px)', fontFamily: 'Inter, Arial, sans-serif', color: 'var(--text-main)', background: 'var(--bg-main)', boxSizing: 'border-box' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 };
-const link: CSSProperties = { color: '#67e8f9', textDecoration: 'none', fontWeight: 900, fontSize: 16 };
+const link: CSSProperties = { color: 'var(--accent-primary)', textDecoration: 'none', fontWeight: 900, fontSize: 16 };
 const danger: CSSProperties = { background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#f87171', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
 const primary: CSSProperties = { display: 'inline-block', padding: '12px 24px', borderRadius: 8, background: 'linear-gradient(135deg,#38bdf8,#818cf8)', color: '#020617', textDecoration: 'none', fontWeight: 900, border: 'none', textAlign: 'center', cursor: 'pointer' };
-const ghost: CSSProperties = { background: 'transparent', color: '#cbd5e1', border: '1px solid #334155', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
-const hero: CSSProperties = { padding: 'clamp(20px, 4vw, 30px)', borderRadius: 24, background: 'rgba(15,23,42,.82)', border: '1px solid rgba(148,163,184,.15)', marginBottom: 24 };
-const eyebrow: CSSProperties = { color: '#67e8f9', fontWeight: 900, letterSpacing: '.14em', textTransform: 'uppercase', margin: '0 0 10px 0' };
-const panel: CSSProperties = { background: 'rgba(15,23,42,.82)', padding: 'clamp(16px, 4vw, 24px)', borderRadius: 24, border: '1px solid rgba(148,163,184,.15)', marginBottom: 24, boxShadow: '0 10px 30px rgba(0,0,0,.2)' };
-const input: CSSProperties = { width: '100%', padding: 14, borderRadius: 12, border: '1px solid rgba(148,163,184,.25)', background: 'rgba(2,6,23,.55)', color: '#eef2ff', marginBottom: 16, outline: 'none', boxSizing: 'border-box' };
+const ghost: CSSProperties = { background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
+const hero: CSSProperties = { padding: 'clamp(20px, 4vw, 30px)', borderRadius: 24, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', marginBottom: 24 };
+const eyebrow: CSSProperties = { color: 'var(--accent-primary)', fontWeight: 900, letterSpacing: '.14em', textTransform: 'uppercase', margin: '0 0 10px 0' };
+const panel: CSSProperties = { background: 'var(--bg-panel)', padding: 'clamp(16px, 4vw, 24px)', borderRadius: 24, border: '1px solid var(--border-color)', marginBottom: 24, boxShadow: '0 10px 30px rgba(0,0,0,.1)' };
+const input: CSSProperties = { width: '100%', padding: 14, borderRadius: 12, border: '1px solid var(--border-color)', background: 'var(--bg-main)', color: 'var(--text-main)', marginBottom: 16, outline: 'none', boxSizing: 'border-box' };
 const inline: CSSProperties = { display: 'flex', gap: 12, alignItems: 'center' };
-const row: CSSProperties = { display: 'flex', alignItems: 'center', gap: 16, padding: '16px 0', borderBottom: '1px solid rgba(148,163,184,.1)' };
-const playerRow: CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', padding: '16px 0', borderBottom: '1px solid rgba(148,163,184,.1)', color: '#cbd5e1', fontSize: 15 };
+const row: CSSProperties = { display: 'flex', alignItems: 'center', gap: 16, padding: '16px 0', borderBottom: '1px solid var(--border-color)' };
+const playerRow: CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', padding: '16px 0', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: 15 };
