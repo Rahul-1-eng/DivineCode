@@ -26,7 +26,7 @@ export default function App({ Component, pageProps }: AppProps) {
   return (
     <SessionProvider session={pageProps.session}>
       <ThemeProvider attribute="data-theme" defaultTheme="dark">
-        {/* Global CSS Variables for seamless Light/Dark Mode */}
+        {/* Global Style overrides to enforce absolute theme token syncing across all document nodes */}
         <style dangerouslySetInnerHTML={{ __html: `
           :root {
             --bg-main: #070a16;
@@ -38,8 +38,10 @@ export default function App({ Component, pageProps }: AppProps) {
             --text-muted: #94a3b8;
             --border-color: rgba(148,163,184,0.22);
             --accent-primary: #22d3ee;
+            --accent-glow: rgba(34, 211, 238, 0.4);
             --button-ghost-bg: rgba(2,6,23,.55);
             --button-ghost-border: rgba(148,163,184,.25);
+            --table-hover: rgba(34, 211, 238, 0.05);
           }
           [data-theme='light'] {
             --bg-main: #f8fafc;
@@ -51,15 +53,20 @@ export default function App({ Component, pageProps }: AppProps) {
             --text-muted: #475569;
             --border-color: rgba(15,23,42,0.1);
             --accent-primary: #0284c7;
+            --accent-glow: rgba(2, 132, 199, 0.2);
             --button-ghost-bg: rgba(255,255,255,.5);
             --button-ghost-border: rgba(15,23,42,.1);
+            --table-hover: rgba(2, 132, 199, 0.05);
           }
           body {
-            background: var(--bg-main-gradient);
-            background-color: var(--bg-main);
-            color: var(--text-main);
-            transition: background 0.3s ease, color 0.3s ease;
+            background: var(--bg-main-gradient) !important;
+            background-color: var(--bg-main) !important;
+            color: var(--text-main) !important;
+            transition: background 0.3s ease, background-color 0.3s ease, color 0.3s ease;
             margin: 0;
+          }
+          main {
+            background: transparent !important;
           }
         `}} />
 

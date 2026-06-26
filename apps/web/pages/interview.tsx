@@ -31,6 +31,8 @@ export default function InterviewPage() {
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [newQ, setNewQ] = useState({ trackId: '', title: '', prompt: '', opt0: '', opt1: '', opt2: '', opt3: '', correctIndex: 0, explanation: '' });
 
+  const isPlatformOwner = profile?.role === 'ADMIN';
+
   useEffect(() => {
     if (status === 'loading') return;
 
@@ -84,18 +86,18 @@ export default function InterviewPage() {
     return list;
   }, [questions, selectedTrack, filterStatus, progress]);
 
-  // Reset states when changing questions or filters
+  // 👉 FIXED: Extracted 'currentIndex' to break the endless reset feedback loop
   useEffect(() => { 
     setCurrentIndex(0); 
     setSelectedOption(null); 
-    setIsMockMode(false); // Default back to MCQ mode on next question
-  }, [selectedTrack, filterStatus, currentIndex]);
+    setIsMockMode(false); 
+  }, [selectedTrack, filterStatus]);
 
   const currentQ = filtered[currentIndex];
 
   const updateProgress = async (qId: string, progressStatus: string) => {
     setProgress(prev => ({ ...prev, [qId]: progressStatus }));
-    if (!session?.user) return; // Guests won't save progress
+    if (!session?.user) return; 
     
     try {
       await fetchApi(`/api/v2/interview/progress/${qId}`, {
@@ -117,6 +119,20 @@ export default function InterviewPage() {
       setQuestions(Array.isArray(refreshedQuestions) ? refreshedQuestions : []);
     } catch (err: any) {
       toast.error(err.message || "Failed to approve");
+    }
+  };
+
+  // 👉 ADDED: Delete question endpoint execution hook
+  const handleDeleteQuestion = async (qId: string) => {
+    if (!confirm("Completely wipe this interview question from the database? This action is absolute.")) return;
+    try {
+      await fetchApi(`/api/v2/interview/questions/${qId}`, { method: 'DELETE' });
+      toast.success("Question removed permanently.");
+      setQuestions(prev => prev.filter(q => q.id !== qId));
+      setSelectedOption(null);
+      if (currentIndex > 0) setCurrentIndex(c => c - 1);
+    } catch (err: any) {
+      toast.error(err.message || "Delete request failed.");
     }
   };
 
@@ -234,7 +250,16 @@ export default function InterviewPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20, alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                     <span style={tag}>{currentQ.track?.title || 'Core CS'}</span>
                     
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                      {/* 👉 ADDED: Admin/Owner destructive capability trigger */}
+                      {isPlatformOwner && (
+                        <button 
+                          onClick={() => handleDeleteQuestion(currentQ.id)}
+                          style={{ background: 'transparent', border: '1px solid #f87171', color: '#f87171', borderRadius: 999, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}
+                        >
+                          🗑️ Delete Question
+                        </button>
+                      )}
                       <button 
                         onClick={() => updateProgress(currentQ.id, 'REVIEWING')} 
                         style={{...statusBtn, background: progress[currentQ.id] === 'REVIEWING' ? 'rgba(251,191,36,.15)' : 'transparent', color: progress[currentQ.id] === 'REVIEWING' ? '#fbbf24' : 'var(--text-muted)', borderColor: progress[currentQ.id] === 'REVIEWING' ? '#fbbf24' : 'var(--border-color)'}}
@@ -293,7 +318,7 @@ export default function InterviewPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 35, borderTop: '1px solid var(--border-color)', paddingTop: 25, flexWrap: 'wrap', gap: 15 }}>
                     <button 
                       disabled={currentIndex === 0} 
-                      onClick={() => { setCurrentIndex(c => c - 1); setSelectedOption(null); }} 
+                      onClick={() => { if(currentIndex > 0) { setCurrentIndex(c => c - 1); setSelectedOption(null); } }} 
                       style={{...ghostBtn, padding: '12px 24px', fontSize: 16, opacity: currentIndex === 0 ? 0.3 : 1}}
                     >← Previous</button>
                     

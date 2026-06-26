@@ -4,6 +4,11 @@ export default function Document() {
   return (
     <Html lang="en">
       <Head>
+        {/* Global tab favicon declaration */}
+        <link rel="icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" href="/favicon.ico" />
+        <link rel="manifest" href="/manifest.json" />
+
         {/* Primary Meta Tags */}
         <meta name="title" content="DivineCode Pro | Distributed Algorithmic Training Platform" />
         <meta name="description" content="A real-time multiplayer coding arena featuring an AI Voice Interviewer, AST Plagiarism Detection, and Codeforces synchronization." />

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 import { conductAiInterview } from '../modules/ai/aiService';
+import { viewerFromRequest } from '../modules/contests/contestRules';
 
 export const interviewRouter = Router();
 
@@ -233,5 +234,34 @@ interviewRouter.post('/questions/:id/mock', async (req, res) => {
     res.json({ success: true, evaluation: aiEvaluation });
   } catch (err: any) {
     res.status(500).json({ error: 'AI Interview Service Failed' });
+  }
+});
+interviewRouter.delete('/questions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const viewer = viewerFromRequest(req);
+
+    // Resolve structural owner mapping validation
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: viewer.userId },
+          { email: viewer.email || undefined }
+        ]
+      }
+    });
+
+    if (!user || user.role !== 'ADMIN') {
+      return res.status(403).json({ error: "Only the platform admin/owner can purge core system interview assets." });
+    }
+
+    // Cascade remove relational progress bindings before deleting parent record
+    await prisma.interviewProgress.deleteMany({ where: { questionId: id } });
+    await prisma.interviewQuestion.delete({ where: { id } });
+
+    return res.json({ success: true, message: "Interview question wiped cleanly from core cluster." });
+  } catch (err: any) {
+    console.error('[INTERVIEW_DELETE_ERR]', err);
+    return res.status(500).json({ error: `Purge operation aborted: ${err.message}` });
   }
 });
