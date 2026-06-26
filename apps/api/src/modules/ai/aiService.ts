@@ -73,19 +73,16 @@ export async function analyzeSubmissionLogic(submissionId: string, problemDescri
   }
 }
 
-// ✅ IMPROVED: AI Chatbot with caching and Claude support
 export async function askAiChatbot(query: string, history: any[] = [], imageBase64?: string): Promise<string> {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) return "AI Configuration key is missing from server architecture variables environment maps.";
 
-  // Check cache first (only for text queries without images)
   if (!imageBase64) {
     const cached = getCachedResponse(query);
     if (cached) return cached;
   }
 
   try {
-    // ✅ CLAUDE API PATH
     if (USE_CLAUDE_API) {
       console.log('🚀 Using Claude API for chatbot');
       const client = new Anthropic({ apiKey });
@@ -120,7 +117,6 @@ export async function askAiChatbot(query: string, history: any[] = [], imageBase
       return reply;
     }
 
-    // ✅ GEMINI API PATH
     console.log('🚀 Using Gemini API for chatbot');
     const historyContext = history.length > 0
       ? `\n--- Previous Conversation ---\n${history.map(m => `${m.role === 'model' || m.role === 'ai' ? 'AI Guide' : 'User'}: ${m.text}`).join('\n')}\n---------------------------\n`
@@ -166,7 +162,6 @@ export async function askAiChatbot(query: string, history: any[] = [], imageBase
   }
 }
 
-// ✅ IMPROVED: AI Interview with Claude support
 export async function conductAiInterview(problemPrompt: string, userResponse: string, chatHistory: any[] = [], currentCode?: string) {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) throw new Error("AI_API_KEY is missing from the environment.");
@@ -196,7 +191,6 @@ export async function conductAiInterview(problemPrompt: string, userResponse: st
   {"feedback": "...", "followUpQuestion": "...", "technicalScore": 85, "fluencyScore": 90, "pronunciationTips": "...", "isPassed": false}`;
 
   try {
-    // ✅ CLAUDE API PATH
     if (USE_CLAUDE_API) {
       console.log('🚀 Using Claude API for interview');
       const client = new Anthropic({ apiKey });
@@ -204,12 +198,7 @@ export async function conductAiInterview(problemPrompt: string, userResponse: st
       const response = await client.messages.create({
         model: 'claude-opus-4-6',
         max_tokens: 1024,
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
+        messages: [{ role: 'user', content: prompt }]
       });
 
       const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
@@ -225,11 +214,9 @@ export async function conductAiInterview(problemPrompt: string, userResponse: st
             isPassed: false
         };
       }
-      
       return responseData;
     }
 
-    // ✅ GEMINI API PATH
     console.log('🚀 Using Gemini API for interview');
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
     const { data } = await axios.post(url, { 
@@ -249,11 +236,9 @@ export async function conductAiInterview(problemPrompt: string, userResponse: st
             isPassed: false
         };
     }
-    
     return responseData;
   } catch (error: any) {
     console.error("❌ AI Interview Error:", error.response?.data || error.message);
-    
     return {
         feedback: "The connection to the AI Interviewer timed out due to heavy load. Let's continue.",
         followUpQuestion: "Can you summarize your approach one more time?",
@@ -366,5 +351,53 @@ export async function debugCodeWithAI(userCode: string, problemDescription: stri
     return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
   } catch (error: any) {
     return { hint: "Could not parse AI response", input: "", expectedOutput: "" };
+  }
+}
+
+// 🚀 NEW: AI Weakness Targeting Analyzer
+export async function analyzeUserWeaknesses(submissions: { problemTitle: string, code: string, verdict: string }[]) {
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) return null;
+
+  const submissionsText = submissions.map((s, i) => `Problem ${i+1}: ${s.problemTitle}\nVerdict: ${s.verdict}\nCode:\n${s.code}`).join('\n\n---\n\n');
+
+  const prompt = `You are a FAANG competitive programming coach. Analyze the following recent FAILED submissions by a student:
+  
+  ${submissionsText}
+
+  Task: Identify their core algorithmic and structural weaknesses based on the code provided. 
+  1. Determine exactly 3 core competitive programming topics they are failing at (e.g., "Dynamic Programming", "Graph Theory", "Greedy Math", "Data Structures", "String Algorithms").
+  2. For the "radarUpdates", deduct points from their mastery score based on severity (e.g., -5 to -15).
+
+  Respond strictly with JSON:
+  {
+    "weaknesses": [
+      {"topic": "Dynamic Programming", "reason": "Failed to identify overlapping subproblems in Problem 1..."},
+      {"topic": "Graph Theory", "reason": "DFS traversal lacked cycle detection..."}
+    ],
+    "radarUpdates": [
+      {"subject": "Dynamic Programming", "scoreDelta": -10},
+      {"subject": "Graph Theory", "scoreDelta": -5}
+    ]
+  }`;
+
+  try {
+    if (USE_CLAUDE_API) {
+      const client = new Anthropic({ apiKey });
+      const response = await client.messages.create({
+        model: 'claude-opus-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }]
+      });
+      const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
+      return parseAiJsonResponse(text);
+    }
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
+    const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
+    return parseAiJsonResponse(data.candidates[0].content.parts[0].text);
+  } catch (error: any) {
+    console.error("AI Weakness Analysis Error:", error.response?.data || error.message);
+    return null;
   }
 }

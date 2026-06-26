@@ -6,7 +6,7 @@ const EloGraph = ({ history }: { history: any[] }) => {
   if (!history || history.length < 1) {
     return <div style={{ color: '#64748b', padding: 40, textAlign: 'center', background: 'rgba(2,6,23,.5)', borderRadius: 16, border: '1px solid rgba(148,163,184,.1)' }}>No rated history yet. Compete to get your initial rating!</div>;
   }
-  const points = history.map(h => h.newRating);
+  const points = history.map(h => h.newRating || h.ratingAfter || h.rating || 1200);
   if (points.length === 1) points.unshift(1200); 
   const min = Math.min(...points) - 50;
   const max = Math.max(...points) + 50;
@@ -96,6 +96,10 @@ export default function ProfilePage() {
   const [savingUser, setSavingUser] = useState(false);
   const [savingHandles, setSavingHandles] = useState(false);
 
+  // 👉 ADDED: State for AI Analysis Engine
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiAnalysisResult, setAiAnalysisResult] = useState<any>(null);
+
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [pwMessage, setPwMessage] = useState({ text: '', type: '' });
@@ -131,6 +135,26 @@ export default function ProfilePage() {
         setLoading(false);
       });
   }, [status, session]);
+
+  // 👉 ADDED: Function to trigger AI Weakness Targeting API
+  async function handleAnalyzeWeaknesses() {
+    setIsAnalyzing(true);
+    try {
+      const res = await fetchApi('/api/v2/ai/analyze-weaknesses', { method: 'POST' });
+      if (res.success) {
+         // Hot-swap the radar chart data for an instant UI update
+         setUserData((prev: any) => ({ ...prev, topicMastery: res.newRadarChart }));
+         setAiAnalysisResult(res);
+         alert("AI Analysis complete! Check your updated radar chart and new recommendations.");
+      } else {
+         alert(res.message || res.error || "Failed to analyze weaknesses.");
+      }
+    } catch (err: any) {
+       alert(err.message || "Network error while analyzing weaknesses.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
 
   async function handleClaimUsername() {
     if (!divineCodeUsername.trim()) return alert("Username cannot be empty");
@@ -238,13 +262,39 @@ export default function ProfilePage() {
           </section>
 
           <section style={{ ...card, display: 'flex', flexDirection: 'column' }}>
-            <h2 style={{ margin: '0 0 16px 0', fontSize: 20, display: 'flex', justifyContent: 'space-between' }}>
+            <h2 style={{ margin: '0 0 16px 0', fontSize: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               Topic Mastery Tracker
-              <span style={{ fontSize: 12, background: 'rgba(34,211,238,0.1)', color: '#22d3ee', padding: '4px 8px', borderRadius: 8, fontWeight: 'bold' }}>AI Analyzed</span>
+              {/* 👉 ADDED: Button to trigger AI Weakness Analysis */}
+              <button 
+                 onClick={handleAnalyzeWeaknesses} 
+                 disabled={isAnalyzing}
+                 style={{ fontSize: 12, background: 'rgba(34,211,238,0.1)', color: '#22d3ee', padding: '6px 12px', borderRadius: 8, fontWeight: 'bold', border: '1px solid rgba(34,211,238,0.3)', cursor: isAnalyzing ? 'not-allowed' : 'pointer' }}
+              >
+                {isAnalyzing ? 'Analyzing...' : '🤖 Analyze Weaknesses'}
+              </button>
             </h2>
-            <div style={{ flex: 1, background: 'rgba(2,6,23,.5)', borderRadius: 16, border: '1px solid rgba(148,163,184,.16)', display: 'grid', placeItems: 'center' }}>
+            
+            <div style={{ flex: 1, background: 'rgba(2,6,23,.5)', borderRadius: 16, border: '1px solid rgba(148,163,184,.16)', display: 'grid', placeItems: 'center', padding: '10px 0' }}>
                <TopicRadarChart data={userData?.topicMastery?.length > 0 ? userData.topicMastery : defaultRadarData} />
             </div>
+
+            {/* 👉 ADDED: Render AI Recommendations Box if present */}
+            {aiAnalysisResult && (
+               <div style={{ marginTop: 15, padding: 15, background: 'rgba(168, 85, 247, 0.1)', borderRadius: 12, border: '1px solid rgba(168, 85, 247, 0.3)' }}>
+                  <h3 style={{ margin: '0 0 10px', color: '#a855f7', fontSize: 16 }}>🎯 AI Recommendations</h3>
+                  <div style={{ fontSize: 13, color: '#e2e8f0', marginBottom: 10 }}>
+                    <strong>Weakness Identified:</strong> {aiAnalysisResult.analysis?.weaknesses?.[0]?.topic || 'General Problem Solving'}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                     {aiAnalysisResult.recommendedProblems?.map((p: any, i: number) => (
+                        <a key={i} href={`/practice?tags=${p.tags?.[0] || ''}`} style={{ padding: '10px 12px', background: '#020617', borderRadius: 8, color: '#38bdf8', textDecoration: 'none', display: 'flex', justifyContent: 'space-between', border: '1px solid #1e293b' }}>
+                           <span>{p.title}</span>
+                           <span style={{ color: '#fbbf24', fontWeight: 'bold' }}>Elo {p.rating}</span>
+                        </a>
+                     ))}
+                  </div>
+               </div>
+            )}
           </section>
 
         </div>
@@ -315,7 +365,6 @@ export default function ProfilePage() {
           </section>
         </div>
         
-        {/* 👉 FIXED: Removed stray text comment, safely rendering logs container */}
         <section style={{ ...card, marginTop: 18 }}>
           <h2 style={{ margin: '0 0 16px 0', fontSize: 20 }}>Transaction & Rating Logs</h2>
           
@@ -330,18 +379,24 @@ export default function ProfilePage() {
                 </tr>
               </thead>
               <tbody>
-                {userData?.activityLog?.map((act: any, i: number) => (
-                  <tr key={i} style={{ borderBottom: '1px solid rgba(148,163,184,.12)' }}>
-                    <td style={td}>{new Date(act.date).toLocaleDateString()}</td>
-                    <td style={td}>{act.eventDescription}</td>
-                    <td style={{ ...td, color: act.ratingDelta >= 0 ? '#4ade80' : '#f87171' }}>
-                      {act.ratingDelta > 0 ? '+' : ''}{act.ratingDelta}
-                    </td>
-                    <td style={{ ...td, color: '#fcd34d' }}>
-                      {act.coinDelta > 0 ? '+' : ''}{act.coinDelta} 🪙
-                    </td>
+                {userData?.activityLog?.length > 0 ? (
+                  userData.activityLog.map((act: any, i: number) => (
+                    <tr key={i} style={{ borderBottom: '1px solid rgba(148,163,184,.12)' }}>
+                      <td style={td}>{new Date(act.date).toLocaleDateString()}</td>
+                      <td style={td}>{act.eventDescription}</td>
+                      <td style={{ ...td, color: act.ratingDelta >= 0 ? '#4ade80' : '#f87171' }}>
+                        {act.ratingDelta > 0 ? '+' : ''}{act.ratingDelta}
+                      </td>
+                      <td style={{ ...td, color: '#fcd34d' }}>
+                        {act.coinDelta > 0 ? '+' : ''}{act.coinDelta} 🪙
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={4} style={{ ...td, textAlign: 'center', color: '#64748b' }}>No transactions or rating changes yet.</td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>

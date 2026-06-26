@@ -19,7 +19,6 @@ profileRouter.get('/me', async (req, res) => {
     
     console.log('📊 [PROFILE] GET /me request received');
     console.log(`   📧 Email from session: ${email}`);
-    console.log(`   📨 Headers: x-user-email = ${req.headers['x-user-email']}`);
     
     if (!email) {
       console.error('❌ [PROFILE] Unauthorized: No email found');
@@ -28,32 +27,33 @@ profileRouter.get('/me', async (req, res) => {
 
     console.log(`🔍 [PROFILE] Searching for user with email: ${email}`);
     
-   let user = await prisma.user.findUnique({
-  where: { email },
-  include: { 
-    externalHandles: true,
-    // 👉 FIXED: Include activity logs so they reach the frontend
-    activityLog: {
-      orderBy: { date: 'desc' }
-    },
-    ratingHistory: { 
-      orderBy: { createdAt: 'asc' }, 
-      include: { contest: { select: { title: true } } } 
-    },
-    submissions: { 
-      select: { id: true, verdict: true, createdAt: true },
-      orderBy: { createdAt: 'desc' }
-    },
-    contestParticipants: {
-      where: { standing: { isNot: null } },
+    let user = await prisma.user.findUnique({
+      where: { email },
       include: { 
-        contest: { select: { id: true, title: true, startTime: true, isRated: true } }, 
-        standing: true 
-      },
-      orderBy: { contest: { startTime: 'desc' } }
-    }
-  }
-});
+        externalHandles: true,
+        // 👉 FIXED: Explicitly include the topic relations for the Radar Chart
+        topicMastery: { include: { topic: true } }, 
+        activityLog: {
+          orderBy: { date: 'desc' }
+        },
+        ratingHistory: { 
+          orderBy: { createdAt: 'asc' }, 
+          include: { contest: { select: { title: true } } } 
+        },
+        submissions: { 
+          select: { id: true, verdict: true, createdAt: true },
+          orderBy: { createdAt: 'desc' }
+        },
+        contestParticipants: {
+          where: { standing: { isNot: null } },
+          include: { 
+            contest: { select: { id: true, title: true, startTime: true, isRated: true } }, 
+            standing: true 
+          },
+          orderBy: { contest: { startTime: 'desc' } }
+        }
+      }
+    });
     
     if (!user) {
       console.warn(`⚠️ [PROFILE] User not found for email: ${email}`);
@@ -61,20 +61,16 @@ profileRouter.get('/me', async (req, res) => {
     }
 
     console.log(`✅ [PROFILE] User found: ${user.username}`);
-    console.log(`   📊 Submissions count: ${user.submissions.length}`);
-    console.log(`   🏆 Rating: ${user.rating}`);
-    console.log(`   🪙 Coins: ${user.coins}`);
 
-    // 🔥 Database Aggregation Optimization
     const [totalAttempts, totalAccepted] = await Promise.all([
       prisma.submission.count({ where: { userId: user.id } }),
       prisma.submission.count({
-  where: {
-    userId: user.id,
-    verdict: 'ACCEPTED',
-    status: 'FINISHED'
-  }
-})
+        where: {
+          userId: user.id,
+          verdict: 'ACCEPTED',
+          status: 'FINISHED'
+        }
+      })
     ]);
 
     const accuracy = totalAttempts > 0 ? Math.round((totalAccepted / totalAttempts) * 100) : 0;
@@ -91,24 +87,29 @@ profileRouter.get('/me', async (req, res) => {
         score: p.standing?.score || 0,
         solved: p.standing?.solved || 0, 
         ratingDelta: rAfter - rBefore, 
-        ratingAfter: rAfter
+        ratingAfter: rAfter,
+        coinsEarned: (p as any).coinsEarned || 0 
       };
     });
 
-    // ✅ FIXED: Ensure submissions is always an array in response
+    // 👉 FIXED: Map relational TopicMastery to the clean {subject, score} format expected by the frontend
+    const formattedTopicMastery = user.topicMastery?.map((tm: any) => ({
+      subject: tm.topic.name,
+      score: tm.ability
+    })) || [];
+
     const responseData = { 
       ...user, 
+      topicMastery: formattedTopicMastery, 
       submissions: user.submissions || [],
       stats: { totalAttempts, totalAccepted, accuracy }, 
       matchHistory 
     };
 
-    console.log(`✅ [PROFILE] Sending response with ${responseData.submissions.length} submissions`);
     return res.json(responseData);
     
   } catch (err: any) {
     console.error('❌ [PROFILE] GET /me error:', err);
-    console.error(`   Stack: ${err.stack}`);
     return res.status(500).json({ error: `Internal server error: ${err.message}` });
   }
 });
@@ -119,14 +120,11 @@ profileRouter.post('/claim-username', async (req, res) => {
     try {
       viewer = await resolvedViewerFromRequest(req, true);
     } catch (authError) {
-      console.error('❌ [AUTH] Viewer resolution failed:', authError);
       return res.status(401).json({ error: 'Authentication failed' });
     }
     const email = viewer?.email;
     const name = viewer.name; 
     const { username } = req.body;
-    
-    console.log(`📝 [PROFILE] Claim username request: ${username}`);
     
     if (!email) return res.status(401).json({ error: 'Unauthorized: No email provided.' });
     if (!username || username.trim().length < 3) {
@@ -138,7 +136,6 @@ profileRouter.post('/claim-username', async (req, res) => {
     let currentUser = await prisma.user.findUnique({ where: { email } });
     
     if (!currentUser) {
-      console.log(`🆕 [PROFILE] Creating new user for email: ${email}`);
       currentUser = await prisma.user.create({
         data: {
           email,
@@ -150,7 +147,6 @@ profileRouter.post('/claim-username', async (req, res) => {
 
     const existingUser = await prisma.user.findUnique({ where: { username: targetUsername } });
     if (existingUser && existingUser.id !== currentUser.id) {
-      console.warn(`⚠️ [PROFILE] Username "${targetUsername}" already taken`);
       return res.status(400).json({ error: `The username "${targetUsername}" is already taken.` });
     }
 
@@ -159,10 +155,8 @@ profileRouter.post('/claim-username', async (req, res) => {
       data: { username: targetUsername }
     });
 
-    console.log(`✅ [PROFILE] Username claimed: ${updatedUser.username}`);
     return res.json({ success: true, username: updatedUser.username });
   } catch (err: any) {
-    console.error('[Profile] Claim Username Error:', err);
     return res.status(500).json({ error: `Database Error: ${err.message}` });
   }
 });
@@ -173,7 +167,6 @@ profileRouter.post('/update-password', async (req, res) => {
     try {
       viewer = await resolvedViewerFromRequest(req, true);
     } catch (authError) {
-      console.error('❌ [AUTH] Viewer resolution failed:', authError);
       return res.status(401).json({ error: 'Authentication failed' });
     }
     const email = viewer?.email;
@@ -199,10 +192,8 @@ profileRouter.post('/update-password', async (req, res) => {
       data: { passwordHash: hashedPassword }
     });
 
-    console.log(`✅ [PROFILE] Password updated for ${email}`);
     return res.json({ success: true, message: 'Password updated successfully!' });
   } catch (err: any) {
-    console.error('[Profile] Update Password Error:', err);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });
@@ -213,7 +204,6 @@ profileRouter.post('/save-handles', async (req, res) => {
     try {
       viewer = await resolvedViewerFromRequest(req, true);
     } catch (authError) {
-      console.error('❌ [AUTH] Viewer resolution failed:', authError);
       return res.status(401).json({ error: 'Authentication failed' });
     }
     const email = viewer?.email;
@@ -244,7 +234,6 @@ profileRouter.post('/save-handles', async (req, res) => {
       });
     }
 
-    console.log(`✅ [PROFILE] Handles linked for ${user.username}`);
     return res.json({ success: true, message: 'Handles linked successfully!' });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -257,7 +246,6 @@ profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
     try {
       viewer = await resolvedViewerFromRequest(req, true);
     } catch (authError) {
-      console.error('❌ [AUTH] Viewer resolution failed:', authError);
       return res.status(401).json({ error: 'Authentication failed' });
     }
     const email = viewer?.email;
@@ -269,7 +257,6 @@ profileRouter.delete('/handles/:platform/:handle', async (req, res) => {
       where: { userId: user.id, platform: platform as Platform, handle }
     });
     
-    console.log(`✅ [PROFILE] Handle deleted: ${platform}/${handle}`);
     return res.json({ success: true });
   } catch (err: any) { 
     return res.status(500).json({ error: err.message }); 
@@ -280,47 +267,43 @@ profileRouter.get('/u/:username', async (req, res) => {
   try {
     const { username } = req.params;
     
-    console.log(`🔍 [PROFILE] GET /u/${username}`);
-    
-   const user = await prisma.user.findFirst({
-  where: { username: { equals: username, mode: 'insensitive' } },
-  include: { 
-    externalHandles: true,
-    // 👉 FIXED: Include activity logs here too
-    activityLog: {
-      orderBy: { date: 'desc' }
-    },
-    submissions: { 
-      select: { id: true, verdict: true, createdAt: true },
-      orderBy: { createdAt: 'desc' }
-    },
-    contestParticipants: {
-      where: { standing: { isNot: null } },
+    const user = await prisma.user.findFirst({
+      where: { username: { equals: username, mode: 'insensitive' } },
       include: { 
-        contest: { select: { id: true, title: true, startTime: true, isRated: true } }, 
-        standing: true 
-      },
-      orderBy: { contest: { startTime: 'desc' } }
-    }
-  }
-});
+        externalHandles: true,
+        // 👉 FIXED: Map relations for public profiles too
+        topicMastery: { include: { topic: true } }, 
+        activityLog: {
+          orderBy: { date: 'desc' }
+        },
+        submissions: { 
+          select: { id: true, verdict: true, createdAt: true },
+          orderBy: { createdAt: 'desc' }
+        },
+        contestParticipants: {
+          where: { standing: { isNot: null } },
+          include: { 
+            contest: { select: { id: true, title: true, startTime: true, isRated: true } }, 
+            standing: true 
+          },
+          orderBy: { contest: { startTime: 'desc' } }
+        }
+      }
+    });
+    
     if (!user) {
-      console.warn(`⚠️ [PROFILE] User not found: ${username}`);
       return res.status(404).json({ error: 'Coder not found in the DivineCode database.' });
     }
 
-    console.log(`✅ [PROFILE] User profile found: ${user.username}`);
-
-    // 🔥 Database Aggregation Optimization
     const [totalAttempts, totalAccepted] = await Promise.all([
       prisma.submission.count({ where: { userId: user.id } }),
       prisma.submission.count({
-  where: {
-    userId: user.id,
-    verdict: 'ACCEPTED',
-    status: 'FINISHED'
-  }
-})
+        where: {
+          userId: user.id,
+          verdict: 'ACCEPTED',
+          status: 'FINISHED'
+        }
+      })
     ]);
 
     const accuracy = totalAttempts > 0 ? Math.round((totalAccepted / totalAttempts) * 100) : 0;
@@ -337,20 +320,26 @@ profileRouter.get('/u/:username', async (req, res) => {
         score: p.standing?.score || 0,
         solved: p.standing?.solved || 0, 
         ratingDelta: rAfter - rBefore, 
-        ratingAfter: rAfter
+        ratingAfter: rAfter,
+        coinsEarned: (p as any).coinsEarned || 0 
       };
     });
+
+    const formattedTopicMastery = user.topicMastery?.map((tm: any) => ({
+      subject: tm.topic.name,
+      score: tm.ability
+    })) || [];
 
     const { passwordHash, email, ...safeProfile } = user as any;
 
     return res.json({ 
       ...safeProfile, 
+      topicMastery: formattedTopicMastery, 
       submissions: user.submissions || [],
       stats: { totalAttempts, totalAccepted, accuracy }, 
       matchHistory 
     });
   } catch (err: any) {
-    console.error(`❌ [PROFILE] GET /u/:username error:`, err);
     return res.status(500).json({ error: err.message });
   }
 });

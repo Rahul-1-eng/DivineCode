@@ -5,12 +5,12 @@ import { motion } from 'framer-motion';
 import { fetchApi } from '../lib/api';
 
 function getRatingColor(rating: number) {
-  if (rating < 1200) return '#94a3b8'; // Gray (Newbie)
-  if (rating < 1400) return '#4ade80'; // Green (Pupil)
-  if (rating < 1600) return '#22d3ee'; // Cyan (Specialist)
-  if (rating < 1900) return '#3b82f6'; // Blue (Expert)
-  if (rating < 2200) return '#a855f7'; // Purple (Candidate Master)
-  return '#ef4444';    // Red (Grandmaster)
+  if (rating < 1200) return '#94a3b8'; 
+  if (rating < 1400) return '#4ade80'; 
+  if (rating < 1600) return '#22d3ee'; 
+  if (rating < 1900) return '#3b82f6'; 
+  if (rating < 2200) return '#a855f7'; 
+  return '#ef4444';    
 }
 
 export default function Leaderboard() {
@@ -19,7 +19,6 @@ export default function Leaderboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // We pass requireAuth: false since the leaderboard is public data
     fetchApi('/api/v2/leaderboard', { requireAuth: false })
       .then(data => {
         setUsers(data);
@@ -39,7 +38,6 @@ export default function Leaderboard() {
 
       <div style={{ maxWidth: 1000, margin: '0 auto' }}>
         
-        {/* Header Section */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 30 }}>
           <div>
             <button onClick={() => router.push('/')} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', marginBottom: 10, fontSize: 14, padding: 0 }}>
@@ -52,7 +50,6 @@ export default function Leaderboard() {
           </div>
         </div>
 
-        {/* Leaderboard Table */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }}>
           
           {loading ? (
@@ -71,12 +68,17 @@ export default function Leaderboard() {
               <tbody>
                 {users.map((user, index) => {
                   const ratingColor = getRatingColor(user.rating);
+                  // 👉 FIXED: Ensure it handles users who have signed up but haven't chosen a username yet.
+                  const hasUsername = Boolean(user.username && !user.username.startsWith('user_'));
+                  
                   return (
                     <motion.tr 
                       key={user.id} 
-                      whileHover={{ backgroundColor: 'rgba(30, 41, 59, 0.8)' }}
-                      style={{ borderBottom: '1px solid #1e293b', transition: 'background-color 0.2s', cursor: 'pointer' }}
-                      onClick={() => router.push(`/u/${user.username}`)}
+                      whileHover={{ backgroundColor: hasUsername ? 'rgba(30, 41, 59, 0.8)' : 'transparent' }}
+                      style={{ borderBottom: '1px solid #1e293b', transition: 'background-color 0.2s', cursor: hasUsername ? 'pointer' : 'default' }}
+                      onClick={() => {
+                        if (hasUsername) router.push(`/u/${user.username}`);
+                      }}
                     >
                       <td style={{ padding: '16px 24px', color: '#94a3b8', fontWeight: 'bold' }}>
                         {index + 1}
@@ -88,7 +90,9 @@ export default function Leaderboard() {
                           </div>
                           <div>
                             <div style={{ color: ratingColor, fontWeight: 600, fontSize: 15 }}>{user.name}</div>
-                            <div style={{ color: '#64748b', fontSize: 13 }}>@{user.username}</div>
+                            <div style={{ color: '#64748b', fontSize: 13 }}>
+                              {hasUsername ? `@${user.username}` : <span style={{ fontStyle: 'italic' }}>Handle not claimed</span>}
+                            </div>
                           </div>
                         </div>
                       </td>

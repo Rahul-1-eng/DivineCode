@@ -1,7 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { prisma } from '../../prisma/client';
 
-// 👉 FIXED: Added email and rating to the core Player type so we can update the DB later
 type Player = { id: string; name: string; email?: string; socket: Socket; score: number; attempts: number; rating: number };
 type QueuedPlayer = Player & { queuedAt: number };
 type DuelState = {
@@ -10,6 +9,8 @@ type DuelState = {
   questions: any[];
   currentQuestionIndex: number;
   finished: boolean;
+  questionStartTime: number;
+  timeoutId?: NodeJS.Timeout;
 };
 
 export function setupDuelSockets(io: Server) {
@@ -17,7 +18,6 @@ export function setupDuelSockets(io: Server) {
   const customWaitingRooms = new Map<string, { host: Player, customQuestionIds?: string[] }>(); 
   const activeRooms = new Map<string, DuelState>();
 
-  // Active Elo Matchmaking Engine Loop (Runs every 2 seconds)
   setInterval(async () => {
     if (matchmakingQueue.length < 2) return;
 
@@ -71,6 +71,24 @@ export function setupDuelSockets(io: Server) {
     });
   };
 
+  // 👉 FIXED: Server-side timeout enforcer. Prevents game from hanging if no one answers.
+  async function handleQuestionTimeout(roomId: string) {
+    const state = activeRooms.get(roomId);
+    if (!state || state.finished) return;
+
+    state.currentQuestionIndex++;
+    state.players.forEach(p => p.attempts = 0);
+    
+    if (state.currentQuestionIndex >= state.questions.length) {
+      state.finished = true;
+      await saveDuelResults(state);
+    } else {
+      state.questionStartTime = Date.now();
+      state.timeoutId = setTimeout(() => handleQuestionTimeout(roomId), 21000);
+    }
+    emitState(roomId);
+  }
+
   async function initializeMatch(p1: Player, p2: Player, customQuestionIds?: string[]) {
     const roomId = `duel_${Date.now()}`;
     p1.socket.join(roomId);
@@ -104,8 +122,13 @@ export function setupDuelSockets(io: Server) {
         questions: selectedQuestions,
         currentQuestionIndex: 0,
         finished: false,
+        questionStartTime: Date.now()
       };
+      
       activeRooms.set(roomId, state);
+      
+      // Start the strict server timer
+      state.timeoutId = setTimeout(() => handleQuestionTimeout(roomId), 21000);
 
       io.to(roomId).emit('duel:start', { 
         roomId, 
@@ -118,14 +141,13 @@ export function setupDuelSockets(io: Server) {
     }
   }
 
-  // 👉 ADDED: Helper function to save results to the DB
   async function saveDuelResults(state: DuelState) {
     const sortedPlayers = [...state.players].sort((a, b) => b.score - a.score);
     const isDraw = sortedPlayers[0].score === sortedPlayers[1].score;
 
     for (let i = 0; i < sortedPlayers.length; i++) {
       const player = sortedPlayers[i];
-      if (!player.email) continue; // Skip guests
+      if (!player.email) continue; 
 
       const isWinner = !isDraw && i === 0;
       const ratingChange = isDraw ? 5 : (isWinner ? 25 : -15);
@@ -154,7 +176,6 @@ export function setupDuelSockets(io: Server) {
       if (userEmail) {
         try {
           const user = await prisma.user.findUnique({ where: { email: userEmail } });
-          // Fetch global rating instead of missing duelRating
           if (user) playerRating = user.rating || 1200; 
         } catch (e) { console.error("Elo fetch failed"); }
       }
@@ -176,7 +197,12 @@ export function setupDuelSockets(io: Server) {
 
     socket.on('duel:createCustom', ({ name, userEmail, questionIds }) => {
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      // 👉 FIXED: Attach email so host gets points
+      
+      // 👉 FIXED: Purge any existing phantom rooms this host might have created to stop leaks
+      for (const [existingCode, room] of customWaitingRooms.entries()) {
+        if (room.host.id === socket.id) customWaitingRooms.delete(existingCode);
+      }
+
       const player: Player = { id: socket.id, name: name || `Player-${socket.id.slice(0, 4)}`, email: userEmail, socket, score: 0, attempts: 0, rating: 1200 };
       customWaitingRooms.set(code, { host: player, customQuestionIds: questionIds });
       socket.emit('duel:customCreated', { roomCode: code });
@@ -188,7 +214,6 @@ export function setupDuelSockets(io: Server) {
       if (!room) return socket.emit('duel:error', { message: 'Invalid or expired room code.' });
       if (room.host.id === socket.id) return; 
       
-      // 👉 FIXED: Attach email so opponent gets points
       const p2: Player = { id: socket.id, name: name || `Player-${socket.id.slice(0, 4)}`, email: userEmail, socket, score: 0, attempts: 0, rating: 1200 };
       customWaitingRooms.delete(code); 
       await initializeMatch(room.host, p2, room.customQuestionIds);
@@ -222,19 +247,23 @@ export function setupDuelSockets(io: Server) {
       });
 
       if (isCorrect) {
+        if (state.timeoutId) clearTimeout(state.timeoutId);
         state.currentQuestionIndex++;
         state.players.forEach(p => p.attempts = 0); 
+        
         if (state.currentQuestionIndex >= state.questions.length) {
           state.finished = true;
-          // 👉 FIXED: Save the match to the database!
           await saveDuelResults(state);
+        } else {
+          // Restart timer for the next question
+          state.questionStartTime = Date.now();
+          state.timeoutId = setTimeout(() => handleQuestionTimeout(roomId), 21000);
         }
       }
       
       emitState(roomId);
     });
 
-    // --- REAL-TIME CHAT & IMAGE EVENTS ---
     socket.on('chat:message', ({ roomId, message }) => {
       const state = activeRooms.get(roomId);
       if (!state) return;
@@ -263,7 +292,6 @@ export function setupDuelSockets(io: Server) {
       });
     });
 
-    // --- WEBRTC VOICE SIGNALING EVENTS ---
     socket.on('webrtc:offer', ({ roomId, offer }) => {
       socket.to(roomId).emit('webrtc:offer', { senderId: socket.id, offer });
     });
@@ -286,13 +314,18 @@ export function setupDuelSockets(io: Server) {
       for (const [code, room] of customWaitingRooms.entries()) {
         if (room.host.id === socket.id) customWaitingRooms.delete(code);
       }
+      
       for (const [roomId, state] of activeRooms.entries()) {
         if (state.players.some(p => p.id === socket.id) && !state.finished) {
           state.finished = true;
-          io.to(roomId).emit('duel:feedback', { playerName: 'System', correct: false, concept: 'Opponent disconnected' });
-          emitState(roomId);
+          if (state.timeoutId) clearTimeout(state.timeoutId);
           
-          // Automatically save results awarding the remaining player the win
+          // 👉 FIXED: Drop disconnected player score massively to guarantee they lose, then save state
+          const disconnectedPlayer = state.players.find(p => p.id === socket.id);
+          if (disconnectedPlayer) disconnectedPlayer.score = -9999;
+
+          io.to(roomId).emit('duel:feedback', { playerName: 'System', correct: false, concept: 'Opponent disconnected. You win!' });
+          emitState(roomId);
           saveDuelResults(state);
           activeRooms.delete(roomId);
         }

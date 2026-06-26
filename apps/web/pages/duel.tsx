@@ -57,7 +57,6 @@ export default function DuelPage() {
     }
   }, [router.query, session]);
 
-  // 👉 FIXED: Consistent Audio Element Cleanup
   const cleanupAudioElement = (socketId: string) => {
     const audio = document.getElementById(`audio-${socketId}`) as HTMLAudioElement;
     if (audio) {
@@ -130,7 +129,6 @@ export default function DuelPage() {
       setMessages(prev => [...prev, { ...msg, type: 'image' }]);
     });
 
-    // WEBRTC Voice Connections
     socket.on('webrtc:offer', async ({ senderId, offer }) => {
       if (!localStreamRef.current) return; 
 
@@ -194,14 +192,20 @@ export default function DuelPage() {
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   function answer(index: number) { 
-    if (!socketRef.current || !roomId || !question || myAttempts >= 2 || lockedOptions.includes(index)) return; 
+    if (!socketRef.current || !roomId || !question || myAttempts >= 2 || lockedOptions.includes(index) || time <= 0) return; 
     setLockedOptions(prev => [...prev, index]); 
     socketRef.current.emit('duel:answer', { roomId, questionId: question.id, answerIndex: index }); 
   }
 
+  // 👉 FIXED: Elegant timer sync. Disables frontend buttons, changes status, and waits for backend auto-advance
   useEffect(() => { 
     if (!question || finished) return; 
-    const t = setInterval(() => setTime((v) => Math.max(0, v - 1)), 1000); 
+    const t = setInterval(() => {
+      setTime((v) => {
+        if (v <= 1) setStatus("Time's up! Syncing with server...");
+        return Math.max(0, v - 1);
+      });
+    }, 1000); 
     return () => clearInterval(t); 
   }, [question, finished]);
 
@@ -227,7 +231,6 @@ export default function DuelPage() {
     const name = session?.user?.name || session?.user?.email || `Player-${Math.floor(Math.random() * 1000)}`; 
     const userEmail = session?.user?.email; 
     
-    // 👉 FIXED: Pass email so rating can update
     socketRef.current.emit('duel:createCustom', { 
       name, 
       userEmail,
@@ -242,7 +245,6 @@ export default function DuelPage() {
     const name = session?.user?.name || session?.user?.email || `Player-${Math.floor(Math.random() * 1000)}`; 
     const userEmail = session?.user?.email; 
 
-    // 👉 FIXED: Pass email so rating can update
     socketRef.current.emit('duel:joinCustom', { name, userEmail, roomCode: joinInputCode });
     setJoined(true);
   }
@@ -289,7 +291,6 @@ export default function DuelPage() {
         
         const pc = new RTCPeerConnection(ICE_SERVERS);
         
-        // 👉 FIXED: Use opponent's exact socket ID to ensure clean creation and teardown
         const opponent = players.find(p => p.id !== socketRef.current?.id);
         const opponentId = opponent?.id || 'opponent';
 
@@ -335,7 +336,7 @@ export default function DuelPage() {
       <section style={arena}>
         <div style={hud}>
           <span style={connected ? online : offline}>{connected ? 'SERVER ONLINE' : 'SERVER OFFLINE'}</span>
-          <strong style={{ flex: '1 1 auto', textAlign: 'center' }}>{status}</strong>
+          <strong style={{ flex: '1 1 auto', textAlign: 'center', color: time <= 0 ? '#ef4444' : '#eef2ff' }}>{status}</strong>
           <span style={{ fontSize: 14, color: '#94a3b8' }}>{roomId || 'Match not started'}</span>
         </div>
         
@@ -481,7 +482,8 @@ export default function DuelPage() {
             <div style={optionGrid}>
               {question.options.map((opt: string, index: number) => {
                 const isLocked = lockedOptions.includes(index);
-                const isOutOfAttempts = myAttempts >= 2;
+                // 👉 FIXED: Gracefully disable buttons when timer hits 0
+                const isOutOfAttempts = myAttempts >= 2 || time <= 0;
                 const isDisabled = isLocked || isOutOfAttempts;
 
                 return (
@@ -570,7 +572,6 @@ export default function DuelPage() {
   );
 }
 
-// STYLES
 const page: CSSProperties = { minHeight: '100vh', padding: '4vw', fontFamily: 'Inter, Arial, sans-serif', color: '#eef2ff', background: 'radial-gradient(circle at top left, rgba(239,68,68,.22), transparent 32rem), radial-gradient(circle at top right, rgba(34,211,238,.2), transparent 30rem), #070a16', boxSizing: 'border-box' };
 const nav: CSSProperties = { maxWidth: 1180, margin: '0 auto 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' };
 const brand: CSSProperties = { color: '#fff', textDecoration: 'none', fontWeight: 950, fontSize: 24 };

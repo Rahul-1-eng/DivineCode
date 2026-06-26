@@ -5,7 +5,6 @@ import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import { io } from 'socket.io-client';
 import NotificationBell from '../components/NotificationBell';
-// 👉 ADDED: Import the fetchApi wrapper
 import { fetchApi } from '../lib/api';
 
 const AnimatedBackground = dynamic(() => import('../components/AnimatedBackground'), { ssr: false });
@@ -125,20 +124,16 @@ export default function Home() {
     return () => { socket.disconnect(); };
   }, []);
 
-  // 👉 FIXED: Using fetchApi instead of standard fetch ensures the authentication token is minted and attached correctly.
   useEffect(() => {
     if (status === 'authenticated' && session?.user?.email) {
-      console.log('🔍 Fetching leaderboard...');
       fetchApi('/api/v2/leaderboard/global', { requireAuth: false })
         .then(data => { 
           if (Array.isArray(data)) {
-            console.log('✅ Leaderboard loaded:', data.length, 'users');
             setTopUsers(data.slice(0, 5));
           }
         })
         .catch(err => console.error('❌ Leaderboard fetch error:', err));
 
-      console.log('🔍 Fetching profile for email:', session.user.email);
       setHeatmapLoading(true);
       
       fetchApi('/api/v2/profile/me')
@@ -177,7 +172,6 @@ export default function Home() {
     }));
 
     try {
-      console.log('🚀 Sending AI request to:', `${API_BASE_URL}/api/v2/ai/chat`);
       const res = await fetch(`${API_BASE_URL}/api/v2/ai/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -185,15 +179,11 @@ export default function Home() {
         signal: AbortSignal.timeout(30000) 
       });
 
-      if (!res.ok) {
-        throw new Error(`API returned ${res.status}: ${res.statusText}`);
-      }
+      if (!res.ok) throw new Error(`API returned ${res.status}: ${res.statusText}`);
 
       const data = await res.json();
       
-      if (data.error) {
-        throw new Error(data.error);
-      }
+      if (data.error) throw new Error(data.error);
 
       if (data.reply) {
         setChatHistory(prev => [...prev, { role: 'ai', text: data.reply }]);
@@ -202,8 +192,6 @@ export default function Home() {
         throw new Error('No reply from AI');
       }
     } catch (err) {
-      console.error('❌ AI Chat error:', err);
-      
       let errorMsg = '';
       const errorString = String(err);
       
@@ -212,7 +200,6 @@ export default function Home() {
         
         if (retryCount < MAX_RETRIES) {
           setTimeout(() => {
-            console.log(`🔄 Retrying AI request (${retryCount + 1}/${MAX_RETRIES})...`);
             sendToAI(text, imageBase64, retryCount + 1);
           }, 3000);
           errorMsg += ` Retrying... (${retryCount + 1}/${MAX_RETRIES})`;
@@ -263,25 +250,14 @@ export default function Home() {
           -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
           border: 1px solid rgba(255, 255, 255, 0.07) !important;
         }
-        .hero-glow {
-          text-shadow: 0 0 40px rgba(34, 211, 238, 0.3), 0 0 80px rgba(129, 140, 248, 0.2);
-        }
+        .hero-glow { text-shadow: 0 0 40px rgba(34, 211, 238, 0.3), 0 0 80px rgba(129, 140, 248, 0.2); }
         .footer-link:hover { color: #38bdf8 !important; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } } 
         .skeleton-pulse { animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         
-        @keyframes ticker-scroll {
-          0% { transform: translateX(100%); }
-          100% { transform: translateX(-100%); }
-        }
-        .live-ticker {
-          display: flex;
-          white-space: nowrap;
-          animation: ticker-scroll 35s linear infinite;
-        }
-        .live-ticker:hover {
-          animation-play-state: paused;
-        }
+        @keyframes ticker-scroll { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
+        .live-ticker { display: flex; white-space: nowrap; animation: ticker-scroll 35s linear infinite; }
+        .live-ticker:hover { animation-play-state: paused; }
 
         @media (max-width: 768px) {
           .nav-items { gap: 8px !important; }
@@ -389,20 +365,29 @@ export default function Home() {
                         <p style={{ color: '#64748b', fontSize: 'clamp(12px, 2vw, 14px)' }}>Loading leaderboard...</p>
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          {topUsers.map((u, i) => (
-                            <motion.div 
-                              key={i} 
-                              whileHover={{ scale: 1.02, backgroundColor: 'rgba(34, 211, 238, 0.1)' }}
-                              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', transition: '0.2s' }}
-                              onClick={() => router.push(`/u/${u.username}`)}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                                <strong style={{ color: i === 0 ? '#fbbf24' : i === 1 ? '#cbd5e1' : i === 2 ? '#b45309' : '#64748b', fontSize: 'clamp(11px, 2vw, 13px)' }}>#{i + 1}</strong>
-                                <span style={{ color: '#eef2ff', fontWeight: 600, fontSize: 'clamp(11px, 2vw, 13px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.username || u.name}</span>
-                              </div>
-                              <span style={{ color: '#38bdf8', fontWeight: 800, fontSize: 'clamp(11px, 2vw, 13px)', flexShrink: 0 }}>{u.rating || 1200}</span>
-                            </motion.div>
-                          ))}
+                          {topUsers.map((u, i) => {
+                            // 👉 FIXED: Safely checking if the user actually claimed a handle
+                            const hasUsername = Boolean(u.username && !u.username.startsWith('user_'));
+
+                            return (
+                              <motion.div 
+                                key={i} 
+                                whileHover={{ scale: 1.02, backgroundColor: hasUsername ? 'rgba(34, 211, 238, 0.1)' : 'transparent' }}
+                                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)', cursor: hasUsername ? 'pointer' : 'default', transition: '0.2s' }}
+                                onClick={() => {
+                                  if (hasUsername) router.push(`/u/${u.username}`);
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                  <strong style={{ color: i === 0 ? '#fbbf24' : i === 1 ? '#cbd5e1' : i === 2 ? '#b45309' : '#64748b', fontSize: 'clamp(11px, 2vw, 13px)' }}>#{i + 1}</strong>
+                                  <span style={{ color: '#eef2ff', fontWeight: 600, fontSize: 'clamp(11px, 2vw, 13px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {hasUsername ? u.username : u.name}
+                                  </span>
+                                </div>
+                                <span style={{ color: '#38bdf8', fontWeight: 800, fontSize: 'clamp(11px, 2vw, 13px)', flexShrink: 0 }}>{u.rating || 1200}</span>
+                              </motion.div>
+                            );
+                          })}
                         </div>
                       )}
                       

@@ -1,79 +1,120 @@
-import { Platform } from '@prisma/client';
+import { prisma } from '../../prisma/client';
+import { analyzeUserWeaknesses } from '../ai/aiService';
 
-type ExternalRatingInput = {
-  platform?: Platform | string;
-  rating?: number;
-  solvedCount?: number;
-};
+export async function generateTargetedPracticeSet(userId: string) {
+  try {
+    // 1. Fetch recent failed submissions (WA, TLE, RE)
+    const failedSubs = await prisma.submission.findMany({
+      where: { 
+        userId, 
+        verdict: { notIn: ['ACCEPTED', 'COMPILATION_ERROR', 'PENDING', 'SKIPPED'] } 
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      include: { contestProblem: true, problem: true }
+    });
 
-const platformCalibration: Record<string, { slope: number; intercept: number; confidence: number }> = {
-  [Platform.CODEFORCES]: { slope: 1, intercept: 0, confidence: 1 },
-  [Platform.ATCODER]: { slope: 1.08, intercept: 80, confidence: 0.9 },
-  [Platform.LEETCODE]: { slope: 0.92, intercept: 120, confidence: 0.75 },
-  [Platform.CODECHEF]: { slope: 0.95, intercept: 60, confidence: 0.75 },
-  [Platform.HACKERRANK]: { slope: 0.8, intercept: 250, confidence: 0.45 },
-  [Platform.DIVINECODE]: { slope: 1, intercept: 0, confidence: 1 },
-  [Platform.OTHER]: { slope: 0.85, intercept: 180, confidence: 0.35 }
-};
+    if (failedSubs.length < 3) {
+      return { 
+        success: false, 
+        message: "Not enough failed submissions to perform a reliable weakness analysis. Keep practicing!" 
+      };
+    }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
+    const payload = failedSubs.map(sub => ({
+       problemTitle: sub.contestProblem?.titleSnapshot || sub.problem?.title || 'Unknown Problem',
+       code: sub.code.substring(0, 500), // Cap length to save tokens
+       verdict: sub.verdict
+    }));
 
-function platformKey(value: ExternalRatingInput['platform']) {
-  const normalized = String(value || Platform.OTHER).toUpperCase();
-  if (normalized.includes('CODEFORCES')) return Platform.CODEFORCES;
-  if (normalized.includes('ATCODER')) return Platform.ATCODER;
-  if (normalized.includes('LEETCODE')) return Platform.LEETCODE;
-  if (normalized.includes('CODECHEF')) return Platform.CODECHEF;
-  if (normalized.includes('HACKERRANK')) return Platform.HACKERRANK;
-  if (normalized.includes('DIVINECODE')) return Platform.DIVINECODE;
-  return Platform.OTHER;
-}
+    // 2. Feed failures to the AI Coach
+    const aiAnalysis = await analyzeUserWeaknesses(payload);
+    
+    if (!aiAnalysis || !aiAnalysis.radarUpdates) {
+      return { success: false, error: "AI Coaching Engine failed to generate analysis." };
+    }
 
-export function normalizeExternalRating(input: ExternalRatingInput) {
-  const rating = Number(input.rating || 1200);
-  const platform = platformKey(input.platform);
-  const calibration = platformCalibration[platform];
-  return Math.round(clamp(rating * calibration.slope + calibration.intercept, 400, 3600));
-}
+    // 3. Fetch User and Current Topic Mastery via Prisma relations
+    const user = await prisma.user.findUnique({ 
+      where: { id: userId },
+      include: { topicMastery: { include: { topic: true } } }
+    });
 
-export function estimateUnifiedRating(ratings: ExternalRatingInput[], fallback = 1200) {
-  if (!ratings.length) return fallback;
+    const defaultRadarData = [
+      { subject: 'Dynamic Programming', score: 85 },
+      { subject: 'Graph Theory', score: 70 },
+      { subject: 'Data Structures', score: 90 },
+      { subject: 'Greedy Math', score: 60 },
+      { subject: 'String Algorithms', score: 75 }
+    ];
 
-  let weightedSum = 0;
-  let totalWeight = 0;
+    let currentMastery: any[] = [];
+    
+    // Map the relational data to the shape the frontend radar chart expects
+    if (user?.topicMastery && user.topicMastery.length > 0) {
+       currentMastery = user.topicMastery.map(tm => ({
+           subject: tm.topic.name,
+           score: tm.ability || 0
+       }));
+    } else {
+       currentMastery = [...defaultRadarData];
+    }
 
-  for (const rating of ratings) {
-    const platform = platformKey(rating.platform);
-    const calibration = platformCalibration[platform];
-    const practiceWeight = Math.log2(Math.max(2, Number(rating.solvedCount || 1) + 1));
-    const weight = calibration.confidence * practiceWeight;
-    weightedSum += normalizeExternalRating(rating) * weight;
-    totalWeight += weight;
+    // 4. Update the Radar Chart scores based on AI Deductions using DB Upserts
+    for (const update of aiAnalysis.radarUpdates) {
+      const subject = update.subject || 'General';
+      const slug = subject.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      
+      // Ensure the topic exists in the global Topic catalog
+      const topic = await prisma.topic.upsert({
+        where: { slug },
+        update: { name: subject },
+        create: { slug, name: subject }
+      });
+
+      const existing = currentMastery.find(m => m.subject.toLowerCase() === subject.toLowerCase());
+      const newScore = existing 
+        ? Math.max(10, Math.min(100, existing.score + (update.scoreDelta || 0))) 
+        : Math.max(10, 80 + (update.scoreDelta || 0));
+
+      if (existing) {
+          existing.score = newScore;
+      } else {
+          currentMastery.push({ subject, score: newScore });
+      }
+
+      // Upsert the specific user's mastery level
+      await prisma.topicMastery.upsert({
+        where: { userId_topicId: { userId: userId, topicId: topic.id } },
+        update: { ability: newScore },
+        create: { userId: userId, topicId: topic.id, ability: newScore }
+      });
+    }
+
+    // 5. Query Practice Problems Based on Weakest Topic and User's Elo
+    const weakestTopicName = aiAnalysis.weaknesses[0]?.topic || 'Data Structures';
+    const userElo = user?.rating || 1200;
+
+    const recommendedProblems = await prisma.problem.findMany({
+      where: {
+        tags: { has: weakestTopicName },
+        rating: { 
+          gte: userElo - 100,
+          lte: userElo + 250 // Push them slightly outside their comfort zone
+        }
+      },
+      take: 3,
+      select: { id: true, title: true, rating: true, tags: true }
+    });
+
+    return {
+       success: true,
+       analysis: aiAnalysis,
+       newRadarChart: currentMastery,
+       recommendedProblems: recommendedProblems.length > 0 ? recommendedProblems : [{ title: `Practice: ${weakestTopicName} fundamentals`, rating: userElo + 50 }]
+    };
+  } catch (err: any) {
+    console.error("Targeted Practice Generation Error:", err);
+    return { success: false, error: err.message };
   }
-
-  if (!totalWeight) return fallback;
-  return Math.round(weightedSum / totalWeight);
-}
-
-export function recommendationBand(input: {
-  ratings?: ExternalRatingInput[];
-  currentRating?: number;
-  targetMode?: 'comfort' | 'growth' | 'duel';
-}) {
-  const ability = input.currentRating || estimateUnifiedRating(input.ratings || []);
-  const mode = input.targetMode || 'growth';
-  const offsets = {
-    comfort: [-150, 100],
-    growth: [-50, 250],
-    duel: [150, 450]
-  }[mode];
-
-  return {
-    unifiedRating: ability,
-    ratingFloor: clamp(ability + offsets[0], 400, 3500),
-    ratingCeil: clamp(ability + offsets[1], 500, 3600),
-    mode
-  };
 }

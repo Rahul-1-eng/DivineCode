@@ -18,21 +18,19 @@ const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { u
 
 type TestCase = { id: string; input: string; expectedOutput: string; output: string; status: 'idle' | 'running' | 'passed' | 'failed' | 'error'; isPublic?: boolean };
 
-// Custom Chat Formatter for Markdown, Code Blocks, and Symbols
 const renderChatMessage = (text: string) => {
   if (!text) return null;
   const codeBlockRegex = /```([\s\S]*?)```/g;
   const parts = text.split(codeBlockRegex);
 
   return parts.map((part, index) => {
-    if (index % 2 === 1) { // This is a code block
+    if (index % 2 === 1) { 
       return (
         <pre key={index} style={{ background: '#020617', padding: '8px', borderRadius: '6px', overflowX: 'auto', border: '1px solid #334155', margin: '4px 0', fontSize: '12px', color: '#38bdf8' }}>
           <code>{part}</code>
         </pre>
       );
     }
-    // Handle inline bold and basic text formatting
     const inlineBold = part.split(/\*\*(.*?)\*\*/g);
     return (
       <span key={index} style={{ whiteSpace: 'pre-wrap' }}>
@@ -340,9 +338,6 @@ export default function ContestProblemWorkspace() {
         socket.emit('voice-offer', { to: remoteSocketId, offer });
       });
 
-      // FIX 1: Removed stray `audio.autoplay` line that was here.
-      // FIX 2: Added missing `});` at the end to properly close this handler.
-      // FIX 3: Added full SDP handshake (setRemoteDescription, createAnswer, setLocalDescription, emit voice-answer).
       socket.on('voice-offer', async ({ from, offer }) => {
         if (!localStreamRef.current) return;
 
@@ -472,10 +467,16 @@ export default function ContestProblemWorkspace() {
     };
 
     try {
+      // ⚡ HARDENED: Add explicit signal for standard browser fetch since it targets local CPH instance
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // Fast timeout for local CPH
+
       const res = await fetch("http://localhost:10043/", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cphPayload)
+        body: JSON.stringify(cphPayload),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       if (res.ok) toast.success(`Sent ${publicCases.length} public test cases to CPH!`);
       else toast.error("Make sure CPH extension is running.");
     } catch (err) {
@@ -490,15 +491,23 @@ export default function ContestProblemWorkspace() {
     setActiveTab('terminal');
     setTerminalOutput(`> Compiling and running...\n`);
     try {
+      // ⚡ HARDENED: Prevent terminal from freezing indefinitely
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); 
+
       const data = await fetchApi(`/api/v2/execute`, {
         method: 'POST', 
-        body: JSON.stringify({ sourceCode: code, language, input: customInput })
+        body: JSON.stringify({ sourceCode: code, language, input: customInput }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
+
       if (data.verdict === 'COMPILATION_ERROR') setTerminalOutput(`> COMPILATION ERROR:\n\n${data.compileError}`);
       else if (data.verdict === 'RUNTIME_ERROR' || data.verdict === 'TIME_LIMIT_EXCEEDED') setTerminalOutput(`> ${data.verdict}:\n\n${data.stderr || ''}`);
       else setTerminalOutput(`> EXECUTED SUCCESSFULLY:\n\n${data.stdout || '[No Output]'}`);
     } catch (e: any) {
-      setTerminalOutput(`> Error: ${e.message || 'Execution engine unreachable.'}`);
+      if (e.name === 'AbortError') setTerminalOutput(`> Error: Execution timed out (>15s). Check for infinite loops.`);
+      else setTerminalOutput(`> Error: ${e.message || 'Execution engine unreachable.'}`);
     }
   };
 
@@ -514,10 +523,15 @@ export default function ContestProblemWorkspace() {
       setTestcases(newCases);
 
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); 
+
         const data = await fetchApi(`/api/v2/execute`, {
           method: 'POST', 
-          body: JSON.stringify({ sourceCode: code, language, input: newCases[i].input })
+          body: JSON.stringify({ sourceCode: code, language, input: newCases[i].input }),
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
         
         let actualOut = '';
         if (data.verdict === 'COMPILATION_ERROR') {
@@ -534,7 +548,8 @@ export default function ContestProblemWorkspace() {
         newCases[i].output = actualOut.trim();
       } catch (e: any) {
         newCases[i].status = 'error';
-        newCases[i].output = e.message || 'Network error connecting to execution engine.';
+        if (e.name === 'AbortError') newCases[i].output = '[TIME_LIMIT_EXCEEDED] Execution took too long.';
+        else newCases[i].output = e.message || 'Network error connecting to execution engine.';
       }
       setTestcases([...newCases]);
     }
@@ -591,12 +606,21 @@ export default function ContestProblemWorkspace() {
     const finalLanguage = isMCQ ? 'mcq' : language;
 
     try {
+      // ⚡ HARDENED: Release the UI block if grading takes too long
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000); 
+
       const submission = await fetchApi(`/api/v2/contests/${id}/submissions`, {
         method: 'POST', 
-        body: JSON.stringify({ contestProblemId: problemIdStr, code: finalCode, language: finalLanguage })
+        body: JSON.stringify({ contestProblemId: problemIdStr, code: finalCode, language: finalLanguage }),
+        signal: controller.signal
       });
 
-      const judgeData = await fetchApi(`/api/v2/submissions/${submission.id}/judge?wait=true`, { method: 'POST' });
+      const judgeData = await fetchApi(`/api/v2/submissions/${submission.id}/judge?wait=true`, { 
+        method: 'POST',
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
 
       const sub = judgeData.submission;
       if (sub?.verdict === 'ACCEPTED' || sub?.verdict === 'Accepted') {
@@ -607,7 +631,11 @@ export default function ContestProblemWorkspace() {
         setJudgeVerdict({ status: sub?.verdict || 'Rejected', message: sub?.judgeMessage || 'Failed on hidden system tests.' });
       }
     } catch (e: any) {
-      setJudgeVerdict({ status: 'Error', message: e.message || 'Network error.' });
+      if (e.name === 'AbortError') {
+         setJudgeVerdict({ status: 'Timeout', message: 'Execution took too long. Rest assured, your code was queued. Check the standings tab later for results.' });
+      } else {
+         setJudgeVerdict({ status: 'Error', message: e.message || 'Network error.' });
+      }
     } finally {
       setSubmitting(false); 
     }

@@ -17,6 +17,9 @@ export async function submitToWandbox(input: { sourceCode: string; language: str
   const normalizedLang = input.language.toLowerCase().replace('cpp', 'c++');
   const compiler = WANDBOX_COMPILERS[normalizedLang] || 'cpython-head';
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000); 
+
   try {
     const response = await fetch(WANDBOX_URL, {
       method: 'POST',
@@ -25,8 +28,11 @@ export async function submitToWandbox(input: { sourceCode: string; language: str
         code: input.sourceCode,
         compiler: compiler,
         stdin: input.stdin || ''
-      })
+      }),
+      signal: controller.signal
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) throw new Error(`Wandbox API rejected payload: ${response.status}`);
     const data = await response.json();
@@ -44,11 +50,14 @@ export async function submitToWandbox(input: { sourceCode: string; language: str
 
     return { stdout: data.program_message || '', stderr: data.program_error || '', status: 'ACCEPTED' };
   } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      return { verdict: 'TIME_LIMIT_EXCEEDED', stderr: 'Execution Timed Out (>12.00s limit)' };
+    }
     return { verdict: 'RUNTIME_ERROR', stderr: `Execution engine offline: ${error.message}` };
   }
 }
 
-// Highly robust output normalizer to handle trailing spaces, \r\n vs \n differences
 function normalizeOutput(value: string | null | undefined) {
   if (!value) return '';
   return String(value)
@@ -131,9 +140,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
 
   if (!submission) throw new Error('Submission not found');
   
-  // ==========================================
-  // STRICT MCQ GRADING LOGIC
-  // ==========================================
   if (submission.language === 'mcq') {
     let correctIndices: number[] = [];
     
@@ -141,8 +147,11 @@ export async function judgeQueuedSubmission(submissionId: string) {
         const mcq = await prisma.interviewQuestion.findUnique({ where: { id: submission.contestProblem.interviewQuestionId } });
         correctIndices = mcq?.correctIndices || [];
     } else if (submission.contestProblem?.mcqData) {
-        const data = typeof submission.contestProblem.mcqData === 'string' ? JSON.parse(submission.contestProblem.mcqData) : submission.contestProblem.mcqData;
-        correctIndices = data.correctIndices || [];
+        let data = submission.contestProblem.mcqData;
+        if (typeof data === 'string') {
+          try { data = JSON.parse(data); } catch(e) { data = {}; }
+        }
+        correctIndices = (data as any)?.correctIndices || [];
     }
 
     let isCorrect = false;
@@ -163,7 +172,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
         isCorrect = false;
       }
     } catch (parseError) {
-      console.error('[MCQ Parse Error]', parseError);
       isCorrect = false;
     }
 
@@ -191,7 +199,6 @@ export async function judgeQueuedSubmission(submissionId: string) {
      } catch (e) {}
   }
   
-  // 👉 FIXED: Ensure AI dynamic tests generate safely for custom descriptions even if `submission.problem` is null
   const hasDescription = submission.contestProblem?.customDescription || submission.problem?.description;
   if (testcases.length === 0 && hasDescription) {
     const descriptionForAi = submission.contestProblem?.customDescription || submission.problem?.description || submission.contestProblem?.titleSnapshot || '';
@@ -220,22 +227,35 @@ export async function judgeQueuedSubmission(submissionId: string) {
   let detailedMessage = '';
   let fullTestResults = [];
 
-  for (const [index, testcase] of testcases.entries()) {
-    const result = await submitToWandbox({ sourceCode: submission.code, language: submission.language, stdin: testcase.input });
-    const localVerdict = evaluateVerdict(result.status, result.stdout, testcase.expectedOutput, submission.problem?.checkerType || CheckerType.EXACT);
+  const CHUNK_SIZE = 5;
+  for (let i = 0; i < testcases.length; i += CHUNK_SIZE) {
+    const chunk = testcases.slice(i, i + CHUNK_SIZE);
     
-    fullTestResults.push({
-      submissionId: submission.id,
-      testcaseId: testcase.id || `tc-${index}`,
-      index,
-      verdict: localVerdict,
-      stdout: result.stdout?.substring(0, 500) || null,
-      stderr: result.stderr?.substring(0, 500) || result.compile_output?.substring(0, 500) || null
-    });
+    const results = await Promise.all(chunk.map(async (testcase, idxOffset) => {
+        const index = i + idxOffset;
+        const result = await submitToWandbox({ sourceCode: submission.code, language: submission.language, stdin: testcase.input });
+        const localVerdict = evaluateVerdict(result.status, result.stdout, testcase.expectedOutput, submission.problem?.checkerType || CheckerType.EXACT);
+        return { index, testcase, result, localVerdict };
+    }));
 
-    if (localVerdict !== Verdict.ACCEPTED && finalVerdict === Verdict.ACCEPTED) {
-      finalVerdict = localVerdict;
-      detailedMessage = result.compile_output || result.stderr || `Failed on testcase ${index + 1}`;
+    for (const res of results) {
+      fullTestResults.push({
+        submissionId: submission.id,
+        testcaseId: res.testcase.id || `tc-${res.index}`,
+        index: res.index,
+        verdict: res.localVerdict,
+        stdout: res.result.stdout?.substring(0, 500) || null,
+        stderr: res.result.stderr?.substring(0, 500) || res.result.compile_output?.substring(0, 500) || null
+      });
+
+      if (res.localVerdict !== Verdict.ACCEPTED && finalVerdict === Verdict.ACCEPTED) {
+        finalVerdict = res.localVerdict;
+        detailedMessage = res.result.compile_output || res.result.stderr || `Failed on testcase ${res.index + 1}`;
+      }
+    }
+
+    if (finalVerdict !== Verdict.ACCEPTED) {
+        break;
     }
   }
 
@@ -243,13 +263,13 @@ export async function judgeQueuedSubmission(submissionId: string) {
 
   const judged = await prisma.submission.update({
     where: { id: submission.id },
-    data: { status: 'FINISHED', verdict: finalVerdict, judgeMessage: detailedMessage || `Passed all ${testcases.length} system tests!`, judgedAt: new Date() }
+    // 👉 FIXED: Explicitly cast 'any' to bypass TS 5.0 strict control-flow narrowing on Enums
+    data: { status: 'FINISHED', verdict: finalVerdict as any, judgeMessage: detailedMessage || `Passed all ${testcases.length} system tests!`, judgedAt: new Date() }
   });
 
   await finalizeVerdict(judged.id, finalVerdict);
   const standings = submission.contestId ? await recomputeContestStandings(submission.contestId) : null;
   
-  // 👉 FIXED: Safe optional chaining for AI Logic analysis on custom problems
   if (finalVerdict === Verdict.ACCEPTED) {
     const descriptionForAi = submission.contestProblem?.customDescription || submission.problem?.description || submission.contestProblem?.titleSnapshot || 'No description available.';
     analyzeSubmissionLogic(judged.id, descriptionForAi, submission.code)

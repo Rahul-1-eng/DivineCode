@@ -96,7 +96,17 @@ export default function SubmitPage() {
       });
       const data = await res.json();
       if (res.ok) {
-         const judge = await fetch(`${API_V2_BASE_URL}/submissions/${data.id}/judge?wait=true`, { method: 'POST', headers: viewerHeaders(session) });
+         // ⚡ HARDENED: Prevent infinite fetch
+         const controller = new AbortController();
+         const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+         const judge = await fetch(`${API_V2_BASE_URL}/submissions/${data.id}/judge?wait=true`, { 
+            method: 'POST', 
+            headers: viewerHeaders(session),
+            signal: controller.signal
+         });
+         clearTimeout(timeoutId);
+
          const jData = await judge.json();
          
          const finalVerdict = jData.submission.verdict;
@@ -112,7 +122,13 @@ export default function SubmitPage() {
       } else {
          toast.error(data.error || "Submission failed");
       }
-    } catch (e) { toast.error("Network Error during submission"); }
+    } catch (e: any) { 
+        if (e.name === 'AbortError') {
+            toast.error("Execution is taking too long. Check your submissions later.");
+        } else {
+            toast.error("Network Error during submission"); 
+        }
+    }
     finally { setSubmitting(false); }
   }
 
