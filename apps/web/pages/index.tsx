@@ -286,8 +286,19 @@ export default function Home() {
       <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }} style={{ minHeight: '100vh', padding: 'clamp(16px, 4vw, 32px)', fontFamily: 'Inter, Arial, sans-serif', color: 'var(--text-main)', background: 'transparent', position: 'relative', zIndex: 1 }}>
         
         <motion.nav initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} style={{ maxWidth: 1200, margin: '0 auto 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-main)', textDecoration: 'none', fontWeight: 900, fontSize: 'clamp(14px, 4vw, 24px)', letterSpacing: '-0.03em', flexShrink: 0 }}>
-            <span style={{ width: 'clamp(32px, 8vw, 46px)', height: 'clamp(32px, 8vw, 44px)', borderRadius: 'clamp(6px, 2vw, 14px)', display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg,#6366f1,#22d3ee)', color: '#000', fontWeight: 'bold', boxShadow: '0 0 30px var(--accent-glow)', fontSize: 'clamp(10px, 2vw, 12px)' }}>DC</span>
+          
+          {/* 👉 THE NEW LOGO HAS BEEN INJECTED HERE */}
+          <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-main)', textDecoration: 'none', fontWeight: 900, fontSize: 'clamp(16px, 4vw, 24px)', letterSpacing: '-0.03em', flexShrink: 0 }}>
+            <img 
+              src="/logo.png" 
+              alt="DivineCode Logo" 
+              style={{ 
+                width: 'clamp(32px, 8vw, 44px)', 
+                height: 'clamp(32px, 8vw, 44px)', 
+                objectFit: 'contain',
+                filter: 'drop-shadow(0 0 10px var(--accent-glow))' 
+              }} 
+            />
             <span>DivineCode</span>
           </a>
           
@@ -298,7 +309,6 @@ export default function Home() {
 
             <NotificationBell />
 
-            {/* LIGHT/DARK THEME TOGGLE ADDED HERE */}
             {mounted && (
               <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} style={{ background: 'var(--button-ghost-bg)', border: '1px solid var(--button-ghost-border)', borderRadius: '50%', width: 36, height: 36, cursor: 'pointer', display: 'grid', placeItems: 'center', fontSize: 16 }}>
                 {theme === 'dark' ? '☀️' : '🌙'}
@@ -322,7 +332,7 @@ export default function Home() {
                 <a href="/profile" style={{ color: '#000', textDecoration: 'none', padding: '8px 16px', borderRadius: 999, fontWeight: 800, fontSize: 'clamp(11px, 2vw, 13px)', background: 'linear-gradient(135deg,#818cf8,#22d3ee)' }}>{profile?.username || session.user?.name?.split(' ')[0] || 'Dashboard'}</a>
               </div>
             ) : (
-              <a href="/signin" style={{ color: '#000', padding: '8px 16px', borderRadius: 999, fontWeight: 800, fontSize: 'clamp(11px, 2vw, 13px)', background: 'var(--text-main)', textDecoration: 'none' }}>Authenticate</a>
+              <a href="/signin" style={{ color: '#000', padding: '8px 16px', borderRadius: 999, fontWeight: 800, fontSize: 'clamp(11px, 2vw, 13px)', background: '#fff', textDecoration: 'none' }}>Authenticate</a>
             )}
           </div>
         </motion.nav>
@@ -335,7 +345,7 @@ export default function Home() {
           <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
             <div className="live-ticker">
               {liveEvents.map((event, i) => (
-                <span key={i} style={{ display: 'inline-block', padding: '10px 24px', color: 'var(--text-main)', fontSize: 'clamp(11px, 2vw, 13px)', fontWeight: 500 }}>
+                <span key={i} style={{ display: 'inline-block', padding: '10px 24px', color: 'var(--text-muted)', fontSize: 'clamp(11px, 2vw, 13px)', fontWeight: 500 }}>
                   {event}
                 </span>
               ))}
@@ -439,7 +449,7 @@ export default function Home() {
               <div style={{ background: 'var(--bg-panel-solid)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ width: 28, height: 28, background: 'var(--bg-main)', borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 16 }}>🤖</div>
-                  <strong style={{ color: 'var(--text-main)', fontSize: 'clamp(12px, 2vw, 14px)' }}>Divine AI Guide</strong>
+                  <strong style={{ color: 'var(--text-main)', fontSize: 'clamp(12px, 2vw, 14px)' }}>Divine AI</strong>
                 </div>
                 <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 20, cursor: 'pointer', padding: 0 }}>×</button>
               </div>
@@ -497,8 +507,9 @@ export default function Home() {
       <footer style={{ background: 'var(--bg-panel)', borderTop: '1px solid var(--border-color)', padding: 'clamp(24px, 5vw, 60px) clamp(12px, 3vw, 20px)', marginTop: '40px', backdropFilter: 'blur(10px)', position: 'relative', zIndex: 10 }}>
         <div style={{ maxWidth: 1180, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'clamp(24px, 4vw, 40px)' }}>
           <div>
-            <h3 style={{ color: 'var(--text-main)', fontSize: 'clamp(14px, 2.5vw, 18px)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 28, height: 28, borderRadius: 6, background: 'linear-gradient(135deg, #a5b4fc, #22d3ee)', color: '#000', display: 'grid', placeItems: 'center', fontSize: 10, fontWeight: 'bold' }}>DC</span> 
+            {/* 👉 THE NEW LOGO IS ALSO IN THE FOOTER HERE */}
+            <h3 style={{ color: 'var(--text-main)', fontSize: 'clamp(14px, 2.5vw, 18px)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <img src="/logo.png" alt="DivineCode Logo" style={{ width: 28, height: 28, objectFit: 'contain' }} /> 
               DivineCode
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: 'clamp(12px, 2vw, 13px)', lineHeight: 1.6 }}>The ultimate OS for competitive programmers.</p>
