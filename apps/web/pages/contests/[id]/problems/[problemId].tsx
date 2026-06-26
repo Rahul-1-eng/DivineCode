@@ -5,40 +5,19 @@ import dynamic from 'next/dynamic';
 import { io, Socket } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
+import { useTheme } from 'next-themes';
 import { fetchApi } from '../../../../lib/api';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
 export async function getServerSideProps() { return { props: {} }; }
 
-const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: '#64748b'}}>Loading Editor...</div> });
+const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: 'var(--text-muted)'}}>Loading Editor...</div> });
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }] };
 
 type TestCase = { id: string; input: string; expectedOutput: string; output: string; status: 'idle' | 'running' | 'passed' | 'failed' | 'error'; isPublic?: boolean };
-
-const renderChatMessage = (text: string) => {
-  if (!text) return null;
-  const codeBlockRegex = /```([\s\S]*?)```/g;
-  const parts = text.split(codeBlockRegex);
-
-  return parts.map((part, index) => {
-    if (index % 2 === 1) { 
-      return (
-        <pre key={index} style={{ background: '#020617', padding: '8px', borderRadius: '6px', overflowX: 'auto', border: '1px solid #334155', margin: '4px 0', fontSize: '12px', color: '#38bdf8' }}>
-          <code>{part}</code>
-        </pre>
-      );
-    }
-    const inlineBold = part.split(/\*\*(.*?)\*\*/g);
-    return (
-      <span key={index} style={{ whiteSpace: 'pre-wrap' }}>
-        {inlineBold.map((str, i) => i % 2 === 1 ? <strong key={i} style={{ color: '#eef2ff' }}>{str}</strong> : str)}
-      </span>
-    );
-  });
-};
 
 function useContestTimer(startTime?: string | Date, endTime?: string | Date) {
   const [timeLeft, setTimeLeft] = useState({ state: 'loading', text: 'Syncing chronometer...' });
@@ -69,6 +48,7 @@ export default function ContestProblemWorkspace() {
   const router = useRouter();
   const { id, problemId } = router.query;
   const { data: session, status } = useSession();
+  const { theme } = useTheme();
   
   const [contest, setContest] = useState<any>(null);
   const [code, setCode] = useState('// Write your solution here...');
@@ -156,12 +136,6 @@ export default function ContestProblemWorkspace() {
   }, [problem, isMCQ, problemIdStr]);
 
   useEffect(() => {
-    if (questionTimeLeft <= 0) return;
-    const interval = setInterval(() => { setQuestionTimeLeft((prev) => prev - 1); }, 1000);
-    return () => clearInterval(interval);
-  }, [questionTimeLeft]);
-
-  useEffect(() => {
     if (!problem || isMCQ) return;
     let tcs = [];
     try {
@@ -200,26 +174,23 @@ export default function ContestProblemWorkspace() {
     return () => controller.abort();
   }, [problemIdStr, problem?.isMCQ, problem?.externalUrl]);
 
+  // 👉 FIXED: Highly robust MCQ Data Extractor
   useEffect(() => {
-    if (isMCQ && problem) {
-      try {
-        if (problem?.interviewQuestion) {
-          setMcqData(problem.interviewQuestion);
-        } else if (redirectInfo?.interviewQuestion) {
-          setMcqData(redirectInfo.interviewQuestion);
-        } else if (problem?.mcqData) {
-          const data = typeof problem.mcqData === 'string' ? JSON.parse(problem.mcqData) : problem.mcqData;
-          setMcqData(data);
-        } else {
-          setMcqData(null);
-        }
-      } catch (e) {
+    if (isMCQ) {
+      let extractedData = null;
+      if (redirectInfo?.interviewQuestion) extractedData = redirectInfo.interviewQuestion;
+      else if (problem?.interviewQuestion) extractedData = problem.interviewQuestion;
+      else if (problem?.problem?.interviewQuestion) extractedData = problem.problem.interviewQuestion;
+      else if (problem?.mcqData) extractedData = typeof problem.mcqData === 'string' ? JSON.parse(problem.mcqData) : problem.mcqData;
+      else if (redirectInfo?.mcqData) extractedData = typeof redirectInfo.mcqData === 'string' ? JSON.parse(redirectInfo.mcqData) : redirectInfo.mcqData;
+      
+      if (extractedData) {
+        setMcqData(extractedData);
+      } else {
         setMcqData(null);
       }
-    } else {
-      setMcqData(null);
     }
-  }, [isMCQ, problem, redirectInfo, problemIdStr]);
+  }, [isMCQ, problem, redirectInfo]);
 
   const cleanupAudioElement = (socketId: string) => {
     const audio = document.getElementById(`audio-${socketId}`) as HTMLAudioElement;
@@ -467,9 +438,8 @@ export default function ContestProblemWorkspace() {
     };
 
     try {
-      // ⚡ HARDENED: Add explicit signal for standard browser fetch since it targets local CPH instance
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000); // Fast timeout for local CPH
+      const timeoutId = setTimeout(() => controller.abort(), 3000); 
 
       const res = await fetch("http://localhost:10043/", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -491,7 +461,6 @@ export default function ContestProblemWorkspace() {
     setActiveTab('terminal');
     setTerminalOutput(`> Compiling and running...\n`);
     try {
-      // ⚡ HARDENED: Prevent terminal from freezing indefinitely
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); 
 
@@ -606,7 +575,6 @@ export default function ContestProblemWorkspace() {
     const finalLanguage = isMCQ ? 'mcq' : language;
 
     try {
-      // ⚡ HARDENED: Release the UI block if grading takes too long
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 25000); 
 
@@ -642,12 +610,12 @@ export default function ContestProblemWorkspace() {
   };
 
   const DynamicLoader = () => (
-    <div style={{...modalOverlay, backgroundColor: '#070a16', flexDirection: 'column'}}>
+    <div style={{...modalOverlay, backgroundColor: 'var(--bg-main)', flexDirection: 'column'}}>
       <div style={{ position: 'relative', width: 80, height: 80 }}>
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderTop: '4px solid #22d3ee', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderTop: '4px solid var(--accent-primary)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
       </div>
       <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
-      <h2 style={{ color: '#eef2ff', marginTop: 24, letterSpacing: '2px', fontWeight: 600 }}>INITIALIZING WORKSPACE</h2>
+      <h2 style={{ color: 'var(--text-main)', marginTop: 24, letterSpacing: '2px', fontWeight: 600 }}>INITIALIZING WORKSPACE</h2>
     </div>
   );
 
@@ -659,12 +627,71 @@ export default function ContestProblemWorkspace() {
   const problemDescriptionHtml = problem?.customDescription || problem?.problem?.description || (problem?.description ? problem.description : 'No description available for this problem.');
 
   const activeMcqPrompt = mcqData?.prompt || problem?.customDescription || problem?.titleSnapshot || 'No description provided';
-  const activeMcqOptions = Array.isArray(mcqData?.options) ? mcqData.options : [];
+  
+  // 👉 FIXED: Robust Option Parsing
+  let activeMcqOptions: string[] = [];
+  if (Array.isArray(mcqData?.options)) {
+    activeMcqOptions = mcqData.options;
+  } else if (typeof mcqData?.options === 'string') {
+    try { activeMcqOptions = JSON.parse(mcqData.options); } catch (e) { }
+  }
+  
+  const editorTheme = theme === 'light' ? 'light' : 'vs-dark';
 
  return (
-    <main style={{...page, minHeight: '100vh', height: '100vh', overflow: 'hidden'}}>
-      
+    <main className="workspace-container">
       <style>{`
+        .workspace-container {
+          display: flex;
+          height: 100vh;
+          background: var(--bg-main);
+          font-family: Inter, sans-serif;
+          flex-direction: row;
+        }
+        .workspace-left {
+          width: 45%;
+          border-right: 1px solid var(--border-color);
+          background: var(--bg-panel);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        .workspace-right {
+          width: 55%;
+          display: flex;
+          flex-direction: column;
+        }
+        .mobile-scroll-x {
+          display: flex;
+          overflow-x: auto;
+          white-space: nowrap;
+        }
+        .mobile-scroll-x::-webkit-scrollbar {
+          height: 4px;
+        }
+        .mobile-scroll-x::-webkit-scrollbar-thumb {
+          background: var(--border-color);
+          border-radius: 4px;
+        }
+        @media (max-width: 768px) {
+          .workspace-container {
+            flex-direction: column;
+            height: auto;
+            min-height: 100vh;
+          }
+          .workspace-left {
+            width: 100%;
+            border-right: none;
+            border-bottom: 4px solid var(--border-color);
+            height: 55vh;
+          }
+          .workspace-right {
+            width: 100%;
+            height: 85vh;
+          }
+        }
+        
+        /* WebRTC Cursor Styles */
         .yRemoteSelection { background-color: rgba(250, 128, 114, 0.2); }
         .yRemoteSelectionHead {
           position: absolute;
@@ -690,13 +717,13 @@ export default function ContestProblemWorkspace() {
         }
       `}</style>
 
-      <Toaster position="top-center" toastOptions={{ style: { background: '#1e293b', color: '#fff', border: '1px solid #475569' } }} />
+      <Toaster position="top-center" toastOptions={{ style: { background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)' } }} />
       
       {submitting && (
         <div style={modalOverlay}>
           <div style={{...modalContent, textAlign: 'center'}}>
-            <h2 style={{ color: '#fff', margin: '0 0 10px 0' }}>{isMCQ ? 'Grading Answer...' : 'Judging Submission...'}</h2>
-            <p style={{ color: '#67e8f9' }}>Evaluating against hidden system modules</p>
+            <h2 style={{ color: 'var(--text-main)', margin: '0 0 10px 0' }}>{isMCQ ? 'Grading Answer...' : 'Judging Submission...'}</h2>
+            <p style={{ color: 'var(--accent-primary)' }}>Evaluating against hidden system modules</p>
           </div>
         </div>
       )}
@@ -706,14 +733,14 @@ export default function ContestProblemWorkspace() {
           <div style={{...modalContent, border: '1px solid #a855f7'}}>
             <h2 style={{ margin: '0 0 10px 0', color: '#a855f7' }}>🤖 AI Debug Analysis</h2>
             
-            <strong style={{ color: '#eef2ff' }}>Hint:</strong>
-            <p style={{ color: '#cbd5e1', marginBottom: 15 }}>{aiDebugResult.hint}</p>
+            <strong style={{ color: 'var(--text-main)' }}>Hint:</strong>
+            <p style={{ color: 'var(--text-muted)', marginBottom: 15 }}>{aiDebugResult.hint}</p>
 
-            <strong style={{ color: '#eef2ff' }}>Failing Input:</strong>
-            <pre style={{ background: '#020617', padding: 10, borderRadius: 8, color: '#e2e8f0', marginTop: 5, whiteSpace: 'pre-wrap' }}>{aiDebugResult.input}</pre>
+            <strong style={{ color: 'var(--text-main)' }}>Failing Input:</strong>
+            <pre style={{ background: 'var(--bg-card)', padding: 10, borderRadius: 8, color: 'var(--text-main)', marginTop: 5, whiteSpace: 'pre-wrap', border: '1px solid var(--border-color)' }}>{aiDebugResult.input}</pre>
 
-            <strong style={{ color: '#eef2ff' }}>Expected Output:</strong>
-            <pre style={{ background: '#020617', padding: 10, borderRadius: 8, color: '#4ade80', marginTop: 5, whiteSpace: 'pre-wrap' }}>{aiDebugResult.expectedOutput}</pre>
+            <strong style={{ color: 'var(--text-main)' }}>Expected Output:</strong>
+            <pre style={{ background: 'var(--bg-card)', padding: 10, borderRadius: 8, color: '#4ade80', marginTop: 5, whiteSpace: 'pre-wrap', border: '1px solid var(--border-color)' }}>{aiDebugResult.expectedOutput}</pre>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
               <button onClick={() => setAiDebugResult(null)} style={{...primaryBtn, background: '#a855f7'}}>Dismiss</button>
@@ -726,7 +753,7 @@ export default function ContestProblemWorkspace() {
         <div style={modalOverlay}>
           <div style={{...modalContent, border: `1px solid ${judgeVerdict.status.includes('Accept') ? '#4ade80' : '#f87171'}`}}>
             <h2 style={{ margin: '0 0 10px 0', color: judgeVerdict.status.includes('Accept') ? '#4ade80' : '#f87171' }}>{judgeVerdict.status}</h2>
-            <pre style={{ background: '#020617', padding: 15, borderRadius: 8, color: '#e2e8f0', whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto' }}>
+            <pre style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', padding: 15, borderRadius: 8, color: 'var(--text-main)', whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto' }}>
               {judgeVerdict.message}
             </pre>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
@@ -739,12 +766,12 @@ export default function ContestProblemWorkspace() {
       {showCfModal && (
         <div style={modalOverlay}>
           <div style={modalContent}>
-            <h2 style={{ margin: '0 0 15px', color: '#fff' }}>Codeforces Submission</h2>
-            <p style={{ color: '#94a3b8', fontSize: 14, marginBottom: 20 }}>
+            <h2 style={{ margin: '0 0 15px', color: 'var(--text-main)' }}>Codeforces Submission</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 20 }}>
               This is a live Codeforces problem. Submit your solution directly on their platform. Once accepted, click below to sync your points back here.
             </p>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{...primaryBtn, flex: 1, background: '#38bdf8', color: '#0f172a'}}>1. Submit on Codeforces</a>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <a href={problem.externalUrl} target="_blank" rel="noreferrer" style={{...primaryBtn, flex: 1, background: 'var(--accent-primary)', color: '#0f172a'}}>1. Submit on Codeforces</a>
               <button onClick={handleSyncCodeforces} disabled={isSyncing} style={{...primaryBtn, flex: 1, background: '#10b981'}}>{isSyncing ? 'Syncing...' : '2. Sync Accepted Result'}</button>
             </div>
             <button onClick={() => setShowCfModal(false)} style={{...ghostBtn, width: '100%', marginTop: 10}}>Cancel</button>
@@ -752,15 +779,18 @@ export default function ContestProblemWorkspace() {
         </div>
       )}
 
-      <header style={headerBar}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+      {/* Unified Header */}
+      <header style={headerBar} className="mobile-scroll-x">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 15, flex: '1 0 auto' }}>
           <button onClick={() => router.push(`/contests/${id}`)} style={btnDark}>← Standings</button>
-          <strong style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <strong style={{ color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <img src="/logo.png" alt="DivineCode Logo" style={{ width: 24, height: 24, objectFit: 'contain' }} />
             {problem.titleSnapshot}
           </strong>
         </div>
-        <div style={timerBox}>{timer.text}</div>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{...timerBox, flex: '0 0 auto', margin: '0 15px'}}>{timer.text}</div>
+        
+        <div style={{ display: 'flex', gap: 10, flex: '1 0 auto', justifyContent: 'flex-end' }}>
           {!isMCQ && (
             <>
               <button onClick={handleAiDebug} disabled={aiDebuggerLoading} style={{...ghostBtn, borderColor: '#a855f7', color: '#a855f7'}}>
@@ -781,10 +811,10 @@ export default function ContestProblemWorkspace() {
       </header>
 
       {isMCQ ? (
-        <div style={{ width: '100%', height: 'calc(100vh - 60px)', overflowY: 'auto', background: '#020617', display: 'flex', justifyContent: 'center' }}>
-          <div style={{ width: '100%', maxWidth: 800, padding: '60px 20px' }}>
+        <div style={{ width: '100%', height: 'calc(100vh - 60px)', overflowY: 'auto', background: 'var(--bg-main)', display: 'flex', justifyContent: 'center' }}>
+          <div style={{ width: '100%', maxWidth: 800, padding: 'clamp(20px, 5vw, 60px) 20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 }}>
-              <strong style={{ color: '#38bdf8', fontSize: 16, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Question {problem?.label || ''}</strong>
+              <strong style={{ color: 'var(--accent-primary)', fontSize: 16, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Question {problem?.label || ''}</strong>
               {problem?.mcqTimeLimitSeconds > 0 && (
                  <div style={{ fontSize: 24, fontWeight: 'bold', color: questionTimeLeft < 30 ? '#ef4444' : '#fbbf24', background: questionTimeLeft < 30 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(251,191,36,0.1)', padding: '5px 15px', borderRadius: 8 }}>
                    {Math.floor(questionTimeLeft / 60)}:{(questionTimeLeft % 60).toString().padStart(2, '0')}
@@ -792,12 +822,12 @@ export default function ContestProblemWorkspace() {
               )}
             </div>
             
-            <h2 style={{ fontSize: 28, lineHeight: 1.6, margin: '0 0 15px', color: '#eef2ff' }} dangerouslySetInnerHTML={{ __html: activeMcqPrompt }} />
+            <h2 style={{ fontSize: 'clamp(20px, 4vw, 28px)', lineHeight: 1.6, margin: '0 0 15px', color: 'var(--text-main)' }} dangerouslySetInnerHTML={{ __html: activeMcqPrompt }} />
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 40 }}>
               {activeMcqOptions.length > 0 ? (
                 activeMcqOptions.map((opt: string, idx: number) => (
-                  <button key={idx} onClick={() => setSelectedOptions(mcqData?.isMultiple ? (prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]) : [idx])} style={{ padding: '20px', borderRadius: 12, background: selectedOptions.includes(idx) ? 'rgba(34,211,238,.12)' : 'rgba(15,23,42,.6)', border: selectedOptions.includes(idx) ? '2px solid #22d3ee' : '2px solid #334155', color: '#eef2ff', cursor: 'pointer', textAlign: 'left' }}>
+                  <button key={idx} onClick={() => setSelectedOptions(mcqData?.isMultiple ? (prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]) : [idx])} style={{ padding: '20px', borderRadius: 12, background: selectedOptions.includes(idx) ? 'var(--accent-glow)' : 'var(--bg-card)', border: selectedOptions.includes(idx) ? '2px solid var(--accent-primary)' : '2px solid var(--border-color)', color: 'var(--text-main)', cursor: 'pointer', textAlign: 'left', transition: '0.2s' }}>
                     {String.fromCharCode(65 + idx)}. {opt}
                   </button>
                 ))
@@ -814,23 +844,23 @@ export default function ContestProblemWorkspace() {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', height: 'calc(100vh - 60px)', width: '100%' }}>
-          <section style={{ width: '40%', overflowY: 'auto', background: '#0f172a', padding: 20 }}>
+        <div className="workspace-container" style={{ height: 'calc(100vh - 60px)', width: '100%' }}>
+          <section className="workspace-left" style={{ overflowY: 'auto', padding: 20 }}>
             {problemType === 'EXTERNAL' && externalUrl && (
-              <div style={{ marginBottom: 20, padding: 20, borderRadius: 14, background: '#081327', border: '1px solid #334155' }}>
-                <strong style={{ display: 'block', color: '#38bdf8', marginBottom: 10, fontSize: 16 }}>External problem detected</strong>
-                <p style={{ margin: 0, color: '#cbd5e1', lineHeight: 1.7 }}>
+              <div style={{ marginBottom: 20, padding: 20, borderRadius: 14, background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+                <strong style={{ display: 'block', color: 'var(--accent-primary)', marginBottom: 10, fontSize: 16 }}>External problem detected</strong>
+                <p style={{ margin: 0, color: 'var(--text-muted)', lineHeight: 1.7 }}>
                   This problem is sourced from an external platform. You can code your solution here or open it natively.
                 </p>
-                <a href={externalUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 16, color: '#22d3ee', textDecoration: 'underline', fontWeight: 600 }}>
+                <a href={externalUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 16, color: 'var(--accent-primary)', textDecoration: 'underline', fontWeight: 600 }}>
                   Open original question ↗
                 </a>
               </div>
             )}
             
             {(problem?.videoUrl || problem?.problem?.videoUrl) && (
-              <div style={{ marginBottom: 20, padding: 15, background: '#020617', borderRadius: 12, border: '1px solid #38bdf8' }}>
-                <strong style={{ color: '#38bdf8', display: 'block', marginBottom: 10 }}>🎥 Video Explanation</strong>
+              <div style={{ marginBottom: 20, padding: 15, background: 'var(--bg-panel-solid)', borderRadius: 12, border: '1px solid var(--accent-primary)' }}>
+                <strong style={{ color: 'var(--accent-primary)', display: 'block', marginBottom: 10 }}>🎥 Video Explanation</strong>
                 <iframe 
                   src={problem.videoUrl || problem.problem.videoUrl} 
                   style={{ width: '100%', height: 250, borderRadius: 8, border: 'none' }} 
@@ -843,24 +873,24 @@ export default function ContestProblemWorkspace() {
             {problemDescriptionHtml && problemDescriptionHtml.length > 10 ? (
               <div 
                 className="problem-statement-html" 
-                style={{ color: '#eef2ff', lineHeight: '1.7', paddingBottom: '60px' }} 
+                style={{ color: 'var(--text-main)', lineHeight: '1.7', paddingBottom: '60px' }} 
                 dangerouslySetInnerHTML={{ __html: problemDescriptionHtml }} 
               />
             ) : (
-              <div style={{ padding: 20, background: '#1e1b4b', borderRadius: 12, border: '1px solid #6366f1' }}>
-                <p style={{ color: '#cbd5e1' }}>Problem description unavailable.</p>
+              <div style={{ padding: 20, background: 'var(--accent-glow)', borderRadius: 12, border: '1px solid var(--accent-primary)' }}>
+                <p style={{ color: 'var(--text-main)' }}>Problem description unavailable.</p>
                 {externalUrl && (
-                   <a href={externalUrl} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontWeight: 'bold' }}>View External Problem Link ↗</a>
+                   <a href={externalUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)', fontWeight: 'bold' }}>View External Problem Link ↗</a>
                 )}
               </div>
             )}
           </section>
           
-          <section style={{ width: '60%', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
+          <section className="workspace-right" style={{ background: 'var(--bg-main)' }}>
             <div style={{ height: '65%' }}>
               <Editor 
                 height="100%" 
-                theme="vs-dark" 
+                theme={editorTheme} 
                 language={monacoLanguage} 
                 options={{ fontSize: 15, minimap: { enabled: false }, padding: { top: 16 } }} 
                 onMount={async (editor, monaco) => {
@@ -901,30 +931,30 @@ export default function ContestProblemWorkspace() {
               />
             </div>
             
-            <div style={{ height: '35%', background: '#1e1e1e', borderTop: '1px solid #333' }}>
+            <div style={{ height: '35%', background: 'var(--bg-main)', borderTop: '1px solid var(--border-color)' }}>
               <div style={tabsHeader}>
                 <button onClick={() => setActiveTab('cph')} style={activeTab === 'cph' ? activeTabStyle : inactiveTabStyle}>TEST CASES</button>
                 <button onClick={() => setActiveTab('terminal')} style={activeTab === 'terminal' ? activeTabStyle : inactiveTabStyle}>TERMINAL</button>
               </div>
               <div style={{ padding: 15, height: 'calc(100% - 40px)', overflowY: 'auto' }}>
                 {activeTab === 'cph' && testcases.map((tc, index) => (
-                  <div key={tc.id} style={{ marginBottom: 15, padding: 12, background: '#020617', border: `1px solid ${tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' ? '#f87171' : tc.status === 'running' ? '#eab308' : '#334155'}`, borderRadius: 8 }}>
+                  <div key={tc.id} style={{ marginBottom: 15, padding: 12, background: 'var(--bg-panel-solid)', border: `1px solid ${tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' ? '#f87171' : tc.status === 'running' ? '#eab308' : 'var(--border-color)'}`, borderRadius: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                       <strong style={{ color: '#e2e8f0', fontSize: 14 }}>Test Case {index + 1}</strong>
+                       <strong style={{ color: 'var(--text-main)', fontSize: 14 }}>Test Case {index + 1}</strong>
                        {tc.status !== 'idle' && (
-                         <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' ? '#f87171' : '#eab308', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', padding: '2px 8px', background: 'rgba(255,255,255,0.05)', borderRadius: 12 }}>
+                         <span style={{ color: tc.status === 'passed' ? '#4ade80' : tc.status === 'failed' ? '#f87171' : '#eab308', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', padding: '2px 8px', background: 'rgba(128,128,128,0.1)', borderRadius: 12 }}>
                            {tc.status}
                          </span>
                        )}
                     </div>
-                    <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>Input:</div>
-                    <pre style={{ margin: 0, padding: 8, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 4, color: '#e2e8f0', fontSize: 12, whiteSpace: 'pre-wrap' }}>{tc.input}</pre>
-                    <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 8, marginBottom: 4 }}>Expected Output:</div>
-                    <pre style={{ margin: 0, padding: 8, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 4, color: '#e2e8f0', fontSize: 12, whiteSpace: 'pre-wrap' }}>{tc.expectedOutput}</pre>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 4 }}>Input:</div>
+                    <pre style={{ margin: 0, padding: 8, background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 4, color: 'var(--text-main)', fontSize: 12, whiteSpace: 'pre-wrap' }}>{tc.input}</pre>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 8, marginBottom: 4 }}>Expected Output:</div>
+                    <pre style={{ margin: 0, padding: 8, background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 4, color: 'var(--text-main)', fontSize: 12, whiteSpace: 'pre-wrap' }}>{tc.expectedOutput}</pre>
 
                     {tc.status !== 'idle' && (
                       <>
-                        <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 8, marginBottom: 4 }}>Actual Output:</div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 8, marginBottom: 4 }}>Actual Output:</div>
                         <pre style={{ margin: 0, padding: 8, background: tc.status === 'passed' ? 'rgba(74, 222, 128, 0.1)' : 'rgba(248, 113, 113, 0.1)', border: `1px solid ${tc.status === 'passed' ? '#4ade80' : '#f87171'}`, borderRadius: 4, color: tc.status === 'passed' ? '#4ade80' : '#f87171', fontSize: 12, whiteSpace: 'pre-wrap' }}>
                           {tc.output || '[No Output / Execution Failed]'}
                         </pre>
@@ -935,17 +965,17 @@ export default function ContestProblemWorkspace() {
                 {activeTab === 'terminal' && (
                   <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10 }}>
                     <div>
-                       <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>Custom Input (stdin):</div>
+                       <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 4 }}>Custom Input (stdin):</div>
                        <textarea 
                          value={customInput} 
                          onChange={(e) => setCustomInput(e.target.value)}
-                         style={{ width: '100%', height: 80, background: '#020617', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 8, padding: 10, fontFamily: 'monospace', outline: 'none', resize: 'vertical' }}
+                         style={{ width: '100%', height: 80, background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)', borderRadius: 8, padding: 10, fontFamily: 'monospace', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
                          placeholder="Enter custom input data here..."
                        />
                     </div>
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                       <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>Terminal Output:</div>
-                       <pre style={{ flex: 1, margin: 0, padding: 12, background: '#020617', color: '#4ade80', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap', border: '1px solid #334155', borderRadius: 8, minHeight: 120, overflowY: 'auto' }}>{terminalOutput}</pre>
+                       <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 4 }}>Terminal Output:</div>
+                       <pre style={{ flex: 1, margin: 0, padding: 12, background: 'var(--bg-panel-solid)', color: '#4ade80', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap', border: '1px solid var(--border-color)', borderRadius: 8, minHeight: 120, overflowY: 'auto' }}>{terminalOutput}</pre>
                     </div>
                   </div>
                 )}
@@ -958,35 +988,36 @@ export default function ContestProblemWorkspace() {
       {/* Global / Team Chat Component */}
       <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 999 }}>
         {isChatOpen ? (
-          <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 340, height: 480, background: '#0f172a', border: '1px solid #6366f1', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+          <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} style={{ width: 'clamp(280px, 90vw, 340px)', height: 'clamp(300px, 80vh, 480px)', background: 'var(--bg-panel-solid)', border: '1px solid var(--accent-primary)', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
             
-            <div style={{ background: '#1e1b4b', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #312e81' }}>
-              <strong style={{ color: '#a5b4fc' }}>{contest?.viewerMember?.teamId ? 'Team Chat' : 'Global Chat'}</strong>
+            <div style={{ background: 'var(--bg-panel)', padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)' }}>
+              <strong style={{ color: 'var(--accent-primary)' }}>{contest?.viewerMember?.teamId ? 'Team Chat' : 'Global Chat'}</strong>
               <div style={{ display: 'flex', gap: 8 }}>
                 {contest?.viewerMember?.teamId && (
-                  <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)', color: voiceStatus === 'connected' ? '#4ade80' : '#fff', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
+                  <button onClick={toggleVoice} style={{ background: voiceStatus === 'connected' ? 'rgba(74,222,128,0.2)' : 'var(--bg-card)', color: voiceStatus === 'connected' ? '#4ade80' : 'var(--text-main)', border: `1px solid ${voiceStatus === 'connected' ? '#4ade80' : 'transparent'}`, borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
                     {voiceStatus === 'connected' ? '🟢 Voice On' : voiceStatus === 'connecting' ? '⏳ Connecting...' : '🎤 Join Voice'}
                   </button>
                 )}
                 <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18 }}>✖</button>
               </div>
             </div>
-            <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: '#94a3b8', fontSize: 14 }}>
+            <div style={{ flex: 1, padding: 12, overflowY: 'auto', color: 'var(--text-muted)', fontSize: 14 }}>
               {messages.length === 0 ? (
-                <p style={{ textAlign: 'center', marginTop: '40%', color: '#64748b' }}>No messages yet. Say hi! 👋</p>
+                <p style={{ textAlign: 'center', marginTop: '40%', color: 'var(--text-muted)' }}>No messages yet. Say hi! 👋</p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {messages.map((msg: any) => {
                     if (!msg || !msg.id) return null;
                     const username = msg.sender?.username || msg.sender?.name || msg.senderId || 'Participant';
                     const timestamp = new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const isMe = msg.senderId === (contest?.viewerMember?.userId || session?.user?.email);
                     return (
-                      <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 8 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}>
-                          <strong style={{ color: '#67e8f9' }}>{username}</strong>
-                          <span style={{ color: '#64748b' }}>{timestamp}</span>
+                      <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} key={msg.id} style={{ alignSelf: isMe ? 'flex-end' : 'flex-start', background: isMe ? 'var(--accent-glow)' : 'var(--bg-card)', border: isMe ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)', padding: '8px 12px', borderRadius: 8, maxWidth: '85%' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12, gap: 10 }}>
+                          <strong style={{ color: isMe ? 'var(--accent-primary)' : 'var(--text-main)' }}>{isMe ? 'You' : username}</strong>
+                          <span style={{ color: 'var(--text-muted)' }}>{timestamp}</span>
                         </div>
-                        <div style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{msg.content || '(empty message)'}</div>
+                        <div style={{ color: 'var(--text-main)', wordBreak: 'break-word' }}>{msg.content || '(empty message)'}</div>
                       </motion.div>
                     );
                   })}
@@ -994,13 +1025,13 @@ export default function ContestProblemWorkspace() {
                 </div>
               )}
             </div>
-            <div style={{ padding: 12, borderTop: '1px solid #334155', display: 'flex', gap: 8 }}>
-              <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ width: '100%', padding: 8, borderRadius: 6, background: '#1e293b', color: '#fff', border: '1px solid #334155' }} />
-              <button onClick={handleSendMessage} style={{ background: '#6366f1', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 6, cursor: 'pointer' }}>Send</button>
+            <div style={{ padding: 12, borderTop: '1px solid var(--border-color)', display: 'flex', gap: 8, background: 'var(--bg-panel)' }}>
+              <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendMessage()} placeholder="Type a message..." style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'var(--bg-card)', color: 'var(--text-main)', border: '1px solid var(--border-color)', outline: 'none' }} />
+              <button onClick={handleSendMessage} style={{ background: 'var(--accent-primary)', color: '#000', border: 'none', padding: '8px 14px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold' }}>Send</button>
             </div>
           </motion.div>
         ) : (
-          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setIsChatOpen(true)} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: '50%', width: 56, height: 56, cursor: 'pointer', boxShadow: '0 4px 12px rgba(99,102,241,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setIsChatOpen(true)} style={{ background: 'var(--accent-primary)', color: '#000', border: 'none', borderRadius: '50%', width: 56, height: 56, cursor: 'pointer', boxShadow: '0 4px 12px var(--accent-glow)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
           </motion.button>
         )}
@@ -1010,17 +1041,17 @@ export default function ContestProblemWorkspace() {
 }
 
 // Styles
-const page: CSSProperties = { display: 'flex', flexDirection: 'column', backgroundColor: '#020617', color: '#eef2ff', fontFamily: 'Inter, sans-serif' };
-const headerBar: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', backgroundColor: '#1e1e1e', borderBottom: '1px solid #333', height: 60 };
-const btnDark: CSSProperties = { background: '#333', border: 'none', color: '#ccc', padding: '8px 14px', cursor: 'pointer', fontWeight: 'bold', borderRadius: 4 };
-const timerBox: CSSProperties = { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold' };
-const submitBtn: CSSProperties = { background: '#10b981', border: 'none', color: '#fff', padding: '8px 16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: 4 };
-const runBtn: CSSProperties = { background: '#3b82f6', border: 'none', color: '#fff', padding: '8px 16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: 4 };
-const ghostBtn: CSSProperties = { background: 'transparent', border: '1px solid #444', color: '#ccc', padding: '8px 16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: 4 };
-const selectBox: CSSProperties = { background: '#333', color: '#fff', border: 'none', padding: '8px', outline: 'none', borderRadius: 4 };
-const tabsHeader: CSSProperties = { display: 'flex', borderBottom: '1px solid #333', background: '#1e1e1e' };
-const activeTabStyle: CSSProperties = { flex: 1, background: '#1e1e1e', border: 'none', borderTop: '2px solid #38bdf8', color: '#fff', padding: '10px', cursor: 'pointer', fontWeight: 'bold', fontSize: 12, letterSpacing: 1 };
-const inactiveTabStyle: CSSProperties = { flex: 1, background: '#2d2d2d', border: 'none', color: '#888', padding: '10px', cursor: 'pointer', fontSize: 12, letterSpacing: 1, borderTop: '2px solid transparent' };
-const modalOverlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(2, 6, 23, 0.8)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
-const modalContent: CSSProperties = { background: '#0f172a', padding: 30, borderRadius: 16, border: '1px solid #1e293b', width: '90%', maxWidth: 500, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' };
-const primaryBtn: CSSProperties = { background: '#0284c7', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', textDecoration: 'none', textAlign: 'center', display: 'inline-block' };
+const page: CSSProperties = { display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-main)', color: 'var(--text-main)', fontFamily: 'Inter, sans-serif' };
+const headerBar: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', backgroundColor: 'var(--bg-panel-solid)', borderBottom: '1px solid var(--border-color)', height: 'auto', minHeight: 60 };
+const btnDark: CSSProperties = { background: 'var(--button-ghost-bg)', border: '1px solid var(--button-ghost-border)', color: 'var(--text-main)', padding: '8px 14px', cursor: 'pointer', fontWeight: 'bold', borderRadius: 4, whiteSpace: 'nowrap' };
+const timerBox: CSSProperties = { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '6px 12px', borderRadius: 6, fontWeight: 'bold', whiteSpace: 'nowrap' };
+const submitBtn: CSSProperties = { background: '#10b981', border: 'none', color: '#fff', padding: '8px 16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: 4, whiteSpace: 'nowrap' };
+const runBtn: CSSProperties = { background: 'var(--accent-primary)', border: 'none', color: '#000', padding: '8px 16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: 4, whiteSpace: 'nowrap' };
+const ghostBtn: CSSProperties = { background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '8px 16px', fontWeight: 'bold', cursor: 'pointer', borderRadius: 4, whiteSpace: 'nowrap' };
+const selectBox: CSSProperties = { background: 'var(--bg-card)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '8px', outline: 'none', borderRadius: 4 };
+const tabsHeader: CSSProperties = { display: 'flex', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-panel-solid)' };
+const activeTabStyle: CSSProperties = { flex: 1, background: 'var(--bg-panel)', border: 'none', borderTop: '2px solid var(--accent-primary)', color: 'var(--accent-primary)', padding: '10px', cursor: 'pointer', fontWeight: 'bold', fontSize: 12, letterSpacing: 1 };
+const inactiveTabStyle: CSSProperties = { flex: 1, background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: '10px', cursor: 'pointer', fontSize: 12, letterSpacing: 1, borderTop: '2px solid transparent' };
+const modalOverlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(2, 6, 23, 0.8)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 };
+const modalContent: CSSProperties = { background: 'var(--bg-panel-solid)', padding: 30, borderRadius: 16, border: '1px solid var(--border-color)', width: '100%', maxWidth: 500, boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' };
+const primaryBtn: CSSProperties = { background: 'var(--accent-primary)', color: '#000', border: 'none', padding: '10px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', textDecoration: 'none', textAlign: 'center', display: 'inline-block' };
