@@ -328,8 +328,11 @@ export default function DuelPage() {
 
   return (
     <main style={page}>
-      <nav style={nav}>
-        <a href="/" style={brand}>⚔️ DivineCode Duel</a>
+     <nav style={nav}>
+        <a href="/" style={brand}>
+          <img src="/logo.png" alt="DivineCode Logo" style={{ width: 32, height: 32, objectFit: 'contain' }} />
+          DivineCode Duel
+        </a>
         <div style={userPill}>{session?.user?.name || session?.user?.email || 'Guest Player'}</div>
       </nav>
       

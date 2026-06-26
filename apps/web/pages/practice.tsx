@@ -277,7 +277,8 @@ export default function PracticePage() {
       <section style={{ maxWidth: 1200, margin: '0 auto' }}>
         <nav style={nav}>
           <a href="/" style={brand}>
-            <span style={logoBadge}>DC</span> DivineCode Practice
+            <img src="/logo.png" alt="DivineCode Logo" style={{ width: 32, height: 32, objectFit: 'contain' }} />
+            DivineCode Practice
           </a>
           <a href="/contests" style={pill}>Contests Arena</a>
         </nav>

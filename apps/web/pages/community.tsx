@@ -128,8 +128,11 @@ export default function CommunityHubPage() {
       <Toaster position="top-center" toastOptions={{ style: { background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)' } }} />
       
       <section style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <nav style={nav}>
-          <a href="/" style={brand}>🌐 DivineCode Community</a>
+       <nav style={nav}>
+          <a href="/" style={brand}>
+            <img src="/logo.png" alt="DivineCode Logo" style={{ width: 32, height: 32, objectFit: 'contain' }} />
+            Community Hub
+          </a>
           <button onClick={openUploadModal} style={button}>+ Upload Tutorial</button>
         </nav>
 

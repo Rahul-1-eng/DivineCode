@@ -504,10 +504,9 @@ export default function Home() {
         )}
       </div>
 
-      <footer style={{ background: 'var(--bg-panel)', borderTop: '1px solid var(--border-color)', padding: 'clamp(24px, 5vw, 60px) clamp(12px, 3vw, 20px)', marginTop: '40px', backdropFilter: 'blur(10px)', position: 'relative', zIndex: 10 }}>
+     <footer style={{ background: 'var(--bg-panel)', borderTop: '1px solid var(--border-color)', padding: 'clamp(24px, 5vw, 60px) clamp(12px, 3vw, 20px)', marginTop: '40px', backdropFilter: 'blur(10px)', position: 'relative', zIndex: 10 }}>
         <div style={{ maxWidth: 1180, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'clamp(24px, 4vw, 40px)' }}>
           <div>
-            {/* 👉 THE NEW LOGO IS ALSO IN THE FOOTER HERE */}
             <h3 style={{ color: 'var(--text-main)', fontSize: 'clamp(14px, 2.5vw, 18px)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
               <img src="/logo.png" alt="DivineCode Logo" style={{ width: 28, height: 28, objectFit: 'contain' }} /> 
               DivineCode
@@ -527,8 +526,16 @@ export default function Home() {
           <div>
             <h4 style={{ color: 'var(--text-main)', marginBottom: 12, fontSize: 'clamp(12px, 2vw, 14px)' }}>Resources</h4>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {[['Documentation', '#'], ['API Reference', '#'], ['System Status', '#']].map(([label, href]) => (
-                <li key={href}><a href={href} className="footer-link" style={{ color: 'var(--text-muted)', textDecoration: 'none', transition: '0.2s', fontSize: 'clamp(11px, 2vw, 12px)' }}>{label}</a></li>
+              {[
+                ['GitHub Repository', 'https://github.com/Rahul-1-eng/DivineCode'], 
+                ['Architecture Docs', 'https://github.com/Rahul-1-eng/DivineCode/blob/main/README.md'], 
+                ['Deployment Guide', 'https://github.com/Rahul-1-eng/DivineCode/blob/main/DEPLOYMENT.md']
+              ].map(([label, href]) => (
+                <li key={label}>
+                  <a href={href} target="_blank" rel="noreferrer" className="footer-link" style={{ color: 'var(--text-muted)', textDecoration: 'none', transition: '0.2s', fontSize: 'clamp(11px, 2vw, 12px)' }}>
+                    {label} ↗
+                  </a>
+                </li>
               ))}
             </ul>
           </div>

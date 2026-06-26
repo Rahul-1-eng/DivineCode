@@ -174,8 +174,11 @@ export default function InterviewPage() {
       <Toaster position="top-center" toastOptions={{ style: { background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)' } }} />
       
       <section style={{ maxWidth: 1000, margin: '0 auto' }}>
-        <nav style={nav}>
-          <a href="/" style={brand}>DivineCode Interview Arena</a>
+       <nav style={nav}>
+          <a href="/" style={brand}>
+            <img src="/logo.png" alt="DivineCode Logo" style={{ width: 32, height: 32, objectFit: 'contain' }} />
+            Interview Arena
+          </a>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             {profile?.role === 'ADMIN' && (
               <button onClick={() => setViewMode(viewMode === 'ADMIN' ? 'PRACTICE' : 'ADMIN')} style={{...pill, background: viewMode === 'ADMIN' ? 'var(--accent-primary)' : 'var(--bg-panel-solid)', color: viewMode === 'ADMIN' ? '#000' : 'var(--text-main)', cursor: 'pointer'}}>
