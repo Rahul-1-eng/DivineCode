@@ -71,13 +71,13 @@ adminRouter.delete('/reports/:id', async (req, res) => {
   }
 });
 
-// Fetch Recent Contests for the Scanner Dropdown
+// Fetch Recent Contests
 adminRouter.get('/contests/recent', async (req, res) => {
   try {
     const contests = await prisma.contest.findMany({
       take: 10,
       orderBy: { createdAt: 'desc' },
-      select: { id: true, title: true, startTime: true }
+      select: { id: true, title: true, startTime: true, status: true, isRated: true }
     });
     return res.json(contests);
   } catch (err: any) {
@@ -90,7 +90,6 @@ adminRouter.get('/plagiarism/scan/:contestId', async (req, res) => {
   try {
     const { contestId } = req.params;
     
-    // 1. Fetch all accepted submissions for this contest
     const submissions = await prisma.submission.findMany({
       where: { contestId, verdict: 'ACCEPTED' },
       select: { 
@@ -101,7 +100,6 @@ adminRouter.get('/plagiarism/scan/:contestId', async (req, res) => {
       }
     });
 
-    // 2. Group by problem ID so we only compare apples to apples
     const grouped: Record<string, typeof submissions> = {};
     for (const sub of submissions) {
       const pid = sub.contestProblem?.id;
@@ -112,23 +110,19 @@ adminRouter.get('/plagiarism/scan/:contestId', async (req, res) => {
 
     const suspiciousPairs = [];
 
-    // 3. Run O(n^2) structural similarity on each problem group
     for (const pid in grouped) {
       const subs = grouped[pid];
       for (let i = 0; i < subs.length; i++) {
         for (let j = i + 1; j < subs.length; j++) {
-          // Skip if same user
           if (subs[i].user?.email === subs[j].user?.email) continue; 
 
           const codeA = normalizeCodeForAST(subs[i].code);
           const codeB = normalizeCodeForAST(subs[j].code);
           
-          // Skip highly trivial/boilerplate codes (under 20 chars post-normalization)
           if (codeA.length < 20 || codeB.length < 20) continue; 
 
           const similarity = calculateStructuralSimilarity(codeA, codeB);
           
-          // 🔥 Threshold: Flag anything over 85% structurally similar
           if (similarity > 0.85) { 
             suspiciousPairs.push({
               problemTitle: subs[i].contestProblem?.titleSnapshot || 'Unknown Problem',
@@ -143,7 +137,6 @@ adminRouter.get('/plagiarism/scan/:contestId', async (req, res) => {
       }
     }
 
-    // Sort by highest similarity first
     suspiciousPairs.sort((a, b) => b.similarity - a.similarity);
 
     return res.json({ success: true, pairs: suspiciousPairs });
@@ -151,6 +144,7 @@ adminRouter.get('/plagiarism/scan/:contestId', async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
 // 🚀 NEW: Finalize Contest & Distribute Ratings/Coins
 adminRouter.post('/contests/:id/finalize', async (req, res) => {
   try {
@@ -167,6 +161,7 @@ adminRouter.post('/contests/:id/finalize', async (req, res) => {
 
     if (!contest) return res.status(404).json({ error: 'Contest not found' });
     if (!contest.isRated) return res.status(400).json({ error: 'Contest is not marked as Rated.' });
+    if (contest.status === 'ENDED') return res.status(400).json({ error: 'Contest is already finalized.' });
 
     // 1. Sort participants by their final contest score (descending)
     const rankedParticipants = contest.participants
@@ -203,7 +198,8 @@ adminRouter.post('/contests/:id/finalize', async (req, res) => {
         data: {
           ratingBefore: p.user.rating,
           ratingAfter: p.user.rating + ratingDelta,
-          coinsEarned: coinsEarned
+          // Safely bypassing TS strict types for unmigrated columns if necessary, or just casting
+          ...({ coinsEarned: coinsEarned } as any)
         }
       });
 
@@ -227,6 +223,12 @@ adminRouter.post('/contests/:id/finalize', async (req, res) => {
         }
       });
     }
+
+    // Mark the contest as officially ended
+    await prisma.contest.update({
+      where: { id },
+      data: { status: 'ENDED' }
+    });
 
     return res.json({ success: true, message: `Successfully rated ${totalPlayers} participants!` });
 
