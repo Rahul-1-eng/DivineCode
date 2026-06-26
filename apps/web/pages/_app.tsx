@@ -26,7 +26,7 @@ export default function App({ Component, pageProps }: AppProps) {
   return (
     <SessionProvider session={pageProps.session}>
       <ThemeProvider attribute="data-theme" defaultTheme="dark">
-        {/* Global Style overrides to enforce absolute theme token syncing across all document nodes */}
+        {/* Global Style overrides to enforce absolute theme token syncing */}
         <style dangerouslySetInnerHTML={{ __html: `
           :root {
             --bg-main: #070a16;
@@ -44,19 +44,23 @@ export default function App({ Component, pageProps }: AppProps) {
             --table-hover: rgba(34, 211, 238, 0.05);
           }
           [data-theme='light'] {
-            --bg-main: #f8fafc;
-            --bg-main-gradient: radial-gradient(circle at top left, rgba(99,102,241,.1), transparent 34rem), #f8fafc;
-            --bg-panel: rgba(255,255,255,0.9);
+            /* Softer Slate Background instead of blinding pure white */
+            --bg-main: #f1f5f9; 
+            --bg-main-gradient: radial-gradient(circle at top left, rgba(99,102,241,.08), transparent 34rem), #f1f5f9;
+            --bg-panel: rgba(255,255,255,0.7);
             --bg-panel-solid: #ffffff;
-            --bg-card: rgba(255,255,255,0.8);
-            --text-main: #0f172a;
-            --text-muted: #475569;
-            --border-color: rgba(15,23,42,0.1);
+            --bg-card: rgba(255,255,255,0.9);
+            
+            /* Dark, high-contrast text so nothing is invisible */
+            --text-main: #0f172a; 
+            --text-muted: #475569; 
+            
+            --border-color: rgba(15,23,42,0.12);
             --accent-primary: #0284c7;
-            --accent-glow: rgba(2, 132, 199, 0.2);
-            --button-ghost-bg: rgba(255,255,255,.5);
-            --button-ghost-border: rgba(15,23,42,.1);
-            --table-hover: rgba(2, 132, 199, 0.05);
+            --accent-glow: rgba(2, 132, 199, 0.15);
+            --button-ghost-bg: rgba(255,255,255,.6);
+            --button-ghost-border: rgba(15,23,42,.2);
+            --table-hover: rgba(15,23,42,0.04);
           }
           body {
             background: var(--bg-main-gradient) !important;

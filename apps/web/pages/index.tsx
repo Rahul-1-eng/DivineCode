@@ -322,7 +322,7 @@ export default function Home() {
                 <a href="/profile" style={{ color: '#000', textDecoration: 'none', padding: '8px 16px', borderRadius: 999, fontWeight: 800, fontSize: 'clamp(11px, 2vw, 13px)', background: 'linear-gradient(135deg,#818cf8,#22d3ee)' }}>{profile?.username || session.user?.name?.split(' ')[0] || 'Dashboard'}</a>
               </div>
             ) : (
-              <a href="/signin" style={{ color: '#000', padding: '8px 16px', borderRadius: 999, fontWeight: 800, fontSize: 'clamp(11px, 2vw, 13px)', background: '#fff', textDecoration: 'none' }}>Authenticate</a>
+              <a href="/signin" style={{ color: '#000', padding: '8px 16px', borderRadius: 999, fontWeight: 800, fontSize: 'clamp(11px, 2vw, 13px)', background: 'var(--text-main)', textDecoration: 'none' }}>Authenticate</a>
             )}
           </div>
         </motion.nav>
@@ -335,7 +335,7 @@ export default function Home() {
           <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
             <div className="live-ticker">
               {liveEvents.map((event, i) => (
-                <span key={i} style={{ display: 'inline-block', padding: '10px 24px', color: 'var(--text-muted)', fontSize: 'clamp(11px, 2vw, 13px)', fontWeight: 500 }}>
+                <span key={i} style={{ display: 'inline-block', padding: '10px 24px', color: 'var(--text-main)', fontSize: 'clamp(11px, 2vw, 13px)', fontWeight: 500 }}>
                   {event}
                 </span>
               ))}
@@ -439,7 +439,7 @@ export default function Home() {
               <div style={{ background: 'var(--bg-panel-solid)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ width: 28, height: 28, background: 'var(--bg-main)', borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 16 }}>🤖</div>
-                  <strong style={{ color: 'var(--text-main)', fontSize: 'clamp(12px, 2vw, 14px)' }}>Divine AI</strong>
+                  <strong style={{ color: 'var(--text-main)', fontSize: 'clamp(12px, 2vw, 14px)' }}>Divine AI Guide</strong>
                 </div>
                 <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 20, cursor: 'pointer', padding: 0 }}>×</button>
               </div>

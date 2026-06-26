@@ -4,9 +4,10 @@ export default function Document() {
   return (
     <Html lang="en">
       <Head>
-        {/* Global tab favicon declaration */}
-        <link rel="icon" href="/favicon.ico" />
-        <link rel="apple-touch-icon" href="/favicon.ico" />
+        {/* 👉 THE FIX: Added ?v=2 to force the browser to clear its cache and load the new icon */}
+        <link rel="icon" href="/favicon.ico?v=2" />
+        <link rel="apple-touch-icon" href="/favicon.ico?v=2" />
+        <link rel="shortcut icon" href="/favicon.ico?v=2" />
         <link rel="manifest" href="/manifest.json" />
 
         {/* Primary Meta Tags */}
@@ -19,7 +20,6 @@ export default function Document() {
         <meta property="og:url" content="https://divine-code-web.vercel.app/" />
         <meta property="og:title" content="DivineCode Pro | Distributed Algorithmic Training Platform" />
         <meta property="og:description" content="A real-time multiplayer coding arena featuring an AI Voice Interviewer, AST Plagiarism Detection, and Codeforces synchronization." />
-        {/* 👉 IMPORTANT: Take a screenshot of your dashboard, upload it to imgur or your public folder, and paste the direct image link here! */}
         <meta property="og:image" content="https://divine-code-web.vercel.app/og-image.png" />
 
         {/* Twitter */}
