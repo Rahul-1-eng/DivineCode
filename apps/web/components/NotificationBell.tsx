@@ -143,43 +143,55 @@ export default function NotificationBell() {
       <AnimatePresence>
         {isOpen && (
           <motion.div 
-            initial={{ opacity: 0, y: 10, scale: 0.95 }} 
-            animate={{ opacity: 1, y: 0, scale: 1 }} 
-            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            style={{ position: 'absolute', top: 45, right: 0, width: 320, background: 'var(--bg-panel)', backdropFilter: 'blur(10px)', border: '1px solid var(--border-color)', borderRadius: 12, boxShadow: '0 20px 40px rgba(0,0,0,0.2)', overflow: 'hidden', zIndex: 999 }}
-          >
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-panel-solid)' }}>
-              <strong style={{ color: 'var(--text-main)' }}>Notifications</strong>
-              {unreadCount > 0 && (
-                <button onClick={markAllRead} style={{ background: 'transparent', border: 'none', color: 'var(--accent-primary)', fontSize: 12, cursor: 'pointer', fontWeight: 'bold' }}>Mark all read</button>
-              )}
-            </div>
-            
-            <div style={{ maxHeight: 350, overflowY: 'auto', background: 'var(--bg-panel)' }}>
-              {notifications.length === 0 ? (
-                <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>You're all caught up!</div>
-              ) : (
-                notifications.map(notif => (
-                  <div 
-                    key={notif.id} 
-                    onClick={() => markAsRead(notif.id, notif.link, notif.userId)}
-                    style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)', cursor: 'pointer', background: notif.isRead ? 'transparent' : 'var(--accent-glow)', display: 'flex', gap: 12, alignItems: 'flex-start', transition: '0.2s' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--table-hover)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = notif.isRead ? 'transparent' : 'var(--accent-glow)'}
-                  >
-                    <div style={{ fontSize: 20 }}>
-                      {notif.type === 'SUCCESS' ? '🏆' : notif.type === 'WARNING' ? '⚠️' : '🔵'}
-                    </div>
-                    <div>
-                      <div style={{ color: notif.isRead ? 'var(--text-muted)' : 'var(--text-main)', fontWeight: notif.isRead ? 400 : 600, fontSize: 14, marginBottom: 4 }}>{notif.title}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.4 }}>{notif.message}</div>
-                      <div style={{ color: 'var(--text-muted)', opacity: 0.8, fontSize: 11, marginTop: 6 }}>{new Date(notif.createdAt).toLocaleDateString()}</div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </motion.div>
+  initial={{ opacity: 0, y: 10, scale: 0.95 }} 
+  animate={{ opacity: 1, y: 0, scale: 1 }} 
+  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+  style={{ 
+    position: 'absolute', 
+    top: 45, 
+    right: 'clamp(5px, 2vw, 0px)', 
+    width: 'min(320px, 95vw)', 
+    background: 'var(--bg-panel)', 
+    backdropFilter: 'blur(10px)', 
+    border: '1px solid var(--border-color)', 
+    borderRadius: 12, 
+    boxShadow: '0 20px 40px rgba(0,0,0,0.2)', 
+    overflow: 'hidden', 
+    zIndex: 999 
+  }}
+>
+  <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-panel-solid)' }}>
+    <strong style={{ color: 'var(--text-main)' }}>Notifications</strong>
+    {unreadCount > 0 && (
+      <button onClick={markAllRead} style={{ background: 'transparent', border: 'none', color: 'var(--accent-primary)', fontSize: 12, cursor: 'pointer', fontWeight: 'bold' }}>Mark all read</button>
+    )}
+  </div>
+  
+  <div style={{ maxHeight: 350, overflowY: 'auto', background: 'var(--bg-panel)' }}>
+    {notifications.length === 0 ? (
+      <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>You're all caught up!</div>
+    ) : (
+      notifications.map(notif => (
+        <div 
+          key={notif.id} 
+          onClick={() => markAsRead(notif.id, notif.link, notif.userId)}
+          style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)', cursor: 'pointer', background: notif.isRead ? 'transparent' : 'var(--accent-glow)', display: 'flex', gap: 12, alignItems: 'flex-start', transition: '0.2s' }}
+          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--table-hover)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = notif.isRead ? 'transparent' : 'var(--accent-glow)'}
+        >
+          <div style={{ fontSize: 20 }}>
+            {notif.type === 'SUCCESS' ? '🏆' : notif.type === 'WARNING' ? '⚠️' : '🔵'}
+          </div>
+          <div>
+            <div style={{ color: notif.isRead ? 'var(--text-muted)' : 'var(--text-main)', fontWeight: notif.isRead ? 400 : 600, fontSize: 14, marginBottom: 4 }}>{notif.title}</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.4 }}>{notif.message}</div>
+            <div style={{ color: 'var(--text-muted)', opacity: 0.8, fontSize: 11, marginTop: 6 }}>{new Date(notif.createdAt).toLocaleDateString()}</div>
+          </div>
+        </div>
+      ))
+    )}
+  </div>
+</motion.div>
         )}
       </AnimatePresence>
     </div>
