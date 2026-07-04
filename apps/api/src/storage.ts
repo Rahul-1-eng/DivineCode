@@ -1,3 +1,9 @@
+/**
+ * @file storage.ts
+ * @author Rahul Kumar Sahoo
+ * @description Application source for the DivineCode platform.
+ */
+
 import { prisma } from './prisma/client';
 
 export async function upsertGoogleUser(input: { name?: string; email?: string; avatar?: string; googleId?: string }) {

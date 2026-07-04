@@ -1,3 +1,9 @@
+/**
+ * @file ActivityHeatmap.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Reusable UI component for the product experience.
+ */
+
 import React, { useMemo } from 'react';
 
 interface ContributionDay {
@@ -12,7 +18,7 @@ interface ActivityHeatmapProps {
 }
 
 export default function ActivityHeatmap({ data = [], loading = false }: ActivityHeatmapProps) {
-  // 👉 FIXED: Accurately map real database submission dates to the 365-day grid
+  // Accurately map real database submission dates to the 365-day grid
   const heatmapDays = useMemo(() => {
     const days: ContributionDay[] = [];
     const today = new Date();
@@ -40,7 +46,7 @@ export default function ActivityHeatmap({ data = [], loading = false }: Activity
     );
   }
 
-  // 👉 FIXED: Professional Github/LeetCode style Blue Theme
+  // Professional Github/LeetCode style Blue Theme
   const levelColors: Record<number, string> = {
     0: 'var(--border-color)', 
     1: '#bae6fd', // light cyan

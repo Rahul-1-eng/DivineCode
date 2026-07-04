@@ -1,3 +1,8 @@
+/**
+ * @file index.ts
+ * @author Rahul Kumar Sahoo
+ * @description Entry point for the DivineCode API server, including auth, CORS, and socket bootstrap.
+ */
 import './config/env';
 import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
@@ -24,10 +29,18 @@ declare global {
 
 const app = express();
 
-const allowedOrigins = [
-  process.env.CLIENT_ORIGIN || 'http://localhost:3000',
-  'https://your-production-domain.com' 
+const defaultOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://divine-code-web.vercel.app',
+  'https://divinecode-xbfb.onrender.com'
 ];
+
+const allowedOrigins = Array.from(new Set([
+  ...(process.env.CLIENT_ORIGIN ? [process.env.CLIENT_ORIGIN] : []),
+  ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map((value) => value.trim()).filter(Boolean) : []),
+  ...defaultOrigins
+]));
 
 const aiLimiter = rateLimit({
   windowMs: 60 * 1000, 
@@ -42,6 +55,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   const origin = req.headers.origin;
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+  } else if (!origin) {
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigins[0]);
   } else {
     res.setHeader('Access-Control-Allow-Origin', allowedOrigins[0]);
   }
@@ -63,7 +78,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
     try {
-      const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET || '') as jwt.JwtPayload;
+      const signingSecret = process.env.NEXTAUTH_SECRET || 'divinecode-local-dev-secret';
+      const decoded = jwt.verify(token, signingSecret) as jwt.JwtPayload;
       req.user = decoded; 
       req.headers['x-user-email'] = decoded.email;
       // ...
@@ -89,7 +105,7 @@ io.adapter(createAdapter(pubClient, subClient));
 
 app.set('io', io);
 
-// 👉 UPDATED: Enhanced WebSocket Pipeline for Multiplayer Coding Rooms
+// Enhanced WebSocket Pipeline for Multiplayer Coding Rooms
 io.on('connection', (socket) => {
   
   // Account Notifications Room

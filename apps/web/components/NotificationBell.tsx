@@ -1,9 +1,16 @@
+/**
+ * @file NotificationBell.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Reusable UI component for the product experience.
+ */
+
 import { useEffect, useState, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/router';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
+import { fetchApi } from '../lib/api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -26,12 +33,12 @@ export default function NotificationBell() {
   const fetchNotifications = async () => {
     if (!session?.user?.email) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v2/notifications`, {
+      // Use fetchApi to guarantee JWT Authorization headers are attached
+      let data = await fetchApi('/api/v2/notifications', {
         headers: { 'x-user-email': session.user.email }
       });
-      if (res.ok) {
-        let data = await res.json();
-        
+      
+      if (data && Array.isArray(data)) {
         const readGlobals = JSON.parse(localStorage.getItem('read_global_notifs') || '[]');
         data = data.map((n: any) => {
           if (n.userId === 'ALL' && readGlobals.includes(n.id)) {
@@ -43,7 +50,9 @@ export default function NotificationBell() {
         setNotifications(data);
         setUnreadCount(data.filter((n: any) => !n.isRead).length);
       }
-    } catch (err) {}
+    } catch (err) {
+      console.error("Failed to fetch notifications:", err);
+    }
   };
 
   useEffect(() => {
@@ -77,7 +86,7 @@ export default function NotificationBell() {
         readGlobals.push(id);
         localStorage.setItem('read_global_notifs', JSON.stringify(readGlobals));
       } else {
-        await fetch(`${API_BASE_URL}/api/v2/notifications/${id}/read`, {
+        await fetchApi(`/api/v2/notifications/${id}/read`, {
           method: 'PUT',
           headers: { 'x-user-email': session?.user?.email || '' }
         });
@@ -96,10 +105,11 @@ export default function NotificationBell() {
       const readGlobals = JSON.parse(localStorage.getItem('read_global_notifs') || '[]');
       localStorage.setItem('read_global_notifs', JSON.stringify([...readGlobals, ...globalIds]));
 
-      await fetch(`${API_BASE_URL}/api/v2/notifications/read-all`, {
+      await fetchApi(`/api/v2/notifications/read-all`, {
         method: 'PUT',
         headers: { 'x-user-email': session?.user?.email || '' }
       });
+      
       setUnreadCount(0);
       setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
     } catch (err) {}

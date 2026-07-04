@@ -1,3 +1,9 @@
+/**
+ * @file community.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { CSSProperties, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { io } from 'socket.io-client';

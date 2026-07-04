@@ -1,3 +1,9 @@
+/**
+ * @file add.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { CSSProperties, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 
@@ -42,7 +48,7 @@ export default function AddQuestionPage() {
 
     setIsSubmitting(true);
     try {
-      // 👉 FIX: Pointing to the correct /questions endpoint
+      // FIX: Pointing to the correct /questions endpoint
       const res = await fetch(`${API_BASE_URL}/api/v2/interview/questions`, {
         method: 'POST',
         headers: {
@@ -54,7 +60,7 @@ export default function AddQuestionPage() {
           title,
           prompt,
           options,
-          // 👉 FIX: The backend expects an array called correctIndices
+          // FIX: The backend expects an array called correctIndices
           correctIndices: [correctIndex], 
           expectedAnswer,
           difficulty: 'Medium', // Defaulting to medium for user submissions

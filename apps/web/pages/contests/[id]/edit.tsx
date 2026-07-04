@@ -1,4 +1,10 @@
-import { CSSProperties, useEffect, useState, useMemo } from 'react';
+/**
+ * @file edit.tsx
+ * @description Contest Administration Control Plane.
+ * Implements optimistic UI rendering, unified state reconciliation, and atomic REST mutations
+ * to guarantee a zero-latency UX during high-frequency contest management operations.
+ */
+import { CSSProperties, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import toast, { Toaster } from 'react-hot-toast';
@@ -8,8 +14,10 @@ export async function getServerSideProps() { return { props: {} }; }
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const API_V2_BASE_URL = `${API_BASE_URL}/api/v2`;
 
+// --- Utility: Network Telemetry & Hydration ---
 function viewerQuery(session: any) {
   const query = new URLSearchParams();
+  if (session?.user?.id) query.set('viewerId', session.user.id);
   if (session?.user?.email) query.set('viewerEmail', session.user.email);
   if (session?.user?.name) query.set('viewerName', session.user.name);
   const value = query.toString();
@@ -18,224 +26,238 @@ function viewerQuery(session: any) {
 
 function viewerHeaders(session: any) {
   return { 
-    'Content-Type': 'application/json', 
+    'Content-Type': 'application/json',
+    'x-user-id': session?.user?.id || '', 
     'x-user-email': session?.user?.email || '', 
     'x-user-name': session?.user?.name || '' 
   };
 }
 
+/**
+ * Standardized Fetch Wrapper to enforce strict JSON parsing and 
+ * catch silent HTTP failures across all REST mutations.
+ */
+async function fetchWithErrorBoundary(url: string, options?: RequestInit) {
+  const res = await fetch(url, options);
+  const contentType = res.headers.get("content-type");
+  
+  if (contentType && contentType.includes("application/json")) {
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}: Operation rejected by server`);
+    return data;
+  }
+  
+  const errorText = await res.text();
+  console.error("[API Boundary Error]:", errorText);
+  throw new Error(`Upstream Error (${res.status}): Inspect network payload.`);
+}
+
+// --- Main Component ---
 export default function ContestEditPage() {
   const router = useRouter();
   const { id } = router.query;
   const { data: session, status } = useSession();
+  
+  // 1. Core Entity State
   const [contest, setContest] = useState<any>(null);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [durationMinutes, setDurationMinutes] = useState(120);
-  const [startTimeStr, setStartTimeStr] = useState('');
-  
-  const [openEditing, setOpenEditing] = useState(false);
+  const [initError, setInitError] = useState('');
 
-  const [newProblemCode, setNewProblemCode] = useState('');
-  const [newProblemPlatform, setNewProblemPlatform] = useState('Codeforces');
-  const [newProblemUrl, setNewProblemUrl] = useState(''); 
-  const [urlGenerateAiTests, setUrlGenerateAiTests] = useState(true);
-  
-  const [customTitle, setCustomTitle] = useState('');
-  const [customDescription, setCustomDescription] = useState('');
-  const [customTimeLimit, setCustomTimeLimit] = useState<number>(0);
-  const [customGenerateAiTests, setCustomGenerateAiTests] = useState(true);
-  const [uploadingImage, setUploadingImage] = useState(false);
+  // 2. Unified Form States (Reduces cascading renders)
+  const [settingsForm, setSettingsForm] = useState({
+    title: '',
+    description: '',
+    durationMinutes: 120,
+    startTimeStr: '',
+    openEditing: false
+  });
 
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
+  const [mashupForm, setMashupForm] = useState({
+    platform: 'Codeforces',
+    code: '',
+    url: '',
+    generateAiTests: true
+  });
 
-  async function loadContest() {
+  const [customForm, setCustomForm] = useState({
+    title: '',
+    description: '',
+    timeLimit: 0,
+    generateAiTests: true
+  });
+
+  // 3. Granular Execution Flags (Prevents UI lockups)
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [pendingOperations, setPendingOperations] = useState<Set<string>>(new Set());
+
+  // --- Initialization Pipeline ---
+  useEffect(() => { 
     if (!id || status === 'loading') return;
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}${viewerQuery(session)}`);
-   let data;
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const errorText = await res.text();
-        console.error("Server Error:", errorText);
-        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
+
+    const loadContest = async () => {
+      try {
+        const data = await fetchWithErrorBoundary(`${API_V2_BASE_URL}/contests/${id}${viewerQuery(session)}`);
+        setContest(data);
+        
+        let formattedTime = '';
+        if (data.startTime) {
+          const dt = new Date(data.startTime);
+          dt.setMinutes(dt.getMinutes() - dt.getTimezoneOffset());
+          formattedTime = dt.toISOString().slice(0, 16);
+        }
+
+        setSettingsForm({
+          title: data.title || '',
+          description: data.description || '',
+          durationMinutes: data.durationMinutes || 120,
+          startTimeStr: formattedTime,
+          openEditing: data.settings?.openEditing || data.openEditing || false
+        });
+
+      } catch (err: any) {
+        setInitError(err.message || 'Contest reference not found');
       }
-    if (!res.ok) { setError(data.error || 'Contest not found'); return; }
-    setContest(data);
-    setTitle(data.title || '');
-    setDescription(data.description || '');
-    setDurationMinutes(data.durationMinutes || 120);
-    setOpenEditing(data.settings?.openEditing || data.openEditing || false);
-    
-    if (data.startTime) {
-      const dt = new Date(data.startTime);
-      dt.setMinutes(dt.getMinutes() - dt.getTimezoneOffset());
-      setStartTimeStr(dt.toISOString().slice(0, 16));
-    }
-  }
+    };
 
-  useEffect(() => { loadContest(); }, [id, status, session?.user?.email, session?.user?.name]);
+    loadContest(); 
+  }, [id, status, session]);
 
-  async function saveSettings() {
+  // --- Handlers: Async Operations ---
+  const addPendingOp = (opId: string) => setPendingOperations(prev => new Set(prev).add(opId));
+  const removePendingOp = (opId: string) => setPendingOperations(prev => { const n = new Set(prev); n.delete(opId); return n; });
+
+  const handleSettingsSave = async () => {
     if (!id || !session) return;
-    setSaving(true);
-    const bodyPayload: any = { title, description, durationMinutes, openEditing };
-    if (startTimeStr) bodyPayload.startTime = new Date(startTimeStr).toISOString();
+    setIsSavingSettings(true);
     
-    const res = await fetch(`${API_V2_BASE_URL}/contests/${id}`, { 
-      method: 'PUT', 
-      headers: viewerHeaders(session), 
-      body: JSON.stringify(bodyPayload) 
-    });
-   let data;
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const errorText = await res.text();
-        console.error("Server Error:", errorText);
-        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
-      }
-    setSaving(false);
-    if (!res.ok) return toast.error(data.error || 'Could not save contest');
-    setContest(data);
-    toast.success('Settings saved successfully!');
-  }
-
-  // 👉 FIXED: API path fixed. We hit the standard PUT route to correctly update the setting.
-  const toggleOpenEditing = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newVal = e.target.checked;
-    setOpenEditing(newVal);
     try {
-      await fetch(`${API_V2_BASE_URL}/contests/${id}`, {
+      const payload: any = { 
+        title: settingsForm.title, 
+        description: settingsForm.description, 
+        durationMinutes: settingsForm.durationMinutes, 
+        openEditing: settingsForm.openEditing 
+      };
+      
+      if (settingsForm.startTimeStr) {
+        payload.startTime = new Date(settingsForm.startTimeStr).toISOString();
+      }
+
+      const updatedContest = await fetchWithErrorBoundary(`${API_V2_BASE_URL}/contests/${id}`, {
+        method: 'PUT',
+        headers: viewerHeaders(session),
+        body: JSON.stringify(payload)
+      });
+
+      setContest(updatedContest);
+      toast.success('Global settings synchronized successfully!');
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleToggleEditing = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.checked;
+    setSettingsForm(prev => ({ ...prev, openEditing: newVal }));
+    
+    try {
+      await fetchWithErrorBoundary(`${API_V2_BASE_URL}/contests/${id}`, {
         method: 'PUT',
         headers: viewerHeaders(session),
         body: JSON.stringify({ openEditing: newVal })
       });
-      toast.success("Editing permissions updated!");
-    } catch(err) {
-      toast.error("Failed to update editing settings");
+      toast.success("Security permissions updated");
+    } catch(err: any) {
+      setSettingsForm(prev => ({ ...prev, openEditing: !newVal })); // Rollback on failure
+      toast.error("Network fault: Failed to update permissions");
     }
   };
 
-  async function lookupProblem(platform: string, code: string) {
-    const res = await fetch(`${API_V2_BASE_URL}/problems/lookup?platform=${encodeURIComponent(platform)}&code=${encodeURIComponent(code)}`, {
-      headers: viewerHeaders(session)
-    });
-   let data;
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const errorText = await res.text();
-        console.error("Server Error:", errorText);
-        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
-      }
-    if (!res.ok) throw new Error(data.error || 'Lookup failed');
-    return data;
-  }
-
-  async function addProblem() {
-    if (!id || !session || !newProblemCode.trim()) return toast.error('Enter a problem code.');
-    try {
-      const cleanCode = newProblemCode.replace(/\s+/g, '').toUpperCase();
-      const p = await lookupProblem(newProblemPlatform, cleanCode);
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems`, { 
-        method: 'POST', 
-        headers: viewerHeaders(session), 
-        body: JSON.stringify(p) 
-      });
-      
-      const contentType = res.headers.get("content-type");
-      let data;
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        data = await res.json();
-      } else {
-        const errorText = await res.text();
-        return toast.error(`Server Error (${res.status}): ${errorText.slice(0, 50)}...`);
-      }
-
-      if (!res.ok) return toast.error(data.error || 'Could not add problem');
-      setContest(data);
-      setNewProblemCode('');
-      toast.success('Problem added!');
-    } catch (e: any) { toast.error(e.message || 'Could not add problem'); }
-  }
-
-  async function addProblemFromUrl() {
-    if (!id || !session || !newProblemUrl.trim()) return toast.error('Enter a problem URL.');
+  const handleAddProblemDirect = async () => {
+    if (!mashupForm.code.trim()) return toast.error('Problem identifier required.');
+    addPendingOp('add_direct');
     
-    let finalUrl = newProblemUrl.trim();
+    try {
+      const cleanCode = mashupForm.code.replace(/\s+/g, '').toUpperCase();
+      const problemContext = await fetchWithErrorBoundary(
+        `${API_V2_BASE_URL}/problems/lookup?platform=${encodeURIComponent(mashupForm.platform)}&code=${encodeURIComponent(cleanCode)}`, 
+        { headers: viewerHeaders(session) }
+      );
+      
+      const updatedContest = await fetchWithErrorBoundary(`${API_V2_BASE_URL}/contests/${id}/problems`, {
+        method: 'POST',
+        headers: viewerHeaders(session),
+        body: JSON.stringify(problemContext)
+      });
+
+      setContest(updatedContest);
+      setMashupForm(prev => ({ ...prev, code: '' }));
+      toast.success('Node appended to problem set.');
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      removePendingOp('add_direct');
+    }
+  };
+
+  const handleAddProblemUrl = async () => {
+    if (!mashupForm.url.trim()) return toast.error('Target vector URL required.');
+    addPendingOp('add_url');
+    
+    let finalUrl = mashupForm.url.trim();
     if (!finalUrl.startsWith('http') && /^\d+\s*[a-zA-Z][0-9]?$/.test(finalUrl)) {
        const clean = finalUrl.replace(/\s+/g, '').toUpperCase();
        const num = clean.match(/^\d+/)?.[0];
        const letter = clean.match(/[A-Z0-9]+$/)?.[0];
        finalUrl = `https://codeforces.com/problemset/problem/${num}/${letter}`;
-    } else if (!finalUrl.startsWith('http')) {
-       return toast.error('Enter a valid URL or Codeforces code');
     }
 
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/mashup`, { 
-        method: 'POST', 
-        headers: viewerHeaders(session), 
-        body: JSON.stringify({ type: 'URL', url: finalUrl, generateAiTests: urlGenerateAiTests }) 
+      const updatedContest = await fetchWithErrorBoundary(`${API_V2_BASE_URL}/contests/${id}/problems/mashup`, {
+        method: 'POST',
+        headers: viewerHeaders(session),
+        body: JSON.stringify({ type: 'URL', url: finalUrl, generateAiTests: mashupForm.generateAiTests })
       });
 
-     let data;
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const errorText = await res.text();
-        console.error("Backend Error Response:", errorText);
-        return toast.error(`Server Error (${res.status}): Please check backend console.`);
-      }
-      if (!res.ok) return toast.error(data.error || 'Could not scrape problem. Check URL.');
-      setContest(data);
-      setNewProblemUrl('');
-      toast.success('Problem scraped and added!');
-    } catch (e: any) { toast.error(e.message || 'Scrape failed'); }
-  }
+      setContest(updatedContest);
+      setMashupForm(prev => ({ ...prev, url: '' }));
+      toast.success('External resource scraped and mapped.');
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      removePendingOp('add_url');
+    }
+  };
 
-  const addCustomProblem = async () => {
-    if (!id || !session || !customTitle.trim()) return toast.error('Enter a title for your custom problem.');
+  const handleAddCustomProblem = async () => {
+    if (!customForm.title.trim()) return toast.error('Entity title is required.');
+    addPendingOp('add_custom');
+    
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/mashup`, {
+      const updatedContest = await fetchWithErrorBoundary(`${API_V2_BASE_URL}/contests/${id}/problems/mashup`, {
         method: 'POST',
         headers: viewerHeaders(session),
         body: JSON.stringify({
           type: 'CUSTOM',
           customData: {
-            title: customTitle,
-            description: customDescription,
-            time: customTimeLimit,
-            generateAiTests: customGenerateAiTests,
+            title: customForm.title,
+            description: customForm.description,
+            time: customForm.timeLimit,
+            generateAiTests: customForm.generateAiTests,
             testcases: [] 
           }
         })
       });
 
-     let data;
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const errorText = await res.text();
-        console.error("Server Error:", errorText);
-        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
-      }
-
-      if (!res.ok) return toast.error(data.error || 'Could not add custom problem');
-      
-      setCustomTitle('');
-      setCustomDescription('');
-      setCustomTimeLimit(0);
-      toast.success('Custom problem added successfully!');
-      loadContest(); 
-    } catch (e: any) { toast.error(e.message || 'Custom add failed'); }
+      setContest(updatedContest);
+      setCustomForm({ title: '', description: '', timeLimit: 0, generateAiTests: true });
+      toast.success('Custom isolated problem provisioned.');
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      removePendingOp('add_custom');
+    }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -244,283 +266,280 @@ export default function ContestEditPage() {
     const formData = new FormData();
     formData.append('image', file);
 
-    setUploadingImage(true);
+    setIsUploadingImage(true);
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/upload-image`, {
+      const data = await fetchWithErrorBoundary(`${API_V2_BASE_URL}/upload-image`, {
         method: 'POST',
         body: formData 
       });
-     let data;
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const errorText = await res.text();
-        console.error("Server Error:", errorText);
-        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
-      }
+      
       if (data.success) {
-        setCustomDescription(prev => prev + `\n<br /><img src="${API_BASE_URL}${data.url}" alt="Problem Image" style="max-width: 100%; border-radius: 8px;" />\n<br />`);
-        toast.success("Image uploaded & appended to description!");
-      } else {
-        toast.error("Image upload failed.");
+        setCustomForm(prev => ({ ...prev, description: prev.description + `\n<br /><img src="${API_BASE_URL}${data.url}" alt="Problem Context" style="max-width: 100%; border-radius: 8px;" />\n<br />` }));
+        toast.success("Binary uploaded to block storage.");
       }
-    } catch (err) {
-      toast.error("Image upload failed.");
+    } catch (err: any) {
+      toast.error("Upload gateway rejected payload.");
     } finally {
-      setUploadingImage(false);
+      setIsUploadingImage(false);
       e.target.value = ''; 
     }
   };
 
-  async function replaceProblem(problemId: string) {
-    const code = prompt('Enter new problem code (e.g. 1500A):');
-    if (!code) return;
-    try {
-      const cleanCode = code.replace(/\s+/g, '').toUpperCase();
-      const p = await lookupProblem(newProblemPlatform, cleanCode);
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, {
-        method: 'PUT',
-        headers: viewerHeaders(session),
-        body: JSON.stringify(p)
-      });
-     let data;
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const errorText = await res.text();
-        console.error("Server Error:", errorText);
-        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
-      }
-      if (!res.ok) return toast.error(data.error || 'Could not replace problem');
-      setContest(data);
-      toast.success('Problem replaced successfully!');
-    } catch (e: any) { toast.error(e.message || 'Could not replace problem'); }
-  }
+  // --- Optimistic Mutations ---
+  
+  const moveProblemOptimistic = async (problemId: string, direction: 'UP' | 'DOWN') => {
+    // 1. Create a deep clone snapshot for potential rollback
+    const previousProblems = [...contest.problems];
+    
+    // 2. Compute indices
+    const currentIndex = previousProblems.findIndex(p => p.id === problemId);
+    if (currentIndex === -1) return;
+    if (direction === 'UP' && currentIndex === 0) return;
+    if (direction === 'DOWN' && currentIndex === previousProblems.length - 1) return;
 
-  async function removeProblem(problemId: string) {
-    if (!confirm('Are you sure you want to remove this problem?')) return;
-    try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, {
-        method: 'DELETE',
-        headers: viewerHeaders(session)
-      });
-     let data;
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const errorText = await res.text();
-        console.error("Server Error:", errorText);
-        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
-      }
-      if (!res.ok) return toast.error(data.error || 'Could not remove problem');
-      setContest(data);
-      toast.success('Problem removed!');
-    } catch (e: any) { toast.error(e.message || 'Could not remove problem'); }
-  }
+    // 3. Mutate local state instantly for Zero-Latency UX
+    const newProblems = [...previousProblems];
+    const targetIndex = direction === 'UP' ? currentIndex - 1 : currentIndex + 1;
+    [newProblems[currentIndex], newProblems[targetIndex]] = [newProblems[targetIndex], newProblems[currentIndex]];
+    setContest((prev: any) => ({ ...prev, problems: newProblems }));
 
-  async function moveProblem(problemId: string, direction: 'UP' | 'DOWN') {
+    // 4. Dispatch actual network request
+    addPendingOp(`move_${problemId}`);
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}/reorder`, {
+      const updatedContest = await fetchWithErrorBoundary(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}/reorder`, {
         method: 'PUT',
         headers: viewerHeaders(session),
         body: JSON.stringify({ direction })
       });
-     let data;
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const errorText = await res.text();
-        console.error("Server Error:", errorText);
-        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
-      }
-      if (!res.ok) return toast.error(data.error || 'Could not reorder problem');
-      setContest(data);
-      toast.success('Reordered successfully!');
-    } catch (e: any) {
-      toast.error('Network error during reordering');
+      
+      // Resync state to ensure authoritative data consistency
+      setContest(updatedContest); 
+    } catch (err: any) {
+      // Rollback on failure
+      setContest((prev: any) => ({ ...prev, problems: previousProblems }));
+      toast.error('Desync error: State rolled back to maintain integrity.');
+    } finally {
+      removePendingOp(`move_${problemId}`);
     }
-  }
+  };
 
-  async function deleteContest() {
-    if (!confirm('Are you sure you want to completely delete this contest?')) return;
+  const removeProblemOptimistic = async (problemId: string) => {
+    if (!confirm('Execute hard delete on this problem node?')) return;
+    
+    const previousProblems = [...contest.problems];
+    setContest((prev: any) => ({ ...prev, problems: previousProblems.filter(p => p.id !== problemId) }));
+    
     try {
-      const res = await fetch(`${API_V2_BASE_URL}/contests/${id}`, {
+      const updatedContest = await fetchWithErrorBoundary(`${API_V2_BASE_URL}/contests/${id}/problems/${problemId}`, {
         method: 'DELETE',
         headers: viewerHeaders(session)
       });
-      if (res.ok) router.push('/contests');
-      else {
-       let data;
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const errorText = await res.text();
-        console.error("Server Error:", errorText);
-        return toast.error(`Server Error (${res.status}): Please check backend logs.`);
-      }
-        toast.error(data.error || 'Could not delete contest');
-      }
-    } catch (e: any) { toast.error(e.message || 'Could not delete contest'); }
-  }
+      setContest(updatedContest);
+      toast.success('Node dereferenced.');
+    } catch (err: any) {
+      setContest((prev: any) => ({ ...prev, problems: previousProblems }));
+      toast.error(err.message);
+    }
+  };
 
-  if (status === 'loading') return <main style={page}>Checking account...</main>;
-  if (!session) return <main style={page}><section style={panel}><h1>Sign in required</h1><a href="/signin" style={primary}>Sign in</a></section></main>;
-  if (error) return <main style={page}><section style={panel}><h1>{error}</h1><a href="/contests" style={link}>Back to contests</a></section></main>;
-  if (!contest) return <main style={page}>Loading editor...</main>;
-  if (!contest.canManage) return <main style={page}><section style={panel}><h1>Owner only</h1><p style={{ color: 'var(--text-muted)' }}>Only the contest creator can open the editing page.</p><a href={`/contests/${id}`} style={primary}>Back to contest</a></section></main>;
+  const handleDeleteContest = async () => {
+    if (!confirm('CRITICAL ACTION: Purge all data associated with this match?')) return;
+    try {
+      await fetchWithErrorBoundary(`${API_V2_BASE_URL}/contests/${id}`, {
+        method: 'DELETE',
+        headers: viewerHeaders(session)
+      });
+      router.push('/contests');
+    } catch (err: any) { 
+      toast.error(err.message); 
+    }
+  };
 
+  // --- Render Guards ---
+  if (status === 'loading') return <main style={page}>Booting workspace parameters...</main>;
+  if (!session) return <main style={page}><section style={panel}><h1>Authentication Required</h1><a href="/signin" style={primary}>Sign in to Access Identity</a></section></main>;
+  if (initError) return <main style={page}><section style={panel}><h1>{initError}</h1><a href="/contests" style={link}>Return to Registry</a></section></main>;
+  if (!contest) return <main style={page}>Synchronizing states...</main>;
+  if (!contest.canManage) return <main style={page}><section style={panel}><h1>Access Denied</h1><p style={{ color: 'var(--text-muted)' }}>Administrative clearance required to alter structural constraints.</p><a href={`/contests/${id}`} style={primary}>Return to Sandbox</a></section></main>;
+
+  // --- Main Layout ---
   return (
     <main style={page}>
       <Toaster position="top-center" toastOptions={{ style: { background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)' } }} />
       <section style={{ maxWidth: 1120, margin: '0 auto' }}>
+        
         <nav style={nav}>
-          <a href={`/contests/${id}`} style={link}>← Back to live room</a>
-          <button onClick={deleteContest} style={danger}>Delete mashup</button>
+          <a href={`/contests/${id}`} style={link}>← Disconnect & Return</a>
+          <button onClick={handleDeleteContest} style={danger}>Execute Match Purge</button>
         </nav>
         
         <div style={hero}>
-          <p style={eyebrow}>Owner editing page</p>
+          <p style={eyebrow}>Orchestration Control Plane</p>
           <h1 style={{ margin: 0, fontSize: 44, color: 'var(--text-main)' }}>{contest.title}</h1>
         </div>
 
+        {/* Global Configurations Block */}
         <section style={panel}>
-          <h2 style={{ color: 'var(--text-main)' }}>Contest settings</h2>
-          <label style={{ color: 'var(--text-muted)' }}>Title</label>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} style={input} />
+          <h2 style={{ color: 'var(--text-main)' }}>Global Parameters</h2>
           
-          <label style={{ color: 'var(--text-muted)' }}>Description</label>
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} style={{ ...input, minHeight: 90 }} />
+          <label style={{ color: 'var(--text-muted)' }}>Match Identifier</label>
+          <input value={settingsForm.title} onChange={(e) => setSettingsForm(p => ({...p, title: e.target.value}))} style={input} />
           
-          <label style={{ color: 'var(--text-muted)' }}>Duration minutes</label>
-          <input type="number" value={durationMinutes} onChange={(e) => setDurationMinutes(Number(e.target.value))} style={{ ...input, maxWidth: 180 }} />
+          <label style={{ color: 'var(--text-muted)' }}>Rules & Context (Markdown enabled)</label>
+          <textarea value={settingsForm.description} onChange={(e) => setSettingsForm(p => ({...p, description: e.target.value}))} style={{ ...input, minHeight: 90 }} />
           
-          <label style={{display: 'block', marginTop: 10, color: 'var(--text-muted)'}}>Scheduled Start Time</label>
-          <input type="datetime-local" value={startTimeStr} onChange={(e) => setStartTimeStr(e.target.value)} style={{ ...input, maxWidth: 220 }} />
+          <label style={{ color: 'var(--text-muted)' }}>Execution Window (Minutes)</label>
+          <input type="number" value={settingsForm.durationMinutes} onChange={(e) => setSettingsForm(p => ({...p, durationMinutes: Number(e.target.value)}))} style={{ ...input, maxWidth: 180 }} />
+          
+          <label style={{display: 'block', marginTop: 10, color: 'var(--text-muted)'}}>Automated Activation Time</label>
+          <input type="datetime-local" value={settingsForm.startTimeStr} onChange={(e) => setSettingsForm(p => ({...p, startTimeStr: e.target.value}))} style={{ ...input, maxWidth: 220 }} />
           
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 15, marginBottom: 15, color: 'var(--text-main)' }}>
-            <input type="checkbox" checked={openEditing} onChange={toggleOpenEditing} />
-            Open Editing (Allow others to add problems during the contest)
+            <input type="checkbox" checked={settingsForm.openEditing} onChange={handleToggleEditing} />
+            Open Editing Protocol (Allow peers to dynamically inject problems)
           </label>
 
-          <button onClick={saveSettings} disabled={saving} style={primary}>{saving ? 'Saving...' : 'Save settings'}</button>
+          <button onClick={handleSettingsSave} disabled={isSavingSettings} style={primary}>
+            {isSavingSettings ? 'Synchronizing Nodes...' : 'Commit Configuration'}
+          </button>
         </section>
 
+        {/* Entity Injection Block */}
         <section style={panel}>
-          <h2 style={{ color: 'var(--text-main)' }}>Add problem</h2>
+          <h2 style={{ color: 'var(--text-main)' }}>Node Injection Modules</h2>
           
+          {/* Internal Platform Lookup */}
           <div style={{ marginBottom: 20 }}>
-            <label style={{ display: 'block', marginBottom: 5, color: 'var(--text-muted)' }}>Option 1: Add by Platform & Code</label>
+            <label style={{ display: 'block', marginBottom: 5, color: 'var(--text-muted)' }}>Module 1: Direct Linkage via Platform Gateway</label>
             <div style={inline}>
-              <select value={newProblemPlatform} onChange={(e) => setNewProblemPlatform(e.target.value)} style={{...input, width: 'auto', marginBottom: 0}}>
+              <select value={mashupForm.platform} onChange={(e) => setMashupForm(p => ({...p, platform: e.target.value}))} style={{...input, width: 'auto', marginBottom: 0}}>
                 <option>Codeforces</option><option>LeetCode</option><option>AtCoder</option><option>CodeChef</option>
               </select>
-              <input value={newProblemCode} onChange={(e) => setNewProblemCode(e.target.value)} placeholder="1805A" style={{...input, flex: 1, marginBottom: 0}} />
-              <button onClick={addProblem} style={primary}>Add</button>
+              <input value={mashupForm.code} onChange={(e) => setMashupForm(p => ({...p, code: e.target.value}))} placeholder="Target ID (e.g. 1805A)" style={{...input, flex: 1, marginBottom: 0}} />
+              <button onClick={handleAddProblemDirect} disabled={pendingOperations.has('add_direct')} style={primary}>
+                {pendingOperations.has('add_direct') ? 'Binding...' : 'Mount Node'}
+              </button>
             </div>
           </div>
 
+          {/* External Scraper */}
           <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 20, marginBottom: 20 }}>
-            <label style={{ display: 'block', marginBottom: 5, color: 'var(--text-muted)' }}>Option 2: Smart Scrape via URL (Extracts Code & Test Cases)</label>
+            <label style={{ display: 'block', marginBottom: 5, color: 'var(--text-muted)' }}>Module 2: Neural Scraper (Extracts AST & Cases dynamically)</label>
             <div style={{ display: 'flex', gap: 12 }}>
-              <input value={newProblemUrl} onChange={(e) => setNewProblemUrl(e.target.value)} placeholder="https://codeforces.com/problemset/problem/..." style={{ ...input, flex: 1, margin: 0 }} />
-              <button onClick={addProblemFromUrl} style={primary}>Scrape & Add</button>
+              <input value={mashupForm.url} onChange={(e) => setMashupForm(p => ({...p, url: e.target.value}))} placeholder="https://codeforces.com/problemset/problem/..." style={{ ...input, flex: 1, margin: 0 }} />
+              <button onClick={handleAddProblemUrl} disabled={pendingOperations.has('add_url')} style={primary}>
+                {pendingOperations.has('add_url') ? 'Scraping AST...' : 'Scrape & Mount'}
+              </button>
             </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--text-muted)', marginTop: 10 }}>
-               <input type="checkbox" checked={urlGenerateAiTests} onChange={e => setUrlGenerateAiTests(e.target.checked)} />
-               🤖 Check scraped tests AND automatically generate tougher hidden system tests via AI
+               <input type="checkbox" checked={mashupForm.generateAiTests} onChange={e => setMashupForm(p => ({...p, generateAiTests: e.target.checked}))} />
+               🤖 Enable Neural Analyzer to generate advanced edge-case system tests globally
             </label>
           </div>
 
+          {/* Custom Construction */}
           <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 20 }}>
-            <label style={{ display: 'block', marginBottom: 5, color: 'var(--text-muted)' }}>Option 3: Create Custom Problem</label>
-            <input value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} placeholder="Custom Problem Title" style={input} />
+            <label style={{ display: 'block', marginBottom: 5, color: 'var(--text-muted)' }}>Module 3: Bespoke Entity Construction</label>
+            <input value={customForm.title} onChange={(e) => setCustomForm(p => ({...p, title: e.target.value}))} placeholder="Node Title Identifier" style={input} />
             
             <div style={{ background: 'var(--border-color)', padding: 10, borderRadius: '12px 12px 0 0', display: 'flex', gap: 10, alignItems: 'center' }}>
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Insert Image:</span>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Inject Binary Image Asset:</span>
               <input 
                 type="file" 
                 accept="image/*" 
                 onChange={handleImageUpload} 
                 style={{ fontSize: 13, color: 'var(--text-main)', width: 220 }} 
-                disabled={uploadingImage}
+                disabled={isUploadingImage}
               />
-              {uploadingImage && <span style={{ color: 'var(--accent-primary)', fontSize: 12 }}>Uploading...</span>}
+              {isUploadingImage && <span style={{ color: 'var(--accent-primary)', fontSize: 12 }}>Streaming to block storage...</span>}
             </div>
             <textarea 
-              value={customDescription} 
-              onChange={(e) => setCustomDescription(e.target.value)} 
-              placeholder="Write your HTML/Text description here. Use the image uploader above to automatically inject images." 
+              value={customForm.description} 
+              onChange={(e) => setCustomForm(p => ({...p, description: e.target.value}))} 
+              placeholder="Inject HTML/Markdown semantic rules. Use the binary uploader above for seamless CDN linking." 
               style={{ ...input, minHeight: 140, borderRadius: '0 0 12px 12px' }} 
             />
             
             <div>
-               <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 'bold' }}>Time Limit (Seconds, 0 for infinite)</label>
-               <input type="number" placeholder="e.g. 120" value={customTimeLimit} onChange={e => setCustomTimeLimit(Number(e.target.value))} style={input} />
+               <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 'bold' }}>Execution Constraint (0 for unbound O(N))</label>
+               <input type="number" placeholder="120s" value={customForm.timeLimit} onChange={e => setCustomForm(p => ({...p, timeLimit: Number(e.target.value)}))} style={input} />
             </div>
 
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--text-muted)', marginTop: 5, marginBottom: 15 }}>
-               <input type="checkbox" checked={customGenerateAiTests} onChange={e => setCustomGenerateAiTests(e.target.checked)} />
-               🤖 Automatically generate tougher hidden system tests for this problem via AI
+               <input type="checkbox" checked={customForm.generateAiTests} onChange={e => setCustomForm(p => ({...p, generateAiTests: e.target.checked}))} />
+               🤖 Synthesize comprehensive regression matrix tests via AI Engine
             </label>
 
-            <button onClick={addCustomProblem} style={primary}>Create Custom Problem</button>
+            <button onClick={handleAddCustomProblem} disabled={pendingOperations.has('add_custom')} style={primary}>
+              {pendingOperations.has('add_custom') ? 'Compiling Entity...' : 'Initialize Bespoke Problem'}
+            </button>
           </div>
 
         </section>
 
+        {/* Existing Data Graph View */}
         <section style={panel}>
-          <h2 style={{ color: 'var(--text-main)' }}>Problems</h2>
+          <h2 style={{ color: 'var(--text-main)' }}>Active Problem Graph</h2>
           {contest.problems.map((problem: any, index: number) => (
             <div key={problem.id} style={row}>
               <strong style={{ fontSize: 24, color: 'var(--text-main)', minWidth: 30 }}>{String.fromCharCode(65 + index)}</strong>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginRight: 15 }}>
-                 <button onClick={() => moveProblem(problem.id, 'UP')} disabled={index === 0} style={{...ghost, padding: '2px 6px', fontSize: 10}}>▲</button>
-                 <button onClick={() => moveProblem(problem.id, 'DOWN')} disabled={index === contest.problems.length - 1} style={{...ghost, padding: '2px 6px', fontSize: 10}}>▼</button>
+                 <button onClick={() => moveProblemOptimistic(problem.id, 'UP')} disabled={index === 0 || pendingOperations.has(`move_${problem.id}`)} style={{...ghost, padding: '2px 6px', fontSize: 10}}>▲</button>
+                 <button onClick={() => moveProblemOptimistic(problem.id, 'DOWN')} disabled={index === contest.problems.length - 1 || pendingOperations.has(`move_${problem.id}`)} style={{...ghost, padding: '2px 6px', fontSize: 10}}>▼</button>
               </div>
 
               <div style={{ flex: 1 }}>
                 <b style={{ fontSize: 18, color: 'var(--text-main)' }}>{problem.titleSnapshot || problem.title}</b>
-                <p style={{ margin: '4px 0 0', color: 'var(--text-muted)' }}>{problem.platform} - Rating {problem.rating || problem.difficulty || 'Practice'}</p>
+                <p style={{ margin: '4px 0 0', color: 'var(--text-muted)' }}>{problem.platform} - Base Elo: {problem.rating || problem.difficulty || 'Unranked'}</p>
               </div>
-              <button onClick={() => replaceProblem(problem.id)} style={ghost}>Replace</button>
-              <button onClick={() => removeProblem(problem.id)} style={danger}>Remove</button>
+              <button onClick={() => removeProblemOptimistic(problem.id)} style={danger}>Unlink Node</button>
             </div>
           ))}
-          {contest.problems.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No problems added yet.</p>}
+          {contest.problems.length === 0 && <p style={{ color: 'var(--text-muted)' }}>Graph is currently empty. Inject a problem to continue.</p>}
         </section>
 
+        {/* Access List Tracker */}
         <section style={panel}>
-          <h2 style={{ color: 'var(--text-main)' }}>Players</h2>
+          <h2 style={{ color: 'var(--text-main)' }}>Connected Identity Vectors</h2>
           <div style={{...playerRow, fontWeight: 'bold', color: 'var(--text-main)', borderBottom: '2px solid var(--border-color)'}}>
-            <span>Name</span><span>Team</span><span>Handle</span>
+            <span>Display Name</span><span>Guild/Group</span><span>Terminal Reference</span>
           </div>
           {contest.members?.map((member: any) => (
             <div key={member.id} style={playerRow}>
               <span>{member.name || member.displayName}</span>
-              <span>{member.teamName || member.team?.name || 'Individuals'}</span>
-              <span>{member.codeforcesHandle || member.externalHandle?.handle || 'missing handle'}</span>
+              <span>{member.teamName || member.team?.name || 'Local'}</span>
+              <span>{member.codeforcesHandle || member.externalHandle?.handle || 'Anonymous'}</span>
             </div>
           ))}
-          {(!contest.members || contest.members.length === 0) && <p style={{ color: 'var(--text-muted)', marginTop: 15 }}>No players registered yet.</p>}
+          {(!contest.members || contest.members.length === 0) && <p style={{ color: 'var(--text-muted)', marginTop: 15 }}>No access vectors established yet.</p>}
         </section>
       </section>
     </main>
   );
 }
 
-// 👉 FIXED: Fully integrated Dark/Light mode theme CSS variables
+// -----------------------------------------------------------------------------
+// Component Style Dictionary (Strict Variables)
+// -----------------------------------------------------------------------------
 const page: CSSProperties = { minHeight: '100vh', width: '100%', maxWidth: '100vw', overflowX: 'hidden', padding: 'clamp(16px, 4vw, 32px)', fontFamily: 'Inter, Arial, sans-serif', color: 'var(--text-main)', background: 'var(--bg-main)', boxSizing: 'border-box' };
 const nav: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 };
 const link: CSSProperties = { color: 'var(--accent-primary)', textDecoration: 'none', fontWeight: 900, fontSize: 16 };
-const danger: CSSProperties = { background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#f87171', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
-const primary: CSSProperties = { display: 'inline-block', padding: '12px 24px', borderRadius: 8, background: 'linear-gradient(135deg,#38bdf8,#818cf8)', color: '#020617', textDecoration: 'none', fontWeight: 900, border: 'none', textAlign: 'center', cursor: 'pointer' };
-const ghost: CSSProperties = { background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' };
+const danger: CSSProperties = { background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#f87171', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', transition: 'all 0.2s' };
+const primary: CSSProperties = { 
+  display: 'inline-block', 
+  padding: '12px 24px', 
+  borderRadius: 8, 
+  background: 'linear-gradient(135deg,#38bdf8,#818cf8)', 
+  color: '#020617', 
+  textDecoration: 'none', 
+  fontWeight: 900, 
+  border: 'none', 
+  textAlign: 'center', 
+  cursor: 'pointer', 
+  transition: 'all 0.2s' 
+};
+const ghost: CSSProperties = { background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', transition: 'all 0.2s' };
 const hero: CSSProperties = { padding: 'clamp(20px, 4vw, 30px)', borderRadius: 24, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', marginBottom: 24 };
 const eyebrow: CSSProperties = { color: 'var(--accent-primary)', fontWeight: 900, letterSpacing: '.14em', textTransform: 'uppercase', margin: '0 0 10px 0' };
 const panel: CSSProperties = { background: 'var(--bg-panel)', padding: 'clamp(16px, 4vw, 24px)', borderRadius: 24, border: '1px solid var(--border-color)', marginBottom: 24, boxShadow: '0 10px 30px rgba(0,0,0,.1)' };

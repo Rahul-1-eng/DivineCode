@@ -1,5 +1,23 @@
-// apps/web/lib/api.ts
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+/**
+ * @file api.ts
+ * @author Rahul Kumar Sahoo
+ * @description Shared web API helpers that resolve the correct backend origin for local and deployed environments.
+ */
+function getApiBaseUrl(hostname?: string | null): string {
+  const normalizedHost = (hostname || '').toLowerCase();
+  if (normalizedHost === 'localhost' || normalizedHost === '127.0.0.1' || normalizedHost === '0.0.0.0' || normalizedHost.endsWith('.local')) {
+    return 'http://localhost:4000';
+  }
+
+  if (typeof window !== 'undefined') {
+    const browserHost = window.location.hostname.toLowerCase();
+    if (browserHost === 'localhost' || browserHost === '127.0.0.1' || browserHost === '0.0.0.0' || browserHost.endsWith('.local')) {
+      return 'http://localhost:4000';
+    }
+  }
+
+  return process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+}
 
 let cachedToken: string | null = null;
 let tokenExpiry: number | null = null;
@@ -32,6 +50,10 @@ async function getApiToken(): Promise<string | null> {
   return null;
 }
 
+export function getApiBaseUrlForClient(hostname?: string | null): string {
+  return getApiBaseUrl(hostname);
+}
+
 export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
   const { requireAuth = true, headers: customHeaders, ...restOptions } = options;
   
@@ -52,7 +74,7 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
 
   // Ensure endpoint format is clean
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  const url = `${API_BASE}${cleanEndpoint}`;
+  const url = `${getApiBaseUrl()}${cleanEndpoint}`;
 
   const response = await fetch(url, {
     ...restOptions,

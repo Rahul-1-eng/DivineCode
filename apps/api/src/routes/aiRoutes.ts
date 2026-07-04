@@ -1,8 +1,13 @@
-// apps/api/src/routes/aiRoutes.ts
+/**
+ * @file aiRoutes.ts
+ * @author Rahul Kumar Sahoo
+ * @description Route handlers for AI-driven features including chat, test-case generation, and performance analysis.
+ */
 import { Router, Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { prisma } from '../prisma/client';
-import { generateTestCasesWithAI, debugCodeWithAI, generateToughTestCases } from '../modules/ai/aiService';
+import { generateTestCasesWithAI, debugCodeWithAI, generateToughTestCases, analyzeUserWeaknesses } from '../modules/ai/aiService';
+import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 
 export const aiRouter = Router();
 
@@ -52,6 +57,24 @@ aiRouter.post('/ai/chat', asyncRoute(async (req, res) => {
     console.error('[AI Chat] Error:', e.response?.data || e.message);
     res.json({ reply: "AI Service Error: Failed to generate a response. The model may be rate-limited or unavailable." });
   }
+}));
+
+aiRouter.post('/analyze-weaknesses', asyncRoute(async (req, res) => {
+  const viewer = await resolvedViewerFromRequest(req, true);
+  if (!viewer.userId) return res.status(401).json({ error: 'Unauthorized' });
+
+  const subs = await prisma.submission.findMany({ 
+    where: { userId: viewer.userId, verdict: { not: 'ACCEPTED' } },
+    take: 5
+  });
+
+  const analysis = await analyzeUserWeaknesses(subs.map(s => ({ 
+    problemTitle: s.contestProblemId || 'Unknown', 
+    code: s.code, 
+    verdict: s.verdict 
+  })));
+
+  res.json({ success: true, analysis });
 }));
 
 aiRouter.post('/ai/generate-testcases', asyncRoute(async (req, res) => {

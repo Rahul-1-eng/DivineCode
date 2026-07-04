@@ -1,3 +1,9 @@
+/**
+ * @file admin.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
@@ -69,7 +75,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleApproveQuestion = async (questionId: string) => {
+const handleApproveQuestion = async (questionId: string) => {
     try {
       await fetchApi(`/api/v2/interview/questions/${questionId}/approve`, { method: 'PATCH' });
       setPendingQuestions(prev => prev.filter(q => q.id !== questionId));
@@ -78,6 +84,15 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDeleteQuestion = async (questionId: string) => {
+    if (!confirm('Are you sure you want to permanently delete this pending question?')) return;
+    try {
+      await fetchApi(`/api/v2/interview/questions/${questionId}`, { method: 'DELETE' });
+      setPendingQuestions(prev => prev.filter(q => q.id !== questionId));
+    } catch (err) {
+      console.error("Failed to delete question", err);
+    }
+  };
   const runPlagiarismScan = async () => {
     if (!scanContestId) return;
     setScanning(true);
@@ -322,9 +337,14 @@ export default function AdminDashboard() {
                             </span>
                         </td>
                         <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                          <button onClick={() => handleApproveQuestion(q.id)} style={{ background: '#a855f7', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
-                            Approve for AI
-                          </button>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                            <button onClick={() => handleApproveQuestion(q.id)} style={{ background: '#a855f7', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
+                              Approve
+                            </button>
+                            <button onClick={() => handleDeleteQuestion(q.id)} style={{ background: 'transparent', color: '#f87171', border: '1px solid rgba(248,113,113,0.5)', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 'bold' }}>
+                              Reject
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

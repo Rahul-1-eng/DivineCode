@@ -1,3 +1,9 @@
+/**
+ * @file submissionRoutes.ts
+ * @author Rahul Kumar Sahoo
+ * @description Route handlers for the platform API.
+ */
+
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { executeSubmission } from '../modules/judge/judge0Service';

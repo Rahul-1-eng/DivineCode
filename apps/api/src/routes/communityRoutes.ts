@@ -1,6 +1,12 @@
+/**
+ * @file communityRoutes.ts
+ * @author Rahul Kumar Sahoo
+ * @description Route handlers for the platform API.
+ */
+
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
-// 👉 ADDED: Import the secure JWT verifier
+// Import the secure JWT verifier
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 
 export const communityRouter = Router();
@@ -29,7 +35,7 @@ communityRouter.get('/problems', async (req, res) => {
 // POST /api/v2/community/upload
 communityRouter.post('/upload', async (req, res) => {
   try {
-    // 👉 FIXED: Secure token validation to prevent identity spoofing
+    // Secure token validation to prevent identity spoofing
     const viewer = await resolvedViewerFromRequest(req, true);
     if (!viewer.userId) return res.status(401).json({ error: "Unauthorized. Invalid session token." });
 
@@ -100,7 +106,7 @@ communityRouter.post('/upload', async (req, res) => {
 // PUT /api/v2/community/problems/:id (Edit Post Endpoint)
 communityRouter.put('/problems/:id', async (req, res) => {
   try {
-    // 👉 FIXED: Secure token validation
+    // Secure token validation
     const viewer = await resolvedViewerFromRequest(req, true);
     if (!viewer.userId) return res.status(401).json({ error: "Unauthorized. Invalid session token." });
 
@@ -145,7 +151,7 @@ communityRouter.put('/problems/:id', async (req, res) => {
 // DELETE /api/v2/community/problems/:id
 communityRouter.delete('/problems/:id', async (req, res) => {
   try {
-    // 👉 FIXED: Secure token validation
+    // Secure token validation
     const viewer = await resolvedViewerFromRequest(req, true);
     if (!viewer.userId) return res.status(401).json({ error: "Unauthorized. Invalid session token." });
 

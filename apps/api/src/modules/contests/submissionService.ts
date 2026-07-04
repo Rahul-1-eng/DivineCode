@@ -1,3 +1,9 @@
+/**
+ * @file submissionService.ts
+ * @author Rahul Kumar Sahoo
+ * @description Core application logic for the platform feature.
+ */
+
 import { SubmissionSource, SubmissionStatus, Verdict, ContestStatus } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { findViewerParticipant, ViewerContext } from './contestRules';
@@ -59,7 +65,7 @@ export async function createQueuedContestSubmission(input: {
   }
 }
 
-// 👉 STEP 4: Point Deduction & Unlocking Logic
+// Hidden testcase unlocking and score adjustment flow.
 export async function unlockHiddenTestCase(contestId: string, contestProblemId: string, viewer: ViewerContext) {
   const contest = await prisma.contest.findUnique({
     where: { id: contestId }, include: { participants: true, teams: true }

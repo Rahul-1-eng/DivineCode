@@ -1,3 +1,9 @@
+/**
+ * @file authRoutes.ts
+ * @author Rahul Kumar Sahoo
+ * @description Route handlers for the platform API.
+ */
+
 import { Router, Request, Response } from 'express';
 import { registerUser, loginUser, generatePasswordResetToken, resetPassword } from '../modules/auth/authService';
 

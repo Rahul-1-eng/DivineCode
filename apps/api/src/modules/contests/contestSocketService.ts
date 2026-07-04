@@ -1,3 +1,8 @@
+/**
+ * @file contestSocketService.ts
+ * @author Rahul Kumar Sahoo
+ * @description Real-time contest chat and voice signaling for the DivineCode experience.
+ */
 import { Server, Socket } from 'socket.io';
 import { prisma } from '../../prisma/client';
 
@@ -17,7 +22,7 @@ export function setupContestSockets(io: Server) {
         const roomTarget = data.teamId ? `chatRoom:${data.teamId}` : `chatRoom:contest_global_${data.contestId}`;
         
         if (data.teamId) {
-           // 👉 FIX: If senderId is an email, find the actual User UUID so Prisma doesn't crash!
+           // Resolve an email-based sender to the matching user record before persisting chat messages.
            let finalSenderId = data.senderId;
            if (finalSenderId.includes('@')) {
              const user = await prisma.user.findUnique({ where: { email: finalSenderId } });
@@ -60,7 +65,7 @@ export function setupContestSockets(io: Server) {
    socket.on('broadcastTeamSolve', (data: { teamId: string, solverId: string, solverName: string, problemLabel: string }) => {
   if (data.teamId) {
     io.to(`chatRoom:${data.teamId}`).emit('team_problem_solved', {
-      // ✅ FIXED: Send unique solverId for logic, solverName for display
+      // Broadcast the solver identifier separately from the display name for UI and rule handling.
       solverId: data.solverId,
       solverName: data.solverName,
       message: `${data.solverName} just solved Problem ${data.problemLabel}!`

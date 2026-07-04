@@ -1,3 +1,9 @@
+/**
+ * @file searchRoutes.ts
+ * @author Rahul Kumar Sahoo
+ * @description Route handlers for the platform API.
+ */
+
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
 
@@ -29,7 +35,7 @@ searchRouter.get('/', async (req, res) => {
       }),
       prisma.problem.findMany({
         where: { title: { contains: q, mode: 'insensitive' } },
-        // 👉 THE ULTIMATE FIX: Only select id and title. These are 100% guaranteed to exist.
+        // THE ULTIMATE FIX: Only select id and title. These are 100% guaranteed to exist.
         select: { id: true, title: true },
         take: 5
       })

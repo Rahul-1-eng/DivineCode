@@ -1,3 +1,9 @@
+/**
+ * @file [username].tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
@@ -118,7 +124,7 @@ export default function PublicProfile() {
           </button>
         </div>
 
-        {/* 👉 FIXED: Replaced rigid grid-template structure with fluid adaptive wrapping arrays */}
+        {/* The content layout uses a responsive wrapping structure for different screen sizes. */}
         <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 24 }}>
           
           {/* Left Column Section: Cards Meta block */}

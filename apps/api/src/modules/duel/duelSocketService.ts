@@ -1,3 +1,8 @@
+/**
+ * @file duelSocketService.ts
+ * @author Rahul Kumar Sahoo
+ * @description Live duel matchmaking, gameplay state, and result persistence for the platform.
+ */
 import { Server, Socket } from 'socket.io';
 import { prisma } from '../../prisma/client';
 
@@ -71,7 +76,7 @@ export function setupDuelSockets(io: Server) {
     });
   };
 
-  // 👉 FIXED: Server-side timeout enforcer. Prevents game from hanging if no one answers.
+  // Enforce a server-side timeout so duels cannot stall indefinitely.
   async function handleQuestionTimeout(roomId: string) {
     const state = activeRooms.get(roomId);
     if (!state || state.finished) return;
@@ -167,7 +172,7 @@ export function setupDuelSockets(io: Server) {
           }
         });
 
-        // 👉 FIXED: 3. Create the paper trail in the ActivityLog so it shows on the profile!
+        // Record the duel result in the activity log so the profile reflects the outcome.
         const opponent = sortedPlayers.find(p => p.id !== player.id);
         const resultText = isDraw ? 'Draw' : (isWinner ? 'Victory' : 'Defeat');
         
@@ -218,7 +223,7 @@ export function setupDuelSockets(io: Server) {
     socket.on('duel:createCustom', ({ name, userEmail, questionIds }) => {
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
       
-      // 👉 FIXED: Purge any existing phantom rooms this host might have created to stop leaks
+      // Clear stale room state so the host cannot leave behind phantom duel rooms.
       for (const [existingCode, room] of customWaitingRooms.entries()) {
         if (room.host.id === socket.id) customWaitingRooms.delete(existingCode);
       }
@@ -340,7 +345,7 @@ export function setupDuelSockets(io: Server) {
           state.finished = true;
           if (state.timeoutId) clearTimeout(state.timeoutId);
           
-          // 👉 FIXED: Drop disconnected player score massively to guarantee they lose, then save state
+          // Penalize disconnected players heavily so they lose cleanly and the state is persisted.
           const disconnectedPlayer = state.players.find(p => p.id === socket.id);
           if (disconnectedPlayer) disconnectedPlayer.score = -9999;
 

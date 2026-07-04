@@ -1,9 +1,14 @@
+/**
+ * @file codeforcesSyncService.ts
+ * @author Rahul Kumar Sahoo
+ * @description Syncs Codeforces contest and submission data into the DivineCode platform.
+ */
 import { ExternalSyncStatus, Platform, SubmissionSource, SubmissionStatus, Verdict } from '@prisma/client';
 import crypto from 'crypto';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
 
-// 👉 FIXED: Added robust regex to parse Gym & Mashup URLs securely
+// Parse Codeforces contest and gym problem URLs reliably.
 function parseCodeforcesProblem(problem: any) {
   const externalId = String(problem.externalId || '').trim().toUpperCase();
   const idMatch = externalId.match(/^(\d+)([A-Z][0-9]?)$/);
@@ -33,8 +38,7 @@ function mapCfVerdictToPrisma(cfVerdict: string | undefined): Verdict {
   }
 }
 
-// 👉 FIXED: Added SHA-512 API Key signing so you can fetch submissions from PRIVATE Mashups
-// Add this robust fetcher
+// Use a signed request path so private mashup submissions can be fetched reliably.
 async function fetchWithRetry(url: string, retries = 3): Promise<any> {
   for (let i = 0; i < retries; i++) {
     try {
@@ -131,7 +135,7 @@ export async function syncCodeforcesContest(contestId: string) {
             const targetVerdict = mapCfVerdictToPrisma(sub.verdict);
             const isAccepted = targetVerdict === Verdict.ACCEPTED;
 
-            // 👉 FIXED: Codeforces separates standard contests (< 100000) from Gyms/Mashups (>= 100000)
+            // Codeforces uses a different contest range for gyms and mashups.
             const isGym = Number(cfContestId) >= 100000;
             const submissionUrl = isGym 
               ? `https://codeforces.com/gym/${cfContestId}/submission/${externalSubmissionId}`
@@ -140,7 +144,7 @@ export async function syncCodeforcesContest(contestId: string) {
             // Inject the exact URL directly into the code block so the UI has it ready
             const codePayload = `// ----------------------------------------------------
 // External submission synced from Codeforces
-// 👉 View original submission here:
+// Link to the original submission when available.
 // ${submissionUrl}
 // ----------------------------------------------------`;
 
@@ -180,7 +184,7 @@ export async function syncCodeforcesContest(contestId: string) {
                   data: {
                     userId: participant.userId as string,
                     participantId: participant.id,
-                    // 👉 OPTIMIZATION: Strict team mapping fallback to prevent background worker typing errors
+                    // Keep a strict fallback mapping for team-based submissions when worker data is incomplete.
                     teamId: participant.teamId || null,
                     contestId,
                     contestProblemId: targetContestProblem.id,
@@ -214,7 +218,7 @@ export async function syncCodeforcesContest(contestId: string) {
       }
     }
 
-    // 👉 OPTIMIZATION: Conditional Recomputation
+    // Recompute standings only when the sync has actually changed contest state.
     // Only hammer the database to rebuild the scoreboard if we ACTUALLY synced new records.
     let standings = null;
     if (synced.length > 0) {

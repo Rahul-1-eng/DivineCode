@@ -1,16 +1,26 @@
+/**
+ * @file profile.tsx
+ * @author Rahul
+ * @description Dynamic user profile aggregating global performance rating trajectories and topic mastery matrices.
+ */
 import { CSSProperties, useEffect, useState } from 'react';
 import { signOut, useSession } from 'next-auth/react';
+import toast from 'react-hot-toast'; // Add this import
 import { fetchApi } from '../lib/api';
 
 const EloGraph = ({ history }: { history: any[] }) => {
   if (!history || history.length < 1) {
     return <div style={{ color: 'var(--text-muted)', padding: 40, textAlign: 'center', background: 'var(--bg-card)', borderRadius: 16, border: '1px solid var(--border-color)' }}>No rated history yet. Compete to get your initial rating!</div>;
   }
+  
   const points = history.map(h => h.newRating || h.ratingAfter || h.rating || 1200);
-  if (points.length === 1) points.unshift(1200); 
+  if (points.length === 1) points.unshift(1200); // Anchor single points to standard entry rating
+  
   const min = Math.min(...points) - 50;
   const max = Math.max(...points) + 50;
-  const range = max - min;
+  // Fallback to 100 range if the user flatlines (max - min === 0) to prevent division by zero in SVG rendering
+  const range = (max - min) === 0 ? 100 : (max - min); 
+  
   const width = 1000;
   const height = 250;
   const stepX = width / (points.length - 1);
@@ -19,6 +29,7 @@ const EloGraph = ({ history }: { history: any[] }) => {
   return (
     <div style={{ width: '100%', overflowX: 'auto', background: 'var(--bg-card)', padding: '30px 20px', borderRadius: 16, border: '1px solid var(--border-color)' }}>
       <svg viewBox={`-20 -20 ${width + 40} ${height + 40}`} style={{ minWidth: 600, width: '100%', height: 'auto', display: 'block' }}>
+        {/* Render clean structural chart grid guidelines natively without heavy external charting engine frameworks */}
         {[0, 0.25, 0.5, 0.75, 1].map(pct => (
           <line key={pct} x1="0" y1={height * pct} x2={width} y2={height * pct} stroke="var(--border-color)" strokeWidth="1" />
         ))}
@@ -103,14 +114,6 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState('');
   const [pwMessage, setPwMessage] = useState({ text: '', type: '' });
 
-  const defaultRadarData = [
-    { subject: 'Dynamic Programming', score: 85 },
-    { subject: 'Graph Theory', score: 70 },
-    { subject: 'Data Structures', score: 90 },
-    { subject: 'Greedy Math', score: 60 },
-    { subject: 'String Algorithms', score: 75 }
-  ];
-
   useEffect(() => { 
     if (status === 'loading') return;
     if (status !== 'authenticated' || !session?.user?.email) {
@@ -135,23 +138,20 @@ export default function ProfilePage() {
       });
   }, [status, session]);
 
-  async function handleAnalyzeWeaknesses() {
-    setIsAnalyzing(true);
-    try {
-      const res = await fetchApi('/api/v2/ai/analyze-weaknesses', { method: 'POST' });
-      if (res.success) {
-         setUserData((prev: any) => ({ ...prev, topicMastery: res.newRadarChart }));
-         setAiAnalysisResult(res);
-         alert("AI Analysis complete! Check your updated radar chart and new recommendations.");
-      } else {
-         alert(res.message || res.error || "Failed to analyze weaknesses.");
-      }
-    } catch (err: any) {
-       alert(err.message || "Network error while analyzing weaknesses.");
-    } finally {
-      setIsAnalyzing(false);
+ async function handleAnalyzeWeaknesses() {
+  setIsAnalyzing(true);
+  try {
+    const res = await fetchApi('/api/v2/ai/analyze-weaknesses', { method: 'POST' });
+    if (res.success && res.analysis) {
+        setAiAnalysisResult(res.analysis);
+        toast.success("AI Analysis Complete!");
     }
+  } catch (err: any) {
+     toast.error("Analysis failed.");
+  } finally {
+    setIsAnalyzing(false);
   }
+}
 
   async function handleClaimUsername() {
     if (!divineCodeUsername.trim()) return alert("Username cannot be empty");
@@ -212,7 +212,18 @@ export default function ProfilePage() {
     </main>
   );
 
-  const name = session.user?.name || userData?.name || session.user?.email || 'DivineCode user';
+ const name = session.user?.name || userData?.name || session.user?.email || 'DivineCode user';
+  const hasTopicData = userData?.topicMastery && userData.topicMastery.length > 0;
+  
+  // Generate a default visual matrix so the UI never looks broken for new users
+  const defaultMastery = [
+    { subject: 'Dynamic Programming', score: 10 },
+    { subject: 'Graph Theory', score: 10 },
+    { subject: 'Data Structures', score: 10 },
+    { subject: 'Math', score: 10 },
+    { subject: 'Greedy', score: 10 }
+  ];
+  const activeTopicData = hasTopicData ? userData.topicMastery : defaultMastery;
   
   return (
     <main style={page}>
@@ -255,7 +266,8 @@ export default function ProfilePage() {
           
           <section style={{ ...card }}>
             <h2 style={{ margin: '0 0 16px 0', fontSize: 20 }}>Rating Trajectory</h2>
-            <EloGraph history={userData?.ratingHistory || []} />
+            {/* Reverses the match history so the graph reads chronologically left-to-right */}
+            <EloGraph history={userData?.matchHistory?.length > 0 ? [...userData.matchHistory].reverse() : userData?.ratingHistory || []} />
           </section>
 
           <section style={{ ...card, display: 'flex', flexDirection: 'column' }}>
@@ -270,8 +282,13 @@ export default function ProfilePage() {
               </button>
             </h2>
             
-            <div style={{ flex: 1, background: 'var(--bg-card)', borderRadius: 16, border: '1px solid var(--border-color)', display: 'grid', placeItems: 'center', padding: '10px 0' }}>
-               <TopicRadarChart data={userData?.topicMastery?.length > 0 ? userData.topicMastery : defaultRadarData} />
+           <div style={{ flex: 1, background: 'var(--bg-card)', borderRadius: 16, border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '10px 0' }}>
+               <TopicRadarChart data={activeTopicData} />
+               {!hasTopicData && (
+                  <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 10, fontStyle: 'italic', textAlign: 'center', padding: '0 20px' }}>
+                    Complete algorithmic battles to activate your live neural matrix.
+                  </p>
+               )}
             </div>
 
             {aiAnalysisResult && (

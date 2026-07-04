@@ -1,8 +1,14 @@
+/**
+ * @file jobTypes.ts
+ * @author Rahul Kumar Sahoo
+ * @description Application source for the DivineCode platform.
+ */
+
 export const QUEUE_NAMES = {
   judge: 'judge',
   externalSync: 'external-sync',
   contestRewards: 'contest-rewards',
-  plagiarismCheck: 'plagiarism-check' // 👉 ADDED: New Queue
+  plagiarismCheck: 'plagiarism-check' // New Queue
 };
 
 export type JudgeSubmissionJob = {
@@ -17,7 +23,7 @@ export type ContestRewardsJob = {
   contestId: string;
 };
 
-// 👉 ADDED: Plagiarism Payload Type
+// Plagiarism Payload Type
 export type PlagiarismCheckJob = {
   submissionId: string;
 };

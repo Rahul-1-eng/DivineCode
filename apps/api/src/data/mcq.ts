@@ -1,3 +1,9 @@
+/**
+ * @file mcq.ts
+ * @author Rahul Kumar Sahoo
+ * @description Application source for the DivineCode platform.
+ */
+
 export const mcqQuestions = [
   // --- Standard Tech MCQs ---
   {

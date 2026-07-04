@@ -1,3 +1,9 @@
+/**
+ * @file env.ts
+ * @author Rahul Kumar Sahoo
+ * @description Application source for the DivineCode platform.
+ */
+
 import path from 'path';
 import dotenv from 'dotenv';
 

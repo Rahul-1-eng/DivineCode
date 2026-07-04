@@ -1,18 +1,34 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 .next/
 
+# Environment files
 .env
 .env.local
+.env.localhost
+.env.production
+.env.development
+.env.test
 .env.*.local
 
+# Keep template in Git
+!.env.example
+
+# Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Coverage
 coverage/
+
+# Turbo / Vercel
 .turbo/
 .vercel/
 
+# TypeScript
 *.tsbuildinfo

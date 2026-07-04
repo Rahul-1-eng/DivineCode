@@ -1,3 +1,9 @@
+/**
+ * @file interview.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import toast, { Toaster } from 'react-hot-toast';
@@ -86,7 +92,7 @@ export default function InterviewPage() {
     return list;
   }, [questions, selectedTrack, filterStatus, progress]);
 
-  // 👉 FIXED: Extracted 'currentIndex' to break the endless reset feedback loop
+  // Extracted 'currentIndex' to break the endless reset feedback loop
   useEffect(() => { 
     setCurrentIndex(0); 
     setSelectedOption(null); 
@@ -122,7 +128,7 @@ export default function InterviewPage() {
     }
   };
 
-  // 👉 ADDED: Delete question endpoint execution hook
+  // Delete question endpoint execution hook
   const handleDeleteQuestion = async (qId: string) => {
     if (!confirm("Completely wipe this interview question from the database? This action is absolute.")) return;
     try {
@@ -254,7 +260,7 @@ export default function InterviewPage() {
                     <span style={tag}>{currentQ.track?.title || 'Core CS'}</span>
                     
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                      {/* 👉 ADDED: Admin/Owner destructive capability trigger */}
+                      {/* This action is reserved for admins and contest owners. */}
                       {isPlatformOwner && (
                         <button 
                           onClick={() => handleDeleteQuestion(currentQ.id)}

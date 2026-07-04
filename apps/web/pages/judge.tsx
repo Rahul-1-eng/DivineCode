@@ -1,3 +1,9 @@
+/**
+ * @file judge.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { CSSProperties, useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useSession } from 'next-auth/react';

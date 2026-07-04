@@ -1,3 +1,9 @@
+/**
+ * @file [id].tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { CSSProperties, Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
@@ -656,13 +662,7 @@ export default function ContestRoomPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); 
   }, [messages, lobbyMessages, isChatOpen]);
   
-  useEffect(() => { 
-      if (!id || !contest || isFinal) return; 
-      if (timeLeft === 0 && !isScheduledLockScreen && !isFinal) { 
-          toast("Contest Ended. Redirecting...");
-          router.push(`/contests/${id}/final`); 
-      } 
-  }, [timeLeft, id, contest, isFinal, isScheduledLockScreen]);
+ 
   
   useEffect(() => { if (isFinal) playSuccessSound(); }, [isFinal]);
 
@@ -849,13 +849,19 @@ export default function ContestRoomPage() {
           <div style={userPill}>{session.user?.name || session.user?.email}</div>
         </nav>
 
-        {isFinal && viewerMember && (
+      {isFinal && viewerMember && (
           <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(34,211,238,0.2))', border: '1px solid var(--accent-primary)', padding: 24, borderRadius: 20, marginBottom: 32, textAlign: 'center', marginTop: 24 }}>
             <h2 style={{ margin: '0 0 8px', color: 'var(--text-main)' }}>🏆 Contest Allocation Finalized!</h2>
-            <p style={{ color: 'var(--text-muted)', margin: 0 }}>
+            <p style={{ color: 'var(--text-muted)', margin: '0 0 16px 0' }}>
               Rating Delta: <strong style={{ color: '#4ade80' }}>{ratingDelta >= 0 ? '+' : ''}{ratingDelta} Elo</strong> | 
               Tokens Awarded: <strong style={{ color: '#fbbf24' }}>🪙 {earnedCoins} Coins</strong>
             </p>
+            <button 
+              onClick={() => router.push(`/contests/${id}`)}
+              style={{ background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '6px 16px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}
+            >
+              ← Return to Contest Room
+            </button>
           </div>
         )}
 
@@ -904,6 +910,21 @@ export default function ContestRoomPage() {
 
         {displayStatus === 'ENDED' && !isActuallyOwnerMode && (
           <div style={{ marginBottom: 18, textAlign: 'right' }}>
+            
+            <button 
+              onClick={() => router.push(`/contests/${id}/final`)}
+              style={{ 
+                background: 'var(--bg-panel-solid)', 
+                color: 'var(--accent-primary)', 
+                border: '1px solid var(--accent-primary)', 
+                padding: '12px 24px', 
+                borderRadius: '8px', 
+                fontWeight: 'bold', 
+                cursor: 'pointer' 
+              }}
+            >
+              📊 View Final Report
+            </button>
             <button 
               onClick={handleStartVirtualContest} 
               disabled={startingVirtual}
@@ -1212,9 +1233,9 @@ export default function ContestRoomPage() {
                           </div>
                         )}
 
-                        {!isFinal && displayStatus !== 'ENDED' && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {!isFinal && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <a href={safeProblemHref} style={primaryLink}>{isSolvedByTeam ? 'Review problem' : 'Open problem'}</a>
-                          {isActuallyOwnerMode && (
+                          {isActuallyOwnerMode && displayStatus !== 'ENDED' && (
                             <>
                               <button onClick={() => generateAITestcases(p.problemId || p.id)} disabled={generatingTcFor === (p.problemId || p.id)} style={{...ghostButton, color: '#a5b4fc', borderColor: 'rgba(99, 102, 241, 0.4)'}}>
                                 {generatingTcFor === (p.problemId || p.id) ? 'Generating...' : '🤖 Generate Hidden Test Cases'}
@@ -1309,7 +1330,7 @@ export default function ContestRoomPage() {
                               <button onClick={() => setSelectedSubmission(sub)} style={{...ghostButton, margin: 0, padding: '5px 10px', fontSize: 12}}>View Code</button>
                               {sub.externalSubmissionUrl && (
                                 <a href={sub.externalSubmissionUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)', textDecoration: 'underline', fontSize: '12px' }}>
-                                  👉 View original
+                                  View original
                                 </a>
                               )}
                             </div>

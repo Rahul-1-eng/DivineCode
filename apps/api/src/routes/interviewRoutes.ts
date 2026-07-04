@@ -1,3 +1,9 @@
+/**
+ * @file interviewRoutes.ts
+ * @author Rahul Kumar Sahoo
+ * @description Route handlers for the platform API.
+ */
+
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
@@ -92,8 +98,9 @@ interviewRouter.get('/questions', async (req, res) => {
 interviewRouter.get('/pending', async (req, res) => {
   try {
     const viewer = await resolvedViewerFromRequest(req, true);
-    const email = viewer.email;
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findFirst({ 
+      where: { OR: [{ id: viewer.userId }, { email: viewer.email || undefined }] } 
+    });
     
     if (!user || user.role !== 'ADMIN') {
       return res.status(403).json({ error: 'Forbidden. Admin access required.' });
@@ -205,7 +212,7 @@ interviewRouter.post('/questions', async (req, res) => {
 // NEW: AI Mock Interview Engine Endpoint (With Live Code Support)
 interviewRouter.post('/questions/:id/mock', async (req, res) => {
   try {
-    // 👉 ADDED: Destructuring `code` from the request body
+    // Destructuring `code` from the request body
     const { userResponse, history, code } = req.body;
     const question = await prisma.interviewQuestion.findUnique({
       where: { id: req.params.id }
@@ -213,7 +220,7 @@ interviewRouter.post('/questions/:id/mock', async (req, res) => {
 
     if (!question) return res.status(404).json({ error: 'Question not found' });
 
-    // 👉 ADDED: Passing the live code into the AI Engine
+    // Passing the live code into the AI Engine
     const aiEvaluation = await conductAiInterview(question.prompt, userResponse, history || [], code);
     
     // Auto-update to MASTERED if the AI grades them successfully

@@ -1,3 +1,9 @@
+/**
+ * @file AnimatedBackground.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Reusable UI component for the product experience.
+ */
+
 import { useEffect, useRef } from 'react';
 // @ts-ignore: Bypassing missing types for immediate deployment
 import * as THREE from 'three';

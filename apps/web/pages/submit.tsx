@@ -1,3 +1,9 @@
+/**
+ * @file submit.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { CSSProperties, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
@@ -96,7 +102,7 @@ export default function SubmitPage() {
       });
       const data = await res.json();
       if (res.ok) {
-         // ⚡ HARDENED: Prevent infinite fetch
+         // Prevent infinite fetch
          const controller = new AbortController();
          const timeoutId = setTimeout(() => controller.abort(), 25000);
 

@@ -1,3 +1,9 @@
+/**
+ * @file profileSyncService.ts
+ * @author Rahul Kumar Sahoo
+ * @description Core application logic for the platform feature.
+ */
+
 import { Platform } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { estimateUnifiedRating } from '../ratings/recommendationMath';

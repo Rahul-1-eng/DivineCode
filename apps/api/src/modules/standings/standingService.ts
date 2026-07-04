@@ -1,3 +1,9 @@
+/**
+ * @file standingService.ts
+ * @author Rahul Kumar Sahoo
+ * @description Core application logic for the platform feature.
+ */
+
 import { SubmissionSource, SubmissionStatus, Verdict, ContestStatus } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { getSharedRedisConnection } from '../../queues/redis';
@@ -36,7 +42,7 @@ try {
   console.error('[STANDINGS] Redis read failed:', err);
 }
 
-  return prisma.$transaction(async (tx) => {
+const resultRows = await prisma.$transaction(async (tx) => {
     const contest = await tx.contest.findUnique({
       where: { id: contestId },
       include: {
@@ -169,13 +175,19 @@ try {
   )
 );
 
-    try {
-      const cacheKey = `contest:standings:${contestId}`;
-      await redis.set(cacheKey, JSON.stringify(standingRows), 'EX', 60);
-    } catch (redisErr) {
-      console.error("Redis Cache write failed:", redisErr);
-    }
-
-    return standingRows;
+ return standingRows;
+  }, {
+    maxWait: 10000, // 10 seconds max wait to acquire a connection
+    timeout: 30000  // 30 seconds max duration for the heavy calculation
   });
+
+  // Execute caching outside the DB lock to prevent unnecessary timeouts
+  try {
+    const cacheKey = `contest:standings:${contestId}`;
+    await redis.set(cacheKey, JSON.stringify(resultRows), 'EX', 60);
+  } catch (redisErr) {
+    console.error("Redis Cache write failed:", redisErr);
+  }
+
+  return resultRows;
 }

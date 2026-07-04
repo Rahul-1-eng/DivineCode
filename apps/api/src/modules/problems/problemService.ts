@@ -1,3 +1,9 @@
+/**
+ * @file problemService.ts
+ * @author Rahul Kumar Sahoo
+ * @description Core application logic for the platform feature.
+ */
+
 import { CheckerType, Platform, ProblemSource, ProblemVisibility, TestcaseType } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import axios from 'axios';

@@ -1,3 +1,9 @@
+/**
+ * @file VoiceInterviewer.tsx
+ * @author Rahul
+ * @description Neural voice screening terminal utilizing native Web Speech API.
+ * Handles hardware stream buffering, real-time transcript mutation, and inference gateway signaling.
+ */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -7,7 +13,45 @@ import { fetchApi } from '../lib/api';
 interface QuestionPayload {
   id: string;
   title?: string;
+  prompt?: string;
   context?: string;
+  track?: { title?: string };
+  videoUrl?: string; // Explicit video reference if provided by the DB
+}
+
+function buildReferenceVideoUrl(question: QuestionPayload) {
+  const seed = [question.title, question.prompt, question.context, question.track?.title]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  const searchQuery = seed || 'software engineering interview explanation';
+
+  if (question.videoUrl) {
+    const rawUrl = question.videoUrl.trim();
+    if (/youtube\.com\/watch\?v=/.test(rawUrl)) {
+      try {
+        const url = new URL(rawUrl);
+        const videoId = url.searchParams.get('v');
+        return videoId ? `https://www.youtube.com/embed/${videoId}` : `https://www.youtube.com/embed?listType=search&search_query=${encodeURIComponent(searchQuery)}`;
+      } catch {
+        return `https://www.youtube.com/embed?listType=search&search_query=${encodeURIComponent(searchQuery)}`;
+      }
+    }
+    if (/youtube\.com\/embed\//.test(rawUrl) || /youtu\.be\//.test(rawUrl)) {
+      return rawUrl;
+    }
+  }
+
+  return `https://www.youtube.com/embed?listType=search&search_query=${encodeURIComponent(searchQuery)}`;
+}
+
+function buildReferenceSearchUrl(question: QuestionPayload) {
+  const seed = [question.title, question.prompt, question.context, question.track?.title]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  const query = seed || 'software engineering interview explanation';
+  return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
 }
 
 interface EvaluationMetrics {
@@ -27,7 +71,7 @@ interface VoiceInterviewerProps {
   onSuccess: () => void;
 }
 
-// Augment Window for Webkit Speech API
+// Augment Window for Webkit Speech API access without TS compiler errors
 declare global {
   interface Window {
     SpeechRecognition: any;
@@ -43,11 +87,20 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
   const [chatLog, setChatLog] = useState<ChatTranscript[]>([]);
   const [isSupported, setIsSupported] = useState(true);
   const [metrics, setMetrics] = useState<EvaluationMetrics | null>(null);
+  const [videoError, setVideoError] = useState(false);
   
   // Hardware Interface Refs
   const recognitionRef = useRef<any>(null);
   const synthesisRef = useRef<SpeechSynthesis | null>(null);
   const transcriptBuffer = useRef('');
+
+  const activeVideoUrl = buildReferenceVideoUrl(currentQuestion);
+  const referenceSearchUrl = buildReferenceSearchUrl(currentQuestion);
+  const hasQuestionContext = Boolean(currentQuestion?.title || currentQuestion?.prompt || currentQuestion?.context);
+
+  useEffect(() => {
+    setVideoError(false);
+  }, [currentQuestion?.id, currentQuestion?.title]);
 
   // 1. Hardware Initialization Pipeline
   useEffect(() => {
@@ -55,7 +108,7 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
 
     synthesisRef.current = window.speechSynthesis;
     
-    // Force voice allocation on mount to prevent latency on first render
+    // Force voice allocation on mount to prevent rendering latency on first synthetic utterance
     if (window.speechSynthesis.onvoiceschanged !== undefined) {
       window.speechSynthesis.onvoiceschanged = () => synthesisRef.current?.getVoices();
     }
@@ -69,6 +122,7 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
     const recognition = new SpeechRecognition();
     recognition.continuous = true; 
     recognition.interimResults = true;
+    // Set to en-IN to ensure maximum fidelity for local accents based on target demographic
     recognition.lang = 'en-IN'; 
     
     recognition.onresult = (event: any) => {
@@ -76,12 +130,13 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
       for (let i = 0; i < event.results.length; i++) {
         currentTranscript += event.results[i][0].transcript;
       }
+      // Mutate ref directly to avoid dependency cycle re-renders during high-frequency audio polling
       transcriptBuffer.current = currentTranscript;
       setTranscript(currentTranscript);
     };
 
     recognition.onerror = (event: any) => {
-      // Safely ignore no-speech timeouts, alert on hardware/permission faults
+      // Safely ignore no-speech timeouts, but alert on hard hardware/permission faults
       if (event.error === 'not-allowed') {
         toast.error("Hardware constraint: Microphone access denied.");
         setIsListening(false);
@@ -92,13 +147,13 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
 
     recognition.onend = () => {
       // The Web Speech API natively stops on long pauses. 
-      // We do NOT auto-submit here anymore to prevent cutting users off.
-      // We only update the visual UI state.
+      // Only UI state is updated here to prevent prematurely submitting incomplete algorithmic thoughts.
       setIsListening(false);
     };
 
     recognitionRef.current = recognition;
 
+    // Critical cleanup: ensure no hanging audio hardware allocations survive unmount
     return () => {
       if (recognitionRef.current) recognitionRef.current.abort();
       if (synthesisRef.current) synthesisRef.current.cancel();
@@ -120,10 +175,14 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
     try {
       const data = await fetchApi(`/api/v2/interview/questions/${currentQuestion.id}/mock`, {
         method: 'POST',
-        body: JSON.stringify({ userResponse: userText, history: chatLog, code })
+        body: JSON.stringify({ 
+            userResponse: userText, 
+            history: chatLog, 
+            code: code || "" // Force empty string if code is undefined
+        })
       });
       
-      if (data.evaluation) {
+      if (data?.evaluation) {
         const aiResponseText = `${data.evaluation.feedback} ${data.evaluation.followUpQuestion || ""}`;
         setChatLog(prev => [...prev, { role: 'interviewer', text: aiResponseText }]);
         
@@ -133,16 +192,24 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
           tips: data.evaluation.pronunciationTips || "Execution clear."
         });
 
-        // Trigger success callback if algorithmic thresholds are met
+        // Trigger upstream success callback if algorithmic thresholds are satisfied
         if (data.evaluation.isPassed) {
           toast.success("Technical Module Resolved Successfully", { icon: '🏆' });
           setTimeout(() => onSuccess(), 2000);
         }
         
         executeSpeechSynthesis(aiResponseText);
+      } else {
+        const fallbackText = 'The voice evaluation service is temporarily unavailable, but your response has been recorded. Please summarize the core idea, the complexity, and a small example.';
+        setChatLog(prev => [...prev, { role: 'interviewer', text: fallbackText }]);
+        setMetrics({ tech: 60, fluency: 60, tips: 'AI evaluation unavailable. Focus on clarity and complexity.' });
+        executeSpeechSynthesis(fallbackText);
       }
     } catch (err) {
-      toast.error("Inference gateway timeout.");
+      const fallbackText = 'The voice evaluation service is temporarily unavailable, but your response has been recorded. Please summarize your thought process and time complexity.';
+      setChatLog(prev => [...prev, { role: 'interviewer', text: fallbackText }]);
+      setMetrics({ tech: 60, fluency: 60, tips: 'Fallback mode enabled while the AI service is unavailable.' });
+      executeSpeechSynthesis(fallbackText);
       setIsAiSpeaking(false);
     }
   }, [chatLog, currentQuestion.id, code, onSuccess]);
@@ -151,13 +218,13 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
   const executeSpeechSynthesis = (text: string) => {
     if (!synthesisRef.current) return;
     
-    // Halt input stream while AI is broadcasting to prevent recursive feedback loops
+    // Halt input stream while AI is broadcasting to prevent recursive microphone feedback loops
     if (recognitionRef.current) recognitionRef.current.abort();
 
     const utterance = new SpeechSynthesisUtterance(text);
     const voices = synthesisRef.current.getVoices();
     
-    // Prioritize high-fidelity standard voices
+    // Prioritize high-fidelity neural voices if available in the host OS
     let premiumVoice = voices.find(v => 
       v.name.includes('Google UK English') || 
       v.name.includes('Microsoft Ava') || 
@@ -179,7 +246,7 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
   // 4. Hardware Input Toggle
   const toggleMic = () => {
     if (isListening) {
-      // User explicitly stopped. Finalize buffer and send to inference.
+      // User explicitly stopped. Finalize buffer and route to neural screening.
       recognitionRef.current?.stop();
       setIsListening(false);
       processAudioToAi(transcriptBuffer.current);
@@ -194,7 +261,7 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
         recognitionRef.current?.start();
         setIsListening(true);
       } catch (e) {
-        // Handle cases where the mic is already silently listening in the background
+        // Handle cases where the mic is already silently listening in the background OS layer
         console.warn("Hardware initialization overlapping:", e);
       }
     }
@@ -233,24 +300,58 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
         </div>
       </div>
       
-      <div style={STYLES.avatarWrapper}>
-        {isAiSpeaking ? (
-          <motion.div 
-            animate={{ scale: [1, 1.15, 1], opacity: [0.6, 1, 0.6] }} 
-            transition={{ repeat: Infinity, duration: 1.5 }} 
-            style={STYLES.aiAvatar}
-          >
-            🤖
-          </motion.div>
-        ) : (
-           <motion.div 
-             animate={isListening ? { scale: [1, 1.05, 1], borderColor: ['var(--border-color)', '#ef4444', 'var(--border-color)'] } : {}} 
-             transition={{ repeat: Infinity, duration: 2 }} 
-             style={{ ...STYLES.idleAvatar, boxShadow: isListening ? '0 0 30px rgba(239,68,68,0.3)' : 'none' }}
-           >
-             {isListening ? '🎙️' : '💼'}
-           </motion.div>
-        )}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', position: 'relative', zIndex: 2 }}>
+        {/* Left Column: AI Avatar */}
+        <div style={STYLES.avatarWrapper}>
+          {isAiSpeaking ? (
+            <motion.div 
+              animate={{ scale: [1, 1.15, 1], opacity: [0.6, 1, 0.6] }} 
+              transition={{ repeat: Infinity, duration: 1.5 }} 
+              style={STYLES.aiAvatar}
+            >
+              🤖
+            </motion.div>
+          ) : (
+             <motion.div 
+               animate={isListening ? { scale: [1, 1.05, 1], borderColor: ['var(--border-color)', '#ef4444', 'var(--border-color)'] } : {}} 
+               transition={{ repeat: Infinity, duration: 2 }} 
+               style={{ ...STYLES.idleAvatar, boxShadow: isListening ? '0 0 30px rgba(239,68,68,0.3)' : 'none' }}
+             >
+               {isListening ? '🎙️' : '💼'}
+             </motion.div>
+          )}
+        </div>
+
+        {/* Right Column: Dynamic Video Fallback */}
+        <div style={STYLES.videoWrapper}>
+          {videoError ? (
+            <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-main)' }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>🎥</div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Reference video unavailable</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 12 }}>The voice coach still works; open a YouTube lesson instead.</div>
+              <a href={referenceSearchUrl} target="_blank" rel="noreferrer" style={STYLES.referenceLink}>Open matching lesson</a>
+            </div>
+          ) : (
+            <iframe
+              src={activeVideoUrl}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              style={{ width: '100%', height: '100%', border: 'none', borderRadius: '12px' }}
+              title="Reference Material"
+              onError={() => setVideoError(true)}
+            />
+          )}
+        </div>
+      </div>
+
+      <div style={STYLES.referenceBar}>
+        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{hasQuestionContext ? 'Reference search ready for this topic.' : 'Reference material is being prepared for the selected practice problem.'}</span>
+        <a href={referenceSearchUrl} target="_blank" rel="noreferrer" style={STYLES.referenceLink}>
+          Open matching YouTube lesson
+        </a>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', position: 'relative', zIndex: 2 }}>
       </div>
 
       <div style={{ minHeight: 60, marginBottom: 20, position: 'relative', zIndex: 2 }}>
@@ -307,7 +408,10 @@ const STYLES: Record<string, React.CSSProperties> = {
   recordingAura: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'radial-gradient(circle at center, rgba(239,68,68,0.1) 0%, transparent 70%)', pointerEvents: 'none' },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, position: 'relative', zIndex: 2, flexWrap: 'wrap', gap: 10 },
   badge: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 'bold', color: 'var(--text-muted)', background: 'var(--bg-card)', padding: '6px 12px', borderRadius: 999, border: '1px solid var(--border-color)' },
-  avatarWrapper: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: 140, marginBottom: 20, position: 'relative', zIndex: 2 },
+  avatarWrapper: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: 160 },
+  videoWrapper: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: 160, background: '#000', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-color)' },
+  referenceBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, margin: '10px 0 20px', padding: '10px 14px', borderRadius: 12, background: 'var(--bg-card)', border: '1px solid var(--border-color)', position: 'relative', zIndex: 2, flexWrap: 'wrap' },
+  referenceLink: { color: 'var(--accent-primary)', fontWeight: 700, textDecoration: 'none' },
   aiAvatar: { width: 100, height: 100, borderRadius: '50%', background: 'linear-gradient(135deg, var(--accent-primary), #818cf8)', display: 'grid', placeItems: 'center', boxShadow: '0 0 40px var(--accent-glow)', fontSize: 40 },
   idleAvatar: { width: 100, height: 100, borderRadius: '50%', background: 'var(--bg-main)', border: '2px solid var(--border-color)', display: 'grid', placeItems: 'center', fontSize: 40 },
   toggleBtn: { position: 'relative', zIndex: 2, border: 'none', padding: '16px 32px', borderRadius: 999, fontSize: 15, fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' },

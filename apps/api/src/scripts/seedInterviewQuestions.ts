@@ -1,3 +1,9 @@
+/**
+ * @file seedInterviewQuestions.ts
+ * @author Rahul Kumar Sahoo
+ * @description Maintenance utility for the application.
+ */
+
 import 'dotenv/config'; 
 import { PrismaClient, InterviewTrackType } from '@prisma/client';
 

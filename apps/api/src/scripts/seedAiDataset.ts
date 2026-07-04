@@ -1,3 +1,9 @@
+/**
+ * @file seedAiDataset.ts
+ * @author Rahul Kumar Sahoo
+ * @description Maintenance utility for the application.
+ */
+
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as fs from 'fs';

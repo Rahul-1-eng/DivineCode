@@ -1,3 +1,9 @@
+/**
+ * @file client.ts
+ * @author Rahul Kumar Sahoo
+ * @description Application source for the DivineCode platform.
+ */
+
 import { PrismaClient } from '@prisma/client';
 
 type PrismaGlobal = typeof globalThis & {

@@ -1,10 +1,16 @@
+/**
+ * @file _document.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { Html, Head, Main, NextScript } from 'next/document';
 
 export default function Document() {
   return (
     <Html lang="en">
       <Head>
-        {/* 👉 THE FIX: Added ?v=2 to force the browser to clear its cache and load the new icon */}
+        {/* The icon is versioned so the browser reloads the latest asset. */}
         <link rel="icon" href="/favicon.ico?v=2" />
         <link rel="apple-touch-icon" href="/favicon.ico?v=2" />
         <link rel="shortcut icon" href="/favicon.ico?v=2" />

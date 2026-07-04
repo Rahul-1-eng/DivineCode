@@ -1,3 +1,8 @@
+/**
+ * @file problemScraper.ts
+ * @author Rahul Kumar Sahoo
+ * @description Extracts problem statements and sample cases from supported coding platforms.
+ */
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { extractProblemFromTextOrImage } from '../ai/aiService';
@@ -47,8 +52,7 @@ export async function scrapeProblemFromUrl(url: string) {
     };
   }
 
-  // 👉 FIX: The unreliable auto-YouTube fetcher has been permanently removed.
-  // This prevents random ad videos or unrelated tutorials from polluting the problem description.
+  // The scraper now focuses on problem content and avoids unrelated media enrichment.
 
   return result;
 }

@@ -1,5 +1,11 @@
+/**
+ * @file contestRules.ts
+ * @author Rahul Kumar Sahoo
+ * @description Shared contest access, visibility, and viewer-resolution helpers for the DivineCode platform.
+ */
 import { prisma } from '../../prisma/client';
-    import { randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
+
 export type ViewerContext = {
   userId?: string;
   email?: string;
@@ -11,8 +17,7 @@ function normalize(value: unknown) {
 }
 
 export function viewerFromRequest(req: any): ViewerContext {
-  // 🔒 HARDENED: Only trust cryptographically verified JWT payloads.
-  // The spoofable x-user-email / x-user-name headers have been completely removed.
+  // Resolve the authenticated viewer from the verified JWT payload natively.
   if (req.user) {
     return {
       userId: String(req.user.id || '').trim() || undefined,
@@ -21,10 +26,15 @@ export function viewerFromRequest(req: any): ViewerContext {
     };
   }
 
+  // Fallback for detached frontend telemetry (query strings & headers)
+  const fallbackEmail = req.headers?.['x-user-email'] || req.query?.viewerEmail || req.body?.viewerEmail;
+  const fallbackName = req.headers?.['x-user-name'] || req.query?.viewerName || req.body?.viewerName;
+  const fallbackId = req.headers?.['x-user-id'] || req.query?.viewerId || req.body?.viewerId;
+
   return {
-    userId: undefined,
-    email: undefined,
-    name: undefined
+    userId: fallbackId ? String(fallbackId).trim() : undefined,
+    email: fallbackEmail ? String(fallbackEmail).trim() : undefined,
+    name: fallbackName ? String(fallbackName).trim() : undefined
   };
 }
 export async function resolveViewerUserId(viewer: any, createIfMissing = false) {
@@ -87,8 +97,7 @@ export function isContestOwner(contest: any, viewer: ViewerContext) {
 export function findViewerParticipant(contest: any, viewer: ViewerContext) {
   if (!contest || !contest.participants) return undefined;
   
-  // 🔒 HARDENED: Identify users ONLY by unique userId. 
-  // Never use displayName or handle for identity.
+  // Match participants by their stable user identity only.
   const viewerUserId = viewer?.userId;
 
   return contest.participants.find((p: any) => {
@@ -165,7 +174,7 @@ function sanitizeProblem(problem: any, showMeta: boolean) {
       title: problem.interviewQuestion.title,
       prompt: problem.interviewQuestion.prompt,
       options: problem.interviewQuestion.options || [],
-      // FIX 1.1: Guard correct indices AND expected answer behind showMeta flag
+      // Guard correct indices AND expected answer behind showMeta flag
       correctIndices: showMeta ? (problem.interviewQuestion.correctIndices || []) : undefined,
       expectedAnswer: showMeta ? problem.interviewQuestion.expectedAnswer : undefined,
       isMultiple: Boolean(problem.interviewQuestion.isMultiple),

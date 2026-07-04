@@ -1,4 +1,10 @@
-import 'dotenv/config'; // 👉 THIS IS THE MISSING PIECE
+/**
+ * @file cleanHandles.ts
+ * @author Rahul Kumar Sahoo
+ * @description Maintenance utility for the application.
+ */
+
+import 'dotenv/config'; // Required environment initialization for this script.
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();

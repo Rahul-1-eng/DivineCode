@@ -1,3 +1,9 @@
+/**
+ * @file checkDatabase.ts
+ * @author Rahul Kumar Sahoo
+ * @description Maintenance utility for the application.
+ */
+
 import '../config/env';
 import { prisma } from '../prisma/client';
 

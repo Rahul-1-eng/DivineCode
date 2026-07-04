@@ -1,3 +1,9 @@
+/**
+ * @file practice.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { useEffect, useState, useRef, useMemo, CSSProperties } from 'react';
 import { useSession } from 'next-auth/react'; 
 import { motion, AnimatePresence } from 'framer-motion';

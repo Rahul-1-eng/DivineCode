@@ -1,3 +1,9 @@
+/**
+ * @file [problemId].tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { CSSProperties, useEffect, useMemo, useState, useRef, Fragment } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
@@ -147,7 +153,7 @@ export default function ContestProblemWorkspace() {
     return () => controller.abort();
   }, [problemIdStr, problem?.isMCQ, problem?.externalUrl]);
 
-  // 👉 FIXED: Aggressive Deep-Search MCQ Data Extractor (Breaks through double-stringification)
+  // Aggressive Deep-Search MCQ Data Extractor (Breaks through double-stringification)
   const mcqData = useMemo(() => {
     if (!isMCQ) return null;
     
@@ -510,9 +516,9 @@ export default function ContestProblemWorkspace() {
       newCases[i].output = '';
       setTestcases(newCases);
 
-      try {
+     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); 
+        const timeoutId = setTimeout(() => controller.abort(), 45000); // Extended to 45 seconds
 
         const data = await fetchApi(`/api/v2/execute`, {
           method: 'POST', 
@@ -593,9 +599,9 @@ export default function ContestProblemWorkspace() {
 
     const finalLanguage = isMCQ ? 'mcq' : language;
 
-    try {
+   try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000); 
+      const timeoutId = setTimeout(() => controller.abort(), 90000); // Extended to 90 seconds for deep system testing
 
       const submission = await fetchApi(`/api/v2/contests/${id}/submissions`, {
         method: 'POST', 

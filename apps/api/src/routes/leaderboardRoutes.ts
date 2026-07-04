@@ -1,9 +1,15 @@
+/**
+ * @file leaderboardRoutes.ts
+ * @author Rahul Kumar Sahoo
+ * @description Route handlers for the platform API.
+ */
+
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
 
 export const leaderboardRouter = Router();
 
-// 👉 ADDED: Global Hall of Fame Endpoint (Used by the Homepage)
+// Global Hall of Fame Endpoint (Used by the Homepage)
 leaderboardRouter.get('/global', async (req, res) => {
   try {
     const topUsers = await prisma.user.findMany({

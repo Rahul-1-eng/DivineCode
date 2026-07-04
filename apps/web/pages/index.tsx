@@ -1,3 +1,9 @@
+/**
+ * @file index.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Page-level experience and view logic.
+ */
+
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -287,7 +293,7 @@ export default function Home() {
         
         <motion.nav initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} style={{ maxWidth: 1200, margin: '0 auto 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           
-          {/* 👉 THE NEW LOGO HAS BEEN INJECTED HERE */}
+          {/* The branded logo is included in the hero section. */}
           <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-main)', textDecoration: 'none', fontWeight: 900, fontSize: 'clamp(16px, 4vw, 24px)', letterSpacing: '-0.03em', flexShrink: 0 }}>
             <img 
               src="/logo.png" 

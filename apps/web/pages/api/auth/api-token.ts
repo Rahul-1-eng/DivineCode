@@ -1,3 +1,8 @@
+/**
+ * @file api-token.ts
+ * @author Rahul Kumar Sahoo
+ * @description Mints a bridge JWT for the Express API from the NextAuth session cookie.
+ */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { getToken } from 'next-auth/jwt';
 import jwt from 'jsonwebtoken';
@@ -12,7 +17,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   // 2. Mint a standard JWT for the Express API to verify
   // Make sure NEXTAUTH_SECRET is identical in BOTH Vercel and Render .env files
-  const apiSecret = process.env.NEXTAUTH_SECRET || '';
+  const apiSecret = process.env.NEXTAUTH_SECRET || 'divinecode-local-dev-secret';
+  const apiBase = req.headers.host ? `http://${req.headers.host}` : undefined;
   
   if (!apiSecret) {
     console.error("NEXTAUTH_SECRET is missing. Cannot sign token.");

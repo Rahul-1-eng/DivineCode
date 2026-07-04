@@ -1,3 +1,9 @@
+/**
+ * @file index.ts
+ * @author Rahul Kumar Sahoo
+ * @description Background processing worker for platform tasks.
+ */
+
 import { Job, Worker } from 'bullmq';
 import { Server } from 'socket.io';
 import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncService';
@@ -32,7 +38,7 @@ function shouldStartWorkers() {
 }
 
 // ==========================================
-// 👉 Structural Plagiarism Math Engine
+// Plagiarism Math Engine
 // ==========================================
 function normalizeCodeForAST(code: string) {
   return code
@@ -96,7 +102,7 @@ async function handlePlagiarismJob(job: Job<PlagiarismCheckJob>) {
 
   // 85% Structural Match = Highly Suspicious
   if (highestSimilarity > 0.85) {
-    // 👉 FIXED: Safely updating the Submission flag without querying a non-existent Report model
+    // Safely updating the Submission flag without querying a non-existent Report model
     await prisma.submission.update({
       where: { id: targetSub.id },
       data: { isPlagiarized: true }

@@ -1,3 +1,9 @@
+/**
+ * @file queues.ts
+ * @author Rahul Kumar Sahoo
+ * @description Application source for the DivineCode platform.
+ */
+
 import { Queue } from 'bullmq';
 import { CodeforcesContestSyncJob, JudgeSubmissionJob, PlagiarismCheckJob, QUEUE_NAMES } from './jobTypes';
 import { getSharedRedisConnection } from './redis';
@@ -6,7 +12,7 @@ let judgeQueue: Queue<JudgeSubmissionJob> | null = null;
 let externalSyncQueue: Queue<CodeforcesContestSyncJob> | null = null;
 let rewardsQueue: Queue | null = null;
 let autoFinalizeQueue: Queue | null = null; 
-let plagiarismQueue: Queue<PlagiarismCheckJob> | null = null; // 👉 ADDED
+let plagiarismQueue: Queue<PlagiarismCheckJob> | null = null; // ADDED
 
 export function getJudgeQueue() {
   if (!judgeQueue) {
@@ -62,7 +68,7 @@ export function getAutoFinalizeQueue() {
   return autoFinalizeQueue;
 }
 
-// 👉 ADDED: The Plagiarism Queue 
+// The Plagiarism Queue 
 export function getPlagiarismQueue() {
   if (!plagiarismQueue) {
     plagiarismQueue = new Queue<PlagiarismCheckJob>(QUEUE_NAMES.plagiarismCheck, {
@@ -96,7 +102,7 @@ export async function enqueueCodeforcesContestSync(contestId: string) {
   return { id: String(job.id), name: job.name, queue: QUEUE_NAMES.externalSync };
 }
 
-// 👉 ADDED: Enqueue Trigger
+// Enqueue Trigger
 export async function enqueuePlagiarismCheck(submissionId: string) {
   const job = await getPlagiarismQueue().add('plagiarism-check', { submissionId });
   return { id: String(job.id), name: job.name, queue: QUEUE_NAMES.plagiarismCheck };

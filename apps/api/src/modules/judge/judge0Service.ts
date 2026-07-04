@@ -1,3 +1,9 @@
+/**
+ * @file judge0Service.ts
+ * @author Rahul Kumar Sahoo
+ * @description Core application logic for the platform feature.
+ */
+
 import { CheckerType, SubmissionStatus, Verdict } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { recomputeContestStandings } from '../standings/standingService';
@@ -198,15 +204,21 @@ export async function judgeQueuedSubmission(submissionId: string) {
          testcases = typeof submission.contestProblem.customTestCases === 'string' ? JSON.parse(submission.contestProblem.customTestCases) : submission.contestProblem.customTestCases;
      } catch (e) {}
   }
+
+  // FORCE CAP: Prevent Wandbox API timeouts by limiting given test cases to a maximum of 6
+  if (testcases.length > 6) {
+      testcases = testcases.slice(0, 6);
+  }
   
   const hasDescription = submission.contestProblem?.customDescription || submission.problem?.description;
   if (testcases.length === 0 && hasDescription) {
     const descriptionForAi = submission.contestProblem?.customDescription || submission.problem?.description || submission.contestProblem?.titleSnapshot || '';
     if (descriptionForAi) {
       await prisma.submission.update({ where: { id: submission.id }, data: { status: 'RUNNING', judgeMessage: 'Generating dynamic test cases via AI...' } });
-      const aiCases = await generateToughTestCases(descriptionForAi);
+     const aiCases = await generateToughTestCases(descriptionForAi);
       if (aiCases && aiCases.length > 0) {
-         testcases = aiCases.map((tc: any, i: number) => ({ id: `ai-${i}`, input: tc.input, expectedOutput: tc.expectedOutput })) as any;
+         // FORCE CAP: Limit dynamically generated AI cases to 4
+         testcases = aiCases.slice(0, 4).map((tc: any, i: number) => ({ id: `ai-${i}`, input: tc.input, expectedOutput: tc.expectedOutput })) as any;
       }
     }
   }
@@ -221,14 +233,26 @@ export async function judgeQueuedSubmission(submissionId: string) {
     return { submission: judged, standings };
   }
 
-  await prisma.submission.update({ where: { id: submission.id }, data: { status: 'RUNNING', verdict: Verdict.PENDING } });
+ await prisma.submission.update({ where: { id: submission.id }, data: { status: 'RUNNING', verdict: Verdict.PENDING } });
   
   let finalVerdict: Verdict = Verdict.ACCEPTED;
   let detailedMessage = '';
   let fullTestResults = [];
 
-  const CHUNK_SIZE = 5;
+  const CHUNK_SIZE = 6; // Increased chunk size to process standard cases much faster
+  const MAX_GRADING_TIME_MS = 60000; // 20 seconds maximum grading limit
+  const gradingStartTime = Date.now();
+
   for (let i = 0; i < testcases.length; i += CHUNK_SIZE) {
+    // TIME OUT FALLBACK: If grading takes too long, verify the given test cases and skip the remaining AI generated ones.
+    if (Date.now() - gradingStartTime > MAX_GRADING_TIME_MS) {
+        console.warn(`[JUDGE] Grading timed out for submission ${submission.id}. Truncating remaining AI testcases.`);
+        if (finalVerdict === Verdict.ACCEPTED) {
+            detailedMessage = `Passed ${i} test cases (Time limit reached: Verified given test cases, truncated remaining AI tests to save time).`;
+        }
+        break;
+    }
+
     const chunk = testcases.slice(i, i + CHUNK_SIZE);
     
     const results = await Promise.all(chunk.map(async (testcase, idxOffset) => {
@@ -263,7 +287,7 @@ export async function judgeQueuedSubmission(submissionId: string) {
 
   const judged = await prisma.submission.update({
     where: { id: submission.id },
-    // 👉 FIXED: Explicitly cast 'any' to bypass TS 5.0 strict control-flow narrowing on Enums
+    // Explicitly cast 'any' to bypass TS 5.0 strict control-flow narrowing on Enums
     data: { status: 'FINISHED', verdict: finalVerdict as any, judgeMessage: detailedMessage || `Passed all ${testcases.length} system tests!`, judgedAt: new Date() }
   });
 

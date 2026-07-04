@@ -1,4 +1,8 @@
-// apps/api/src/modules/auth/authService.ts
+/**
+ * @file authService.ts
+ * @author Rahul Kumar Sahoo
+ * @description Authentication and account lifecycle helpers for the DivineCode API.
+ */
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { prisma } from '../../prisma/client';
@@ -49,13 +53,14 @@ export async function loginUser({ handle, password }: any) {
   const isValid = await bcrypt.compare(password, existingUser.passwordHash);
   if (!isValid) throw new Error('Invalid credentials.');
 
+  const signingSecret = process.env.NEXTAUTH_SECRET || 'divinecode-local-dev-secret';
   const token = jwt.sign(
   {
     id: existingUser.id,
     email: existingUser.email,
     name: existingUser.name
   },
-  process.env.NEXTAUTH_SECRET!,
+  signingSecret,
   { expiresIn: "7d" }
 );
 

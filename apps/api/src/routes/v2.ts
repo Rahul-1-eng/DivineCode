@@ -241,7 +241,7 @@ export function mountV2Routes(app: Express, io: Server) {
   });
 
   router.post('/contests/:id/register', asyncRoute(async (req, res) => {
-    // 👉 FIXED: Explicitly resolve identity to guarantee ID linkage during registration
+    // Explicitly resolve identity to guarantee ID linkage during registration
     const viewer = await resolvedViewerFromRequest(req, true);
     const contest = await registerForContestV2(req.params.id, {
       ...req.body,
@@ -428,13 +428,19 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
+  router.put('/contests/:id/problems/:problemId/reorder', asyncRoute(async (req, res) => {
+    const viewer = await requireContestOwner(req);
+    const contest = await reorderContestProblemV2(req.params.id, req.params.problemId, req.body?.direction || 'UP', viewer.userId);
+    res.json(sanitizeContestForViewer(contest!, viewer));
+  }));
+
   router.delete('/contests/:id/problems/:problemId', asyncRoute(async (req, res) => {
     const viewer = await requireContestOwner(req);
     const contest = await removeContestProblemV2(req.params.id, req.params.problemId, viewer.userId);
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
-  // 👉 FIXED: Fully resolve Viewer Identity so Owner Controls are enabled on the GET route!
+  // Fully resolve Viewer Identity so Owner Controls are enabled on the GET route!
   router.get('/contests', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req);
     const contests = await listContestsV2();
@@ -518,7 +524,7 @@ export function mountV2Routes(app: Express, io: Server) {
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
 
-  // 👉 FIXED: Fully resolve Viewer Identity so Owner Controls are enabled on the GET route!
+  // Fully resolve Viewer Identity so Owner Controls are enabled on the GET route!
   router.get('/contests/:id', asyncRoute(async (req, res) => {
     const viewer = await resolvedViewerFromRequest(req);
     const contest = await loadContestForViewer(req.params.id);

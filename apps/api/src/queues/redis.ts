@@ -1,3 +1,9 @@
+/**
+ * @file redis.ts
+ * @author Rahul Kumar Sahoo
+ * @description Application source for the DivineCode platform.
+ */
+
 import IORedis from 'ioredis';
 
 let sharedConnection: IORedis | null = null;

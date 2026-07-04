@@ -1,3 +1,9 @@
+/**
+ * @file externalSync.ts
+ * @author Rahul Kumar Sahoo
+ * @description Application source for the DivineCode platform.
+ */
+
 export type CodeforcesSubmission = {
   id: number;
   creationTimeSeconds: number;

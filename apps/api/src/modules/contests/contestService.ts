@@ -1,3 +1,8 @@
+/**
+ * @file contestService.ts
+ * @description Core contest state machine and orchestration layer. 
+ * Handles problem parsing, strict user authorization, and post-contest transactional rollups.
+ */
 import { ContestParticipantRole, ContestStatus, ContestType, HandleVerificationStatus, Platform, Prisma } from '@prisma/client';
 import { fetchCodeforcesAccepted } from '../../externalSync';
 import { prisma } from '../../prisma/client';
@@ -64,6 +69,12 @@ function slugify(value: string) { return value.trim().toLowerCase().replace(/[^a
 function randomSuffix() { return Math.random().toString(36).slice(2, 8); }
 function inviteCode(title: string) { return Math.random().toString(36).substring(2, 8).toUpperCase(); }
 function displayLabel(index: number) { return LABELS[index] || `Q${index + 1}`; }
+
+export async function resolveAuditActorId(tx: Prisma.TransactionClient, actorId?: string | null) {
+  if (!actorId) return null;
+  const user = await tx.user.findUnique({ where: { id: actorId } });
+  return user ? actorId : null;
+}
 
 function toPlatform(value: string | undefined) {
   const normalized = String(value || 'DIVINECODE').trim().toUpperCase();
@@ -213,7 +224,6 @@ export async function loadContestForViewer(contestId: string) {
   } catch (error) { throw error; }
 }
 
-// Replace your existing registerForContestV2 with this version:
 export async function registerForContestV2(contestId: string, input: MemberInput) {
   const contest = await prisma.contest.findUnique({ where: { id: contestId } });
   if (!contest) throw new Error('Contest not found');
@@ -343,7 +353,7 @@ export async function deleteContestV2(contestId: string, actorId?: string) {
   if (!contest) throw new Error('Contest not found');
   
   await prisma.$transaction(async (tx) => {
-    await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_DELETE', entityType: 'Contest', entityId: contestId, before: contest as any } });
+    await tx.auditLog.create({ data: { actorId: await resolveAuditActorId(tx, actorId), contestId, action: 'CONTEST_DELETE', entityType: 'Contest', entityId: contestId, before: contest as any } });
     await tx.submission.deleteMany({ where: { contestId } });
     await tx.contestParticipant.deleteMany({ where: { contestId } });
     await tx.contestProblem.deleteMany({ where: { contestId } });
@@ -397,7 +407,7 @@ export async function extendContestV2(contestId: string, minutes: number, actorI
   
   await prisma.$transaction(async (tx) => {
     await tx.auditLog.create({ 
-        data: { actorId: actorId || null, contestId, action: 'CONTEST_EXTEND', entityType: 'Contest', entityId: contestId, before: contest as any, after: { durationMinutes: contest.durationMinutes + Math.max(1, minutes) } } 
+        data: { actorId: await resolveAuditActorId(tx, actorId), contestId, action: 'CONTEST_EXTEND', entityType: 'Contest', entityId: contestId, before: contest as any, after: { durationMinutes: contest.durationMinutes + Math.max(1, minutes) } } 
     });
     await tx.contest.update({ 
         where: { id: contestId }, 
@@ -407,12 +417,17 @@ export async function extendContestV2(contestId: string, minutes: number, actorI
   return loadContestForViewer(contestId);
 }
 
-export async function updateContestSettingsV2(contestId: string, input: { title?: string; description?: string; durationMinutes?: number; startTime?: string }, actorId?: string) {
+export async function updateContestSettingsV2(contestId: string, input: { title?: string; description?: string; durationMinutes?: number; startTime?: string; openEditing?: boolean }, actorId?: string) {
   const contest = await prisma.contest.findUnique({ where: { id: contestId } });
   if (!contest) throw new Error('Contest not found');
   
   const durationMinutes = input.durationMinutes ? Math.max(1, Number(input.durationMinutes)) : contest.durationMinutes;
-  const data: any = { title: input.title?.trim() || contest.title, description: typeof input.description === 'string' ? input.description : contest.description, durationMinutes };
+  const data: any = {
+    title: input.title?.trim() || contest.title,
+    description: typeof input.description === 'string' ? input.description : contest.description,
+    durationMinutes,
+    openEditing: typeof input.openEditing === 'boolean' ? input.openEditing : contest.openEditing
+  };
   
   if (input.startTime) { 
       const st = new Date(input.startTime); 
@@ -424,7 +439,7 @@ export async function updateContestSettingsV2(contestId: string, input: { title?
 
   await prisma.$transaction(async (tx) => {
     const updated = await tx.contest.update({ where: { id: contestId }, data });
-    await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_SETTINGS_UPDATE', entityType: 'Contest', entityId: contestId, before: contest as any, after: updated as any } });
+    await tx.auditLog.create({ data: { actorId: await resolveAuditActorId(tx, actorId), contestId, action: 'CONTEST_SETTINGS_UPDATE', entityType: 'Contest', entityId: contestId, before: contest as any, after: updated as any } });
   });
   return loadContestForViewer(contestId);
 }
@@ -453,7 +468,7 @@ export async function reorderContestProblemV2(contestId: string, contestProblemI
     for (let i = 0; i < all.length; i++) { 
         await tx.contestProblem.update({ where: { id: all[i].id }, data: { index: i, label: LABELS[i] || `Q${i + 1}` } }); 
     }
-    await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_REORDER', entityType: 'ContestProblem', entityId: contestProblemId, before: { direction } as any } });
+    await tx.auditLog.create({ data: { actorId: await resolveAuditActorId(tx, actorId), contestId, action: 'CONTEST_PROBLEM_REORDER', entityType: 'ContestProblem', entityId: contestProblemId, before: { direction } as any } });
   });
   void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
   return loadContestForViewer(contestId);
@@ -477,7 +492,6 @@ export async function addContestProblemV2(contestId: string, problem: ProblemInp
       
       if (problem.mcqData?.generateAiTests || (problem as any).generateAiTests) {
          const aiGeneratedCases = await generateToughTestCases(scraped.descriptionHtml);
-         // 👉 FIXED: Safe optional chaining for missing testcases from scraper
          scrapedTestcases = [...(scraped.testcases || []), ...aiGeneratedCases];
       } else {
          scrapedTestcases = [...(scraped.testcases || [])];
@@ -538,7 +552,7 @@ export async function removeContestProblemV2(contestId: string, contestProblemId
   if (!problem) throw new Error('Problem not found');
   
   await prisma.$transaction(async (tx) => {
-    await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_REMOVE', entityType: 'ContestProblem', entityId: contestProblemId, before: problem as any } });
+    await tx.auditLog.create({ data: { actorId: await resolveAuditActorId(tx, actorId), contestId, action: 'CONTEST_PROBLEM_REMOVE', entityType: 'ContestProblem', entityId: contestProblemId, before: problem as any } });
     await tx.contestProblem.delete({ where: { id: contestProblemId } });
     const remaining = await tx.contestProblem.findMany({ where: { contestId }, orderBy: { index: 'asc' } });
     for (let i = 0; i < remaining.length; i++) { 
@@ -578,7 +592,7 @@ export async function replaceContestProblemV2(contestId: string, contestProblemI
           interviewQuestionId: problem.interviewQuestionId ?? existing.interviewQuestionId
         }
       });
-      await tx.auditLog.create({ data: { actorId: actorId || null, contestId, action: 'CONTEST_PROBLEM_REPLACE', entityType: 'ContestProblem', entityId: contestProblemId, before: existing as any, after: updated as any } });
+      await tx.auditLog.create({ data: { actorId: await resolveAuditActorId(tx, actorId), contestId, action: 'CONTEST_PROBLEM_REPLACE', entityType: 'ContestProblem', entityId: contestProblemId, before: existing as any, after: updated as any } });
     });
     void recomputeContestStandings(contestId).catch(err => console.error("Standings failed:", err));
     return loadContestForViewer(contestId);
@@ -645,10 +659,8 @@ export async function getContestSubmissionsV2(contestId: string, viewerUserId?: 
     contestId: sub.contestId, 
     memberId: sub.participantId,
     
-    // 👉 FIXED: Use the unique ID for identification
+    // Use the stable user ID for identity and the display name for presentation.
     userId: sub.participant?.userId || 'unknown-id', 
-    
-    // 👉 FIXED: Keep the name for UI purposes only
     userDisplay: sub.participant?.displayName || sub.participant?.user?.name || 'Unknown', 
     
     problemId: sub.contestProblemId, 
@@ -718,7 +730,7 @@ export async function createTeamForContest(contestId: string, teamName: string, 
               externalHandleId: externalHandle?.id || existing.externalHandleId,
               teamId: team.id,
               teamName,
-              // 👉 FIXED: The team creator is assigned MANAGER so they can approve others
+              // Team creators act as managers so they can approve new members.
               role: ContestParticipantRole.MANAGER,
               isOfficial: officialFlag
             }
@@ -731,7 +743,7 @@ export async function createTeamForContest(contestId: string, teamName: string, 
               displayName: user.name || user.email,
               teamId: team.id,
               teamName,
-              // 👉 FIXED: The team creator is assigned MANAGER so they can approve others
+              // Team creators act as managers so they can approve new members.
               role: ContestParticipantRole.MANAGER,
               isOfficial: officialFlag
             }
@@ -862,11 +874,17 @@ export async function requestToJoinTeam(contestId: string, teamName: string, use
   }
 }
 
+/**
+ * Validates, securely locks, and processes contest completion logic globally.
+ * Ensures the match standings are fully settled via `recomputeContestStandings`,
+ * and dynamically offloads complex user coin/rating calculations out to `processContestRewards`.
+ */
 export async function endContestV2(contestId: string, actorId?: string) {
   const contest = await prisma.contest.findUnique({ where: { id: contestId } });
   if (!contest) throw new Error('Contest not found');
+  if (contest.status === ContestStatus.ENDED) throw new Error('Contest is already finalized.');
 
-  // 1. Lock the contest by ending it safely via a transaction
+  // 1. Lock the contest by ending it safely via a database transaction
   await prisma.$transaction(async (tx) => {
     await tx.contest.update({
       where: { id: contestId },
@@ -875,21 +893,21 @@ export async function endContestV2(contestId: string, actorId?: string) {
     
     await tx.auditLog.create({ 
       data: { 
-        actorId: actorId || null, 
+        actorId: await resolveAuditActorId(tx, actorId), 
         contestId, 
         action: 'CONTEST_END', 
         entityType: 'Contest', 
         entityId: contestId, 
-        before: { status: contest.status }, 
-        after: { status: ContestStatus.ENDED } 
+        before: { status: contest.status } as any, 
+        after: { status: ContestStatus.ENDED } as any 
       } 
     });
   });
 
-  // 2. Finalize the mathematical standings calculations safely
+  // 2. Finalize the mathematical standings calculations safely, resolving deadlocks
   await recomputeContestStandings(contestId);
 
-  // 3. Process and persist Rating Updates and Coins securely via the Rating engine module
+  // 3. Process and persist Rating Updates and Coins securely via the dedicated Rating engine module
   await processContestRewards(contestId);
 
   return loadContestForViewer(contestId);

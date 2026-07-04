@@ -1,3 +1,9 @@
+/**
+ * @file [id].tsx (Workspace)
+ * @author Rahul Kumar Sahoo
+ * @description Unified IDE workspace supporting local code execution, live socket code synchronization, 
+ * AI video/voice assistance, and collaborative terminal features.
+ */
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
@@ -7,7 +13,7 @@ import { useTheme } from 'next-themes';
 import VoiceInterviewer from '../../components/VoiceInterviewer';
 import { fetchApi } from '../../lib/api'; 
 
-const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: 'var(--text-muted)'}}>Loading Editor...</div> });
+const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false, loading: () => <div style={{padding: 20, color: 'var(--text-muted)'}}>Provisioning Editor Environment...</div> });
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
 interface Problem {
@@ -38,7 +44,12 @@ interface ChatPost {
   timestamp: string;
 }
 
+// Ensure the embed formats correctly from standard Youtube, Shortlinks, or raw query parameters
 const getYouTubeEmbedUrl = (url: string) => {
+    if (!url || typeof url !== 'string') {
+      return 'https://www.youtube.com/embed?listType=search&search_query=software%20engineering%20interview%20explanation';
+    }
+
     let videoId = '';
     const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
     const match = url.match(regex);
@@ -46,7 +57,8 @@ const getYouTubeEmbedUrl = (url: string) => {
       videoId = match[1];
       return `https://www.youtube.com/embed/${videoId}`;
     }
-    return url; 
+
+    return `https://www.youtube.com/embed?listType=search&search_query=${encodeURIComponent(url)}`;
 };
 
 export default function ProblemWorkspace() {
@@ -56,8 +68,9 @@ export default function ProblemWorkspace() {
   const { theme } = useTheme();
 
   const [problem, setProblem] = useState<Problem | null>(null);
-  const [code, setCode] = useState('// Implementation source framework entry\n');
+  const [code, setCode] = useState('// Competitive Programming Workspace Initialized\n');
   const [language, setLanguage] = useState('cpp');
+  const [problemLoadError, setProblemLoadError] = useState('');
   const [outputs, setOutputs] = useState<ExecutionResult[]>([]);
   const [running, setRunning] = useState(false);
   const [isKitsMenuOpen, setIsKitsMenuOpen] = useState(false);
@@ -76,8 +89,9 @@ export default function ProblemWorkspace() {
   const [customInput, setCustomInput] = useState('');
   const [isTerminalMode, setIsTerminalMode] = useState(false);
 
+  // Ready-to-go snippets prioritizing competitive programming setups
   const battleKits = [
-    { name: 'IICPC Standard IO Boilerplate', code: '#include <bits/stdc++.h>\nusing namespace std;\n\nvoid solve() {\n    // Implementation here\n}\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n    int t; cin >> t;\n    while(t--) solve();\n    return 0;\n}' },
+    { name: 'IICPC Fast IO Boilerplate (C++)', code: '#include <bits/stdc++.h>\nusing namespace std;\n\n#define int long long\n#define pb push_back\n#define all(x) (x).begin(), (x).end()\n\nvoid solve() {\n    // Implementation here\n}\n\nint32_t main() {\n    ios_base::sync_with_stdio(0); cin.tie(0); cout.tie(0);\n    int t = 1; cin >> t;\n    while(t--) solve();\n    return 0;\n}' },
     { name: 'Segment Tree Template', code: '// Segment Tree (Point Update, Range Query)\nconst int N = 1e5+5;\nint tree[4*N];\n\nvoid build(int node, int start, int end) {\n    if(start == end) return;\n    int mid = (start + end) / 2;\n    build(2*node, start, mid);\n    build(2*node+1, mid+1, end);\n    tree[node] = tree[2*node] + tree[2*node+1];\n}' },
     { name: 'Graph BFS/DFS Skeleton', code: 'vector<int> adj[100005];\nbool vis[100005];\n\nvoid dfs(int node) {\n    vis[node] = true;\n    for(int child : adj[node]) {\n        if(!vis[child]) dfs(child);\n    }\n}' }
   ];
@@ -94,7 +108,7 @@ export default function ProblemWorkspace() {
     if (id) {
       const saved = localStorage.getItem(`chat_${id}`);
       if (saved) setPosts(JSON.parse(saved));
-      else setPosts([{ author: 'System_Admin', message: 'If executing in O(N), ensure the sparse initialization bounds are checked properly to avoid segment errors.', timestamp: '1 hour ago' }]);
+      else setPosts([{ author: 'System_Admin', message: 'If executing in O(N), ensure the sparse initialization bounds are checked properly to avoid segmentation faults.', timestamp: '1 hour ago' }]);
     }
   }, [id]);
 
@@ -107,6 +121,7 @@ export default function ProblemWorkspace() {
   useEffect(() => {
     if (!id) return;
     
+    // Connect to synchronization socket for live collaboration
     const newSocket = io(API_BASE_URL, { transports: ['websocket'] });
     setSocket(newSocket);
     newSocket.emit('join-workspace', id);
@@ -115,30 +130,44 @@ export default function ProblemWorkspace() {
       setCode(newCode);
     });
 
+    // Hydrate problem constraints natively from the API
     fetchApi(`/api/v2/problems/${id}/redirect`)
       .then(data => {
         if (data && data.title) {
-          const hasTestcases = data.customTestCases || data.testcases;
-          setIsTerminalMode(!hasTestcases || (typeof hasTestcases === 'string' && JSON.parse(hasTestcases).length === 0) || (Array.isArray(hasTestcases) && hasTestcases.length === 0));
-          
+          const rawTestcases = data.customTestCases || data.testcases || [];
+          let parsedTestcases: any[] = [];
+
+          try {
+            if (typeof rawTestcases === 'string') {
+              parsedTestcases = JSON.parse(rawTestcases);
+            } else if (Array.isArray(rawTestcases)) {
+              parsedTestcases = rawTestcases;
+            }
+          } catch {
+            parsedTestcases = [];
+          }
+
+          setIsTerminalMode(parsedTestcases.length === 0);
+          setProblemLoadError('');
           setProblem({
             id: data.id,
             title: data.title,
             videoUrl: data.videoUrl,
             difficulty: data.difficulty,
             rating: data.rating,
-            descriptionHtml: data.description || data.customDescription,
-            description: data.description || data.customDescription,
-            content: data.description || data.customDescription,
-            testcases: data.customTestCases || data.testcases,
+            descriptionHtml: data.description || data.customDescription || '<p>Problem description is unavailable right now. The workspace remains usable for code practice.</p>',
+            description: data.description || data.customDescription || 'Problem description is unavailable right now. The workspace remains usable for code practice.',
+            content: data.description || data.customDescription || 'Problem description is unavailable right now. The workspace remains usable for code practice.',
+            testcases: rawTestcases,
             originalUrl: data.externalUrl,
           });
         } else {
-          throw new Error('Invalid problem data returned from API');
+          throw new Error('Invalid schema mapping returned from API');
         }
       })
       .catch((err) => {
         console.error('[ProblemWorkspace] Fetch error:', err);
+        setProblemLoadError(err.message || 'Unable to load this practice problem.');
         setProblem({ 
           error: true, 
           title: 'Problem Not Found', 
@@ -146,7 +175,11 @@ export default function ProblemWorkspace() {
         });
       });
 
-    return () => { newSocket.disconnect(); };
+    // Extremely important: Detach socket listener on unmount to prevent rapid memory leaks
+    return () => { 
+      newSocket.off('remote-code-update');
+      newSocket.disconnect(); 
+    };
   }, [id, session]);
 
   const sampleData = useMemo(() => {
@@ -157,7 +190,7 @@ export default function ProblemWorkspace() {
         return { input: parsed[0].input || parsed[0].stdin || '', output: parsed[0].expectedOutput || parsed[0].output || '' };
       }
     } catch (e) {
-      console.error("Failed parsing testcase array on frontend:", e);
+      console.error("Testcase string buffer failed to deserialize:", e);
     }
     return { input: '', output: '' };
   }, [problem]);
@@ -170,6 +203,7 @@ export default function ProblemWorkspace() {
     try {
       let data;
       
+      // Route code execution to the proper isolated docker container context
       if (isTerminalMode) {
         data = await fetchApi('/api/v2/submissions/execute-raw', {
           method: 'POST',
@@ -206,7 +240,7 @@ export default function ProblemWorkspace() {
       }
     } catch (err: any) {
       console.error('[ProblemWorkspace] Run code error:', err);
-      alert(`Failed to run code: ${err.message}`);
+      alert(`Execution fault: ${err.message}`);
     } finally {
       setRunning(false);
     }
@@ -223,9 +257,9 @@ export default function ProblemWorkspace() {
         body: JSON.stringify({ message: prompt, history: [] })
       });
       
-      setAiAnalysis(resData.reply || 'No response from AI');
+      setAiAnalysis(resData.reply || 'The AI analysis service did not return a response. Your editor is still available for manual problem solving.');
     } catch (err: any) {
-      setAiAnalysis(`Error: ${err.message}. Please check your API configuration.`);
+      setAiAnalysis(`The AI analysis service is unavailable right now. You can still use the editor and the problem description. ${err.message || ''}`.trim());
     } finally {
       setAnalyzing(false);
     }
@@ -324,6 +358,11 @@ export default function ProblemWorkspace() {
           {workspaceTab === 'problem' && (
             <>
               <h1 style={{ color: 'var(--text-main)', fontSize: 'clamp(20px, 4vw, 24px)', margin: '0 0 8px' }}>{problem.title}</h1>
+              {problemLoadError && (
+                <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, background: 'rgba(248,113,113,0.12)', color: '#fda4af', border: '1px solid rgba(248,113,113,0.3)', fontSize: 13 }}>
+                  {problemLoadError}
+                </div>
+              )}
               {!problem.error && <div style={{ color: 'var(--accent-primary)', fontSize: 13, marginBottom: 20 }}>Complexity Floor: {problem.difficulty || problem.rating || 'Unrated'}</div>}
               
               {hasDescription ? (
@@ -331,7 +370,7 @@ export default function ProblemWorkspace() {
               ) : (
                 <div style={{ padding: 30, background: 'var(--accent-glow)', borderRadius: 12, border: '1px solid var(--accent-primary)', textAlign: 'center', marginTop: 20 }}>
                    <h3 style={{ color: 'var(--text-main)', margin: '0 0 10px' }}>Problem Details Hidden</h3>
-                   <p style={{ color: 'var(--text-muted)', marginBottom: 20 }}>Due to platform restrictions, this description cannot be rendered natively.</p>
+                   <p style={{ color: 'var(--text-muted)', marginBottom: 20 }}>Due to platform constraints, this description cannot be rendered natively.</p>
                    {problem.originalUrl && (
                      <a href={problem.originalUrl} target="_blank" rel="noreferrer" style={{ background: 'var(--accent-primary)', color: '#000', padding: '10px 20px', borderRadius: 8, textDecoration: 'none', fontWeight: 'bold', display: 'inline-block' }}>
                        View Original Problem ↗
@@ -356,7 +395,7 @@ export default function ProblemWorkspace() {
               {isTerminalMode && (
                 <div style={{ marginTop: 24, padding: 16, borderRadius: 12, background: 'var(--bg-card)', border: '2px solid var(--accent-primary)' }}>
                   <strong style={{ display: 'block', marginBottom: 8, color: 'var(--accent-primary)' }}>🖥️ Terminal Mode</strong>
-                  <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 8px' }}>No predefined test cases found. Enter custom input below:</p>
+                  <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 8px' }}>No predefined test cases mapped in DB. Pass standard STDIN parameters below:</p>
                   <textarea
                     placeholder="Enter STDIN here...\nExample:\n5\n1 2 3 4 5"
                     value={customInput}
@@ -396,15 +435,16 @@ export default function ProblemWorkspace() {
                 </div>
               ) : !problem.error ? (
                 <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 12, background: '#000' }}>
+                  {/* Dynamic Fallback resolution for undefined external video mappings */}
                   <iframe 
                     style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} 
-                    src={`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(problem.title + ' optimal solution algorithm')}`} 
+                    src={`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(problem.title + ' tutorial algorithm explanation')}`} 
                     frameBorder="0" 
                     allowFullScreen 
                   />
                 </div>
               ) : (
-                <p style={{ color: 'var(--text-muted)' }}>Cannot load video for this problem.</p>
+                <p style={{ color: 'var(--text-muted)' }}>Cannot establish video pipeline for this context.</p>
               )}
             </div>
           )}
@@ -427,9 +467,9 @@ export default function ProblemWorkspace() {
             </div>
           )}
 
-          {workspaceTab === 'voice' && (
+          {workspaceTab === 'voice' && problem?.id && (
              <VoiceInterviewer
-                currentQuestion={problem}
+                currentQuestion={{ ...problem, id: problem.id }}
                 code={code}
                 onSuccess={() => playSuccessAudio()}
              />
@@ -475,7 +515,7 @@ export default function ProblemWorkspace() {
           </div>
 
           <button onClick={runCode} disabled={running || problem?.error} style={{ background: running || problem?.error ? 'var(--border-color)' : 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#000', border: 'none', padding: '8px 24px', borderRadius: 8, fontWeight: 900, cursor: problem?.error ? 'not-allowed' : 'pointer', boxShadow: '0 0 15px var(--accent-glow)', opacity: problem?.error ? 0.5 : 1 }}>
-            {running ? 'Compiling...' : isTerminalMode ? '▶ Run' : 'Run Code ▶'}
+            {running ? 'Compiling...' : isTerminalMode ? '▶ Run Code' : 'Submit Job ▶'}
           </button>
         </div>
         
@@ -486,13 +526,13 @@ export default function ProblemWorkspace() {
         <div style={{ height: '40%', background: 'var(--bg-main)', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column' }}>
           <div className="mobile-scroll-x" style={{ background: 'var(--bg-panel-solid)' }}>
             <button onClick={() => setConsoleTab('output')} style={{ flex: '1 0 auto', padding: '12px 20px', background: consoleTab === 'output' ? 'var(--bg-panel-solid)' : 'transparent', color: consoleTab === 'output' ? 'var(--accent-primary)' : 'var(--text-main)', border: 'none', borderTop: consoleTab === 'output' ? '2px solid var(--accent-primary)' : '2px solid transparent', cursor: 'pointer', fontWeight: 'bold' }}>Console Output</button>
-            <button onClick={() => setConsoleTab('mentor')} style={{ flex: '1 0 auto', padding: '12px 20px', background: consoleTab === 'mentor' ? 'var(--bg-panel-solid)' : 'transparent', color: consoleTab === 'mentor' ? 'var(--accent-primary)' : 'var(--text-main)', border: 'none', borderTop: consoleTab === 'mentor' ? '2px solid var(--accent-primary)' : '2px solid transparent', cursor: 'pointer', fontWeight: 'bold' }}>AI Explainer</button>
-            <button onClick={invokeAIProfiler} disabled={analyzing || problem?.error} style={{ marginLeft: 'auto', flex: '0 0 auto', background: analyzing || problem?.error ? 'var(--border-color)' : 'var(--accent-primary)', color: '#000', border: 'none', padding: '0 20px', fontWeight: 700, cursor: problem?.error ? 'not-allowed' : 'pointer', opacity: problem?.error ? 0.5 : 1 }}>{analyzing ? 'Analyzing...' : 'Run AI Analysis'}</button>
+            <button onClick={() => setConsoleTab('mentor')} style={{ flex: '1 0 auto', padding: '12px 20px', background: consoleTab === 'mentor' ? 'var(--bg-panel-solid)' : 'transparent', color: consoleTab === 'mentor' ? 'var(--accent-primary)' : 'var(--text-main)', border: 'none', borderTop: consoleTab === 'mentor' ? '2px solid var(--accent-primary)' : '2px solid transparent', cursor: 'pointer', fontWeight: 'bold' }}>AI Profiler</button>
+            <button onClick={invokeAIProfiler} disabled={analyzing || problem?.error} style={{ marginLeft: 'auto', flex: '0 0 auto', background: analyzing || problem?.error ? 'var(--border-color)' : 'var(--accent-primary)', color: '#000', border: 'none', padding: '0 20px', fontWeight: 700, cursor: problem?.error ? 'not-allowed' : 'pointer', opacity: problem?.error ? 0.5 : 1 }}>{analyzing ? 'Analyzing...' : 'Run Stack Analysis'}</button>
           </div>
           <div style={{ flex: 1, padding: 16, overflowY: 'auto' }}>
             {consoleTab === 'output' ? (
               <>
-                {outputs.length === 0 && <p style={{ color: 'var(--text-muted)' }}>Run your code to see results here.</p>}
+                {outputs.length === 0 && <p style={{ color: 'var(--text-muted)' }}>Execute program block to monitor standard output hooks.</p>}
                 {outputs.map((out, idx) => (
                   <div key={idx} style={{ marginBottom: 12, padding: 12, borderRadius: 8, background: out.verdict === 'ACCEPTED' ? 'rgba(74,222,128,0.1)' : 'rgba(239,68,68,0.1)' }}>
                     {isTerminalMode ? (
@@ -503,28 +543,28 @@ export default function ProblemWorkspace() {
                         
                         {out.stdout && (
                           <>
-                            <h4 style={{ color: 'var(--text-muted)', marginTop: 12 }}>Output:</h4>
+                            <h4 style={{ color: 'var(--text-muted)', marginTop: 12 }}>STDOUT:</h4>
                             <pre style={{ color: 'var(--text-main)', background: 'var(--bg-panel-solid)', padding: 12, borderRadius: 6, whiteSpace: 'pre-wrap', margin: 0 }}>{out.stdout}</pre>
                           </>
                         )}
                         
                         {out.stderr && (
                           <>
-                            <h4 style={{ color: '#ef4444', marginTop: 12 }}>Stderr:</h4>
+                            <h4 style={{ color: '#ef4444', marginTop: 12 }}>STDERR:</h4>
                             <pre style={{ color: '#ef4444', background: 'var(--bg-panel-solid)', padding: 12, borderRadius: 6, whiteSpace: 'pre-wrap', margin: 0 }}>{out.stderr}</pre>
                           </>
                         )}
                         
                         {out.compileError && (
                           <>
-                            <h4 style={{ color: '#ef4444', marginTop: 12 }}>Compile Error:</h4>
+                            <h4 style={{ color: '#ef4444', marginTop: 12 }}>Compilation Fault:</h4>
                             <pre style={{ color: '#ef4444', background: 'var(--bg-panel-solid)', padding: 12, borderRadius: 6, whiteSpace: 'pre-wrap', margin: 0 }}>{out.compileError}</pre>
                           </>
                         )}
                       </>
                     ) : (
                       <>
-                        <strong style={{ color: 'var(--text-main)' }}>Test Case {idx + 1}: </strong>
+                        <strong style={{ color: 'var(--text-main)' }}>Sys-Test {idx + 1}: </strong>
                         <span style={{ color: out.verdict === 'ACCEPTED' ? '#4ade80' : '#ef4444', fontWeight: 'bold' }}>{out.verdict}</span>
                         {out.runtimeMs && <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>({out.runtimeMs}ms)</span>}
                         {out.compileError && <pre style={{ color: '#ef4444', marginTop: 12, whiteSpace: 'pre-wrap', fontSize: 13, background: 'var(--bg-panel-solid)', padding: 12, borderRadius: 6 }}>{out.compileError}</pre>}
@@ -541,8 +581,8 @@ export default function ProblemWorkspace() {
                   </div>
                 ) : (
                   <div style={{ textAlign: 'center', marginTop: 20 }}>
-                    <h3 style={{ color: 'var(--accent-primary)', marginTop: 0 }}>🤖 Interactive AI Explainer</h3>
-                    <p style={{ color: 'var(--text-muted)', marginBottom: 20 }}>Stuck? Let the AI break down the optimal approach step-by-step.</p>
+                    <h3 style={{ color: 'var(--accent-primary)', marginTop: 0 }}>🤖 Interactive Stack Explainer</h3>
+                    <p style={{ color: 'var(--text-muted)', marginBottom: 20 }}>Execute the Profiler to dissect edge cases and Time Complexity gaps against constraints.</p>
                   </div>
                 )}
               </div>

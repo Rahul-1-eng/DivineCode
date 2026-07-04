@@ -1,3 +1,9 @@
+/**
+ * @file CommandPalette.tsx
+ * @author Rahul Kumar Sahoo
+ * @description Reusable UI component for the product experience.
+ */
+
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { motion, AnimatePresence } from 'framer-motion';

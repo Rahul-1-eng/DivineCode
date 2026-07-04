@@ -1,10 +1,16 @@
+/**
+ * @file [...nextauth].ts
+ * @author Rahul Kumar Sahoo
+ * @description NextAuth configuration for credentials and Google-based sign-in across local and deployed environments.
+ */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import NextAuth from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
+import { getApiBaseUrlForClient } from '../../../lib/api';
 
 export default async function auth(req: NextApiRequest, res: NextApiResponse) {
-  return NextAuth(req, res, {
+  const authOptions: any = {
     providers: [
       GoogleProvider({
         clientId: process.env.GOOGLE_CLIENT_ID || '',
@@ -19,7 +25,7 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
         async authorize(credentials) {
           if (!credentials?.handle || !credentials?.password) return null;
           
-          const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+          const apiBase = getApiBaseUrlForClient(Array.isArray(req.headers.host) ? req.headers.host[0] : req.headers.host);
           
           try {
             const res = await fetch(`${apiBase}/api/v2/auth/login`, {
@@ -51,13 +57,14 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
         }
       })
     ],
-    secret: process.env.NEXTAUTH_SECRET,
+    secret: process.env.NEXTAUTH_SECRET || 'divinecode-local-dev-secret',
+    trustHost: true,
     session: { strategy: 'jwt' },
     callbacks: {
       async signIn({ user, account }) {
         if (account?.provider === 'google') {
           try {
-            const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+            const apiBase = getApiBaseUrlForClient(Array.isArray(req.headers.host) ? req.headers.host[0] : req.headers.host);
             const res = await fetch(`${apiBase}/api/auth/google`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -95,5 +102,7 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
       }
     },
     pages: { signIn: '/signin' }
-  });
+  };
+
+  return NextAuth(req, res, authOptions);
 }

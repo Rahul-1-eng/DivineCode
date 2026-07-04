@@ -1,3 +1,9 @@
+/**
+ * @file interviewMcqs.ts
+ * @author Rahul Kumar Sahoo
+ * @description Application source for the DivineCode platform.
+ */
+
 export type InterviewMcq = {
   id: number;
   rating: number;

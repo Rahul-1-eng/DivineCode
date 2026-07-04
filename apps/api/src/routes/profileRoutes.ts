@@ -1,3 +1,9 @@
+/**
+ * @file profileRoutes.ts
+ * @author Rahul Kumar Sahoo
+ * @description Route handlers for the platform API.
+ */
+
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { Platform } from '@prisma/client';
@@ -5,6 +11,61 @@ import bcrypt from 'bcryptjs';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 
 export const profileRouter = Router();
+
+async function ensureTopicMasterySnapshot(userId: string) {
+  const existing = await prisma.topicMastery.findMany({
+    where: { userId },
+    include: { topic: true }
+  });
+
+  if (existing.length > 0) return existing;
+
+  const solvedSubmissions = await prisma.submission.findMany({
+    where: { userId, verdict: 'ACCEPTED', status: 'FINISHED' },
+    select: { problemId: true },
+    distinct: ['problemId']
+  });
+
+  const problemIds = solvedSubmissions.map((item) => item.problemId).filter(Boolean) as string[];
+  if (problemIds.length === 0) return [];
+
+  const problems = await prisma.problem.findMany({
+    where: { id: { in: problemIds } },
+    include: { problemTopics: { include: { topic: true } } }
+  });
+
+  const aggregate = new Map<string, { topicId: string; name: string; score: number; solved: number }>();
+  for (const problem of problems) {
+    for (const relation of problem.problemTopics) {
+      const current = aggregate.get(relation.topic.id) || { topicId: relation.topic.id, name: relation.topic.name, score: 0, solved: 0 };
+      current.score += 1;
+      current.solved += 1;
+      aggregate.set(relation.topic.id, current);
+    }
+  }
+
+  if (aggregate.size === 0) return [];
+
+  await prisma.$transaction(
+    Array.from(aggregate.values()).map((entry) => prisma.topicMastery.upsert({
+      where: { userId_topicId: { userId, topicId: entry.topicId } },
+      update: {
+        ability: Math.min(100, Math.round(entry.score * 20)),
+        attempts: { increment: 1 },
+        solved: { increment: entry.solved }
+      },
+      create: {
+        userId,
+        topicId: entry.topicId,
+        ability: Math.min(100, Math.round(entry.score * 20)),
+        attempts: 1,
+        solved: entry.solved
+      }
+    }))
+  );
+
+  return prisma.topicMastery.findMany({ where: { userId }, include: { topic: true } });
+}
 
 profileRouter.get('/me', async (req, res) => {
   try {
@@ -31,7 +92,7 @@ profileRouter.get('/me', async (req, res) => {
       where: { email },
       include: { 
         externalHandles: true,
-        // 👉 FIXED: Explicitly include the topic relations for the Radar Chart
+        // Explicitly include the topic relations for the Radar Chart
         topicMastery: { include: { topic: true } }, 
         activityLog: {
           orderBy: { date: 'desc' }
@@ -61,6 +122,11 @@ profileRouter.get('/me', async (req, res) => {
     }
 
     console.log(`✅ [PROFILE] User found: ${user.username}`);
+
+    let topicMasteryRecords = user.topicMastery || [];
+    if (topicMasteryRecords.length === 0) {
+      topicMasteryRecords = await ensureTopicMasterySnapshot(user.id);
+    }
 
     const [totalAttempts, totalAccepted] = await Promise.all([
       prisma.submission.count({ where: { userId: user.id } }),
@@ -92,11 +158,10 @@ profileRouter.get('/me', async (req, res) => {
       };
     });
 
-    // 👉 FIXED: Map relational TopicMastery to the clean {subject, score} format expected by the frontend
-    const formattedTopicMastery = user.topicMastery?.map((tm: any) => ({
+    const formattedTopicMastery = topicMasteryRecords.map((tm: any) => ({
       subject: tm.topic.name,
       score: tm.ability
-    })) || [];
+    }));
 
     const responseData = { 
       ...user, 
@@ -271,7 +336,7 @@ profileRouter.get('/u/:username', async (req, res) => {
       where: { username: { equals: username, mode: 'insensitive' } },
       include: { 
         externalHandles: true,
-        // 👉 FIXED: Map relations for public profiles too
+        // Map relations for public profiles too
         topicMastery: { include: { topic: true } }, 
         activityLog: {
           orderBy: { date: 'desc' }
@@ -293,6 +358,11 @@ profileRouter.get('/u/:username', async (req, res) => {
     
     if (!user) {
       return res.status(404).json({ error: 'Coder not found in the DivineCode database.' });
+    }
+
+    let topicMasteryRecords = user.topicMastery || [];
+    if (topicMasteryRecords.length === 0) {
+      topicMasteryRecords = await ensureTopicMasterySnapshot(user.id);
     }
 
     const [totalAttempts, totalAccepted] = await Promise.all([
@@ -325,10 +395,10 @@ profileRouter.get('/u/:username', async (req, res) => {
       };
     });
 
-    const formattedTopicMastery = user.topicMastery?.map((tm: any) => ({
+    const formattedTopicMastery = topicMasteryRecords.map((tm: any) => ({
       subject: tm.topic.name,
       score: tm.ability
-    })) || [];
+    }));
 
     const { passwordHash, email, ...safeProfile } = user as any;
 
