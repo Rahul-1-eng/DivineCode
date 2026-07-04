@@ -148,14 +148,15 @@ export default function NotificationBell() {
   exit={{ opacity: 0, y: 10, scale: 0.95 }}
   style={{ 
     position: 'absolute', 
-    top: 45, 
-    right: 'clamp(5px, 2vw, 0px)', 
-    width: 'min(320px, 95vw)', 
+    top: 50, 
+    right: '-15px', /* Shifts it slightly right to balance it on mobile */
+    width: '320px', 
+    maxWidth: 'calc(100vw - 30px)', /* Prevents it from overflowing tiny screens */
     background: 'var(--bg-panel)', 
     backdropFilter: 'blur(10px)', 
     border: '1px solid var(--border-color)', 
     borderRadius: 12, 
-    boxShadow: '0 20px 40px rgba(0,0,0,0.2)', 
+    boxShadow: '0 20px 40px rgba(0,0,0,0.4)', /* Slightly stronger shadow for depth */
     overflow: 'hidden', 
     zIndex: 999 
   }}
