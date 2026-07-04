@@ -148,16 +148,17 @@ export default function NotificationBell() {
   exit={{ opacity: 0, y: 10, scale: 0.95 }}
   style={{ 
     position: 'absolute', 
-    top: 50, 
-    /* Pulls the dropdown to the right, underneath the Sun icon, giving it room to breathe on the left */
-    right: '-50px', 
-    /* Maxes out at 320px on desktop, but shrinks to 85% of screen width on small phones */
-    width: 'min(320px, 85vw)', 
+    top: '55px', 
+    /* The Magic Number: Shifts the box 75px right, perfectly centering it under the Bell and Sun icons */
+    right: '-75px', 
+    width: '320px', 
+    /* Ensures it never bleeds off the edge of any phone screen */
+    maxWidth: 'calc(100vw - 20px)', 
     background: 'var(--bg-panel)', 
     backdropFilter: 'blur(10px)', 
     border: '1px solid var(--border-color)', 
     borderRadius: 12, 
-    boxShadow: '0 20px 40px rgba(0,0,0,0.5)', 
+    boxShadow: '0 20px 40px rgba(0,0,0,0.6)', 
     overflow: 'hidden', 
     zIndex: 999 
   }}
