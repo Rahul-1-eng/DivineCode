@@ -149,14 +149,15 @@ export default function NotificationBell() {
   style={{ 
     position: 'absolute', 
     top: 50, 
-    right: '-15px', /* Shifts it slightly right to balance it on mobile */
-    width: '320px', 
-    maxWidth: 'calc(100vw - 30px)', /* Prevents it from overflowing tiny screens */
+    /* Pulls the dropdown to the right, underneath the Sun icon, giving it room to breathe on the left */
+    right: '-50px', 
+    /* Maxes out at 320px on desktop, but shrinks to 85% of screen width on small phones */
+    width: 'min(320px, 85vw)', 
     background: 'var(--bg-panel)', 
     backdropFilter: 'blur(10px)', 
     border: '1px solid var(--border-color)', 
     borderRadius: 12, 
-    boxShadow: '0 20px 40px rgba(0,0,0,0.4)', /* Slightly stronger shadow for depth */
+    boxShadow: '0 20px 40px rgba(0,0,0,0.5)', 
     overflow: 'hidden', 
     zIndex: 999 
   }}
