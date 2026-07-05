@@ -6,7 +6,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { prisma } from '../prisma/client';
-import { generateTestCasesWithAI, debugCodeWithAI, generateToughTestCases, analyzeUserWeaknesses } from '../modules/ai/aiService';
+import { generateTestCasesWithAI, debugCodeWithAI, generateToughTestCases, analyzeUserWeaknesses, PLATFORM_GUIDE } from '../modules/ai/aiService';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 
 export const aiRouter = Router();
@@ -50,7 +50,12 @@ aiRouter.post('/ai/chat', asyncRoute(async (req, res) => {
 
     const modelName = process.env.AI_MODEL || 'gemini-3.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { contents });
+    // The guide makes the chat useful for "how does the platform work" questions
+    // (coins, free interviews, UPI bookings), not just algorithm help.
+    const { data } = await axios.post(url, {
+      systemInstruction: { parts: [{ text: PLATFORM_GUIDE }] },
+      contents
+    });
     
     res.json({ reply: data.candidates[0].content.parts[0].text });
   } catch (e: any) {

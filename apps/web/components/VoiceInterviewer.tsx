@@ -19,30 +19,15 @@ interface QuestionPayload {
   videoUrl?: string; // Explicit video reference if provided by the DB
 }
 
-function buildReferenceVideoUrl(question: QuestionPayload) {
-  const seed = [question.title, question.prompt, question.context, question.track?.title]
-    .filter(Boolean)
-    .join(' ')
-    .trim();
-  const searchQuery = seed || 'software engineering interview explanation';
-
-  if (question.videoUrl) {
-    const rawUrl = question.videoUrl.trim();
-    if (/youtube\.com\/watch\?v=/.test(rawUrl)) {
-      try {
-        const url = new URL(rawUrl);
-        const videoId = url.searchParams.get('v');
-        return videoId ? `https://www.youtube.com/embed/${videoId}` : `https://www.youtube.com/embed?listType=search&search_query=${encodeURIComponent(searchQuery)}`;
-      } catch {
-        return `https://www.youtube.com/embed?listType=search&search_query=${encodeURIComponent(searchQuery)}`;
-      }
-    }
-    if (/youtube\.com\/embed\//.test(rawUrl) || /youtu\.be\//.test(rawUrl)) {
-      return rawUrl;
-    }
-  }
-
-  return `https://www.youtube.com/embed?listType=search&search_query=${encodeURIComponent(searchQuery)}`;
+// YouTube killed search-based embeds (listType=search) ages ago, they just show
+// an error player now. So only embed when a real 11-char video id can be pulled
+// out of the stored link; otherwise the UI shows the search-link card instead.
+function buildReferenceVideoUrl(question: QuestionPayload): string | null {
+  if (!question.videoUrl) return null;
+  const match = question.videoUrl.trim().match(
+    /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|shorts\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i
+  );
+  return match ? `https://www.youtube.com/embed/${match[1]}` : null;
 }
 
 function buildReferenceSearchUrl(question: QuestionPayload) {
@@ -322,16 +307,9 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
           )}
         </div>
 
-        {/* Right Column: Dynamic Video Fallback */}
+        {/* Right Column: Reference Video (only when a real video is linked) */}
         <div style={STYLES.videoWrapper}>
-          {videoError ? (
-            <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-main)' }}>
-              <div style={{ fontSize: 28, marginBottom: 8 }}>🎥</div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Reference video unavailable</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 12 }}>The voice coach still works; open a YouTube lesson instead.</div>
-              <a href={referenceSearchUrl} target="_blank" rel="noreferrer" style={STYLES.referenceLink}>Open matching lesson</a>
-            </div>
-          ) : (
+          {activeVideoUrl && !videoError ? (
             <iframe
               src={activeVideoUrl}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -340,6 +318,13 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
               title="Reference Material"
               onError={() => setVideoError(true)}
             />
+          ) : (
+            <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-main)' }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>🎥</div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>{videoError ? 'Reference video unavailable' : 'No editorial video linked yet'}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 12 }}>The voice coach still works; open a YouTube lesson instead.</div>
+              <a href={referenceSearchUrl} target="_blank" rel="noreferrer" style={STYLES.referenceLink}>Open matching lesson</a>
+            </div>
           )}
         </div>
       </div>

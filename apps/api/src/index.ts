@@ -29,6 +29,10 @@ declare global {
 
 const app = express();
 
+// Render/Vercel sit behind a reverse proxy; without this express-rate-limit v7
+// rejects requests carrying X-Forwarded-For and every client shares one IP bucket.
+app.set('trust proxy', 1);
+
 const defaultOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
@@ -105,9 +109,26 @@ io.adapter(createAdapter(pubClient, subClient));
 
 app.set('io', io);
 
+// DivineLive viewer presence — a viewer is just a socket in the live:<id>
+// room. Count is re-broadcast on every join/leave/disconnect; peakViewers is
+// bumped in the DB only when the count actually beats the previous peak.
+async function broadcastLiveViewers(roomId: string) {
+  try {
+    const sockets = await io.in(`live:${roomId}`).fetchSockets();
+    const count = sockets.length;
+    io.to(`live:${roomId}`).emit('live-viewer-count', { roomId, count });
+    await prisma.liveRoom.updateMany({
+      where: { id: roomId, peakViewers: { lt: count } },
+      data: { peakViewers: count }
+    });
+  } catch (err: any) {
+    console.warn('[DivineLive viewers]', err?.message);
+  }
+}
+
 // Enhanced WebSocket Pipeline for Multiplayer Coding Rooms
 io.on('connection', (socket) => {
-  
+
   // Account Notifications Room
   socket.on('join-personal-notifications', (email: string) => {
     socket.join(`user:${email}`);
@@ -122,7 +143,30 @@ io.on('connection', (socket) => {
   socket.on('local-code-update', (data: { roomId: string; code: string }) => {
     socket.to(`workspace:${data.roomId}`).emit('remote-code-update', data.code);
   });
-  
+
+  // DivineLive rooms
+  socket.on('join-live-room', (roomId: string) => {
+    if (!roomId || typeof roomId !== 'string') return;
+    socket.join(`live:${roomId}`);
+    broadcastLiveViewers(roomId);
+  });
+
+  socket.on('leave-live-room', (roomId: string) => {
+    if (!roomId || typeof roomId !== 'string') return;
+    socket.leave(`live:${roomId}`);
+    broadcastLiveViewers(roomId);
+  });
+
+  socket.on('disconnecting', () => {
+    for (const room of socket.rooms) {
+      if (room.startsWith('live:')) {
+        const roomId = room.slice(5);
+        // Recount after this socket has actually left the room
+        setImmediate(() => broadcastLiveViewers(roomId));
+      }
+    }
+  });
+
 });
 
 startQueueWorkers(io);

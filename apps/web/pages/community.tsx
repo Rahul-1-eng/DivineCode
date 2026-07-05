@@ -25,26 +25,87 @@ export default function CommunityHubPage() {
   const [formData, setFormData] = useState({ id: '', title: '', videoUrl: '', description: '' });
   const [isEditing, setIsEditing] = useState(false);
 
+  // DivineLive — camera-on community streams for talking through contest problems
+  const [liveRooms, setLiveRooms] = useState<any[]>([]);
+  const [myRoomId, setMyRoomId] = useState<string | null>(null);
+  const [showGoLive, setShowGoLive] = useState(false);
+  const [goLiveForm, setGoLiveForm] = useState({ title: '', topic: '', contestId: '' });
+  const [contests, setContests] = useState<any[]>([]);
+  const [startingLive, setStartingLive] = useState(false);
+
+  const loadLiveRooms = async () => {
+    try {
+      const res = await fetchApi('/api/v2/live/rooms');
+      setLiveRooms(res.rooms || []);
+      setMyRoomId(res.myRoomId || null);
+    } catch {
+      // signed-out visitors just don't see the live rail
+    }
+  };
+
   useEffect(() => {
     loadCommunityPosts();
+    loadLiveRooms();
 
     const socket = io(API_BASE_URL, { transports: ['websocket'] });
-    
+
     socket.on('new_community_post', (post) => {
       setPosts(prev => {
         if (prev.find(p => p.id === post.id)) {
             return prev.map(p => p.id === post.id ? post : p);
         }
-        return [post, ...prev]; 
+        return [post, ...prev];
       });
     });
-    
+
     socket.on('post_deleted', ({ id }) => {
       setPosts(prev => prev.filter(p => p.id !== id));
     });
 
+    socket.on('live_room_started', (room) => {
+      setLiveRooms(prev => [room, ...prev.filter(r => r.id !== room.id && r.hostId !== room.hostId)]);
+    });
+
+    socket.on('live_room_ended', ({ id }) => {
+      setLiveRooms(prev => prev.filter(r => r.id !== id));
+      setMyRoomId(prev => (prev === id ? null : prev));
+    });
+
     return () => { socket.disconnect(); };
   }, []);
+
+  const openGoLive = async () => {
+    if (!session?.user?.email) return toast.error('Sign in to go live.');
+    if (myRoomId) return window.location.assign(`/live/${myRoomId}`);
+    setGoLiveForm({ title: '', topic: '', contestId: '' });
+    setShowGoLive(true);
+    // Contest picker is best-effort decoration; the stream works without it.
+    try {
+      const list = await fetchApi('/api/v2/contests', { requireAuth: false });
+      setContests(Array.isArray(list) ? list : []);
+    } catch { setContests([]); }
+  };
+
+  const startLiveStream = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!goLiveForm.title.trim()) return toast.error('Give your stream a title.');
+    setStartingLive(true);
+    try {
+      const res = await fetchApi('/api/v2/live/rooms', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: goLiveForm.title,
+          topic: goLiveForm.topic || undefined,
+          contestId: goLiveForm.contestId || undefined
+        })
+      });
+      toast.success('You are LIVE! Everyone online just got notified.', { icon: '🔴' });
+      window.location.assign(`/live/${res.room.id}`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not start the stream.');
+      setStartingLive(false);
+    }
+  };
 
   const loadCommunityPosts = async () => {
     setLoading(true);
@@ -139,14 +200,63 @@ export default function CommunityHubPage() {
             <img src="/logo.png" alt="DivineCode Logo" style={{ width: 32, height: 32, objectFit: 'contain' }} />
             Community Hub
           </a>
-          <button onClick={openUploadModal} style={button}>+ Upload Tutorial</button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button onClick={openGoLive} style={goLiveBtn}>
+              <span style={liveDot} /> {myRoomId ? 'Return to Your Stream' : 'Go Live'}
+            </button>
+            <button onClick={openUploadModal} style={button}>+ Upload Tutorial</button>
+          </div>
         </nav>
 
         <div style={hero}>
           <p style={eyebrow}>Learn from the Best</p>
           <h1 style={{ fontSize: 'clamp(32px, 5vw, 58px)', margin: '10px 0', color: 'var(--text-main)' }}>Developer Video Hub.</h1>
-          <p style={{ color: 'var(--text-muted)', maxWidth: 600 }}>Watch algorithms broken down by top competitive programmers in the community, or share your own approaches to earn profile badges.</p>
+          <p style={{ color: 'var(--text-muted)', maxWidth: 600 }}>Watch algorithms broken down by top competitive programmers in the community, go live to discuss contest problems face to face, or share your own approaches to earn profile badges.</p>
         </div>
+
+        {/* DivineLive — who's streaming right now */}
+        <section style={{ marginBottom: 40 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+            <h2 style={{ margin: 0, fontSize: 20, color: 'var(--text-main)' }}>
+              <span style={{ color: '#ef4444' }}>●</span> DivineLive
+            </h2>
+            <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+              Camera-on rooms — jump in, talk through contest questions, screen-share your approach.
+            </span>
+          </div>
+
+          {liveRooms.length === 0 ? (
+            <div style={{ padding: '26px 24px', borderRadius: 16, border: '1px dashed var(--border-color)', background: 'var(--bg-panel)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>
+                Nobody is live right now. Start a room and every online user gets pinged instantly.
+              </span>
+              <button onClick={openGoLive} style={goLiveBtn}><span style={liveDot} /> Start Streaming</button>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+              {liveRooms.map(room => (
+                <a key={room.id} href={`/live/${room.id}`} style={{ textDecoration: 'none' }}>
+                  <div style={{ ...card, padding: 18, gap: 10, border: '1px solid rgba(239,68,68,0.45)', cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 900, color: '#ef4444', letterSpacing: 1 }}>
+                        <span style={liveDot} /> LIVE
+                      </span>
+                      {room.contest && <span style={{ ...tag, fontSize: 11 }}>🏁 {room.contest.title}</span>}
+                    </div>
+                    <strong style={{ color: 'var(--text-main)', fontSize: 16, lineHeight: 1.4 }}>{room.title}</strong>
+                    {room.topic && <span style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{room.topic}</span>}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                      <span style={{ color: 'var(--accent-primary)', fontSize: 12.5, fontWeight: 700 }}>
+                        🎙 {room.host?.name || room.host?.username}{room.host?.rating ? ` · ${room.host.rating}` : ''}
+                      </span>
+                      <span style={{ ...ghostBtn, fontSize: 12, padding: '6px 14px' }}>Join →</span>
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+        </section>
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: 100, color: 'var(--text-muted)' }}>Loading videos...</div>
@@ -180,13 +290,12 @@ export default function CommunityHubPage() {
                   
                   {post.videoUrl ? (
                     <div style={videoContainer}>
-                      <iframe 
-                        src={getYouTubeEmbedUrl(post.videoUrl)} 
+                      <iframe
+                        src={getYouTubeEmbedUrl(post.videoUrl)}
                         title={post.title}
-                        frameBorder="0" 
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                         allowFullScreen
-                        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', borderRadius: '16px 16px 0 0' }}
+                        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none', borderRadius: '16px 16px 0 0' }}
                       />
                     </div>
                   ) : (
@@ -216,6 +325,48 @@ export default function CommunityHubPage() {
           </div>
         )}
       </section>
+
+      {showGoLive && (
+        <div style={modalOverlay}>
+          <div style={modalContent}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ margin: 0, color: 'var(--text-main)' }}><span style={{ color: '#ef4444' }}>●</span> Go Live</h2>
+              <button onClick={() => setShowGoLive(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 24, cursor: 'pointer' }}>×</button>
+            </div>
+
+            <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 24 }}>
+              Your camera and mic go live in a public room. Everyone online gets notified, and anyone can hop in on video to discuss with you.
+            </p>
+
+            <form onSubmit={startLiveStream} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={label}>Stream Title</label>
+                <input placeholder="e.g. Walking through today's Div 2 problem C" value={goLiveForm.title} onChange={e => setGoLiveForm({ ...goLiveForm, title: e.target.value })} style={input} required />
+              </div>
+
+              <div>
+                <label style={label}>Discussing a contest? (optional)</label>
+                <select value={goLiveForm.contestId} onChange={e => setGoLiveForm({ ...goLiveForm, contestId: e.target.value })} style={{ ...input, appearance: 'auto' }}>
+                  <option value="">— No specific contest —</option>
+                  {contests.map((c: any) => <option key={c.id} value={c.id}>{c.title}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label style={label}>Topic / what you'll cover (optional)</label>
+                <textarea placeholder="Which problems, which approaches, Q&A at the end…" value={goLiveForm.topic} onChange={e => setGoLiveForm({ ...goLiveForm, topic: e.target.value })} style={{ ...input, minHeight: 90, resize: 'vertical' }} />
+              </div>
+
+              <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
+                <button type="button" onClick={() => setShowGoLive(false)} style={{ ...ghostBtn, flex: 1 }}>Cancel</button>
+                <button type="submit" disabled={startingLive} style={{ ...goLiveBtn, flex: 2, justifyContent: 'center', opacity: startingLive ? 0.6 : 1 }}>
+                  {startingLive ? 'Starting…' : '🔴 Start Streaming & Notify Everyone'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {showUploadModal && (
         <div style={modalOverlay}>
@@ -269,6 +420,8 @@ const card: CSSProperties = { borderRadius: 16, border: '1px solid var(--border-
 const videoContainer: CSSProperties = { position: 'relative', width: '100%', paddingTop: '56.25%', background: '#000' };
 const tag: CSSProperties = { color: 'var(--accent-primary)', background: 'var(--accent-glow)', padding: '4px 10px', borderRadius: 6, fontWeight: 800, fontSize: 12, border: '1px solid var(--accent-primary)' };
 const button: CSSProperties = { padding: '12px 24px', borderRadius: 999, border: 0, background: 'linear-gradient(135deg,#a5b4fc,#22d3ee)', color: '#000', fontWeight: 900, cursor: 'pointer', fontSize: 15 };
+const goLiveBtn: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 24px', borderRadius: 999, border: '1px solid #ef4444', background: 'rgba(239,68,68,0.12)', color: '#ef4444', fontWeight: 900, cursor: 'pointer', fontSize: 15 };
+const liveDot: CSSProperties = { width: 8, height: 8, borderRadius: '50%', background: '#ef4444', boxShadow: '0 0 10px #ef4444', display: 'inline-block' };
 const ghostBtn: CSSProperties = { padding: '8px 16px', borderRadius: 999, border: '1px solid var(--border-color)', background: 'var(--bg-panel-solid)', color: 'var(--text-main)', fontWeight: 800, cursor: 'pointer', fontSize: 13, textDecoration: 'none', textAlign: 'center' };
 const label: CSSProperties = { display: 'block', color: 'var(--text-muted)', fontSize: 13, fontWeight: 'bold', marginBottom: 6 };
 const input: CSSProperties = { width: '100%', padding: 14, borderRadius: 12, background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)', boxSizing: 'border-box', outline: 'none', fontSize: 15, fontFamily: 'inherit' };

@@ -11,17 +11,27 @@ import { analyzeSubmissionLogic, generateToughTestCases } from '../ai/aiService'
 
 const WANDBOX_URL = 'https://wandbox.org/api/compile.json';
 
+// Pinned stable images — the *-head images fail with container errors
+// ("failed to exec pid1"), and openjdk-head/nodejs-head no longer exist
+// in Wandbox's compiler list (verified against /api/list.json 2026-07-05).
 const WANDBOX_COMPILERS: Record<string, string> = {
-  'c++': 'gcc-head',
-  'c': 'gcc-head-c',
-  'python': 'cpython-head',
-  'java': 'openjdk-head',
-  'javascript': 'nodejs-head'
+  'c++': 'gcc-13.2.0',
+  'c': 'gcc-13.2.0-c',
+  'python': 'cpython-3.13.8',
+  'java': 'openjdk-jdk-22+36',
+  'javascript': 'nodejs-20.17.0'
 };
 
 export async function submitToWandbox(input: { sourceCode: string; language: string; stdin: string; }) {
   const normalizedLang = input.language.toLowerCase().replace('cpp', 'c++');
-  const compiler = WANDBOX_COMPILERS[normalizedLang] || 'cpython-head';
+  const compiler = WANDBOX_COMPILERS[normalizedLang] || 'cpython-3.13.8';
+
+  // Wandbox saves the source as prog.java, so `public class Main` fails to
+  // compile ("should be declared in a file named Main.java"). Dropping the
+  // top-level `public` keeps every standard submission working.
+  const sourceCode = normalizedLang === 'java'
+    ? input.sourceCode.replace(/public\s+(?=(?:final\s+|abstract\s+)*class\s)/g, '')
+    : input.sourceCode;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12000); 
@@ -31,7 +41,7 @@ export async function submitToWandbox(input: { sourceCode: string; language: str
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        code: input.sourceCode,
+        code: sourceCode,
         compiler: compiler,
         stdin: input.stdin || ''
       }),

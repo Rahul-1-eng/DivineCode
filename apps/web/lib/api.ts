@@ -54,6 +54,20 @@ export function getApiBaseUrlForClient(hostname?: string | null): string {
   return getApiBaseUrl(hostname);
 }
 
+export class ApiError extends Error {
+  status: number;
+  data: any;
+  retryable: boolean;
+
+  constructor(message: string, status: number, data: any) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.data = data;
+    this.retryable = !!(data && typeof data === 'object' && (data as any).retryable);
+  }
+}
+
 export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
   const { requireAuth = true, headers: customHeaders, ...restOptions } = options;
   
@@ -85,7 +99,7 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
   const data = isJson ? await response.json() : await response.text();
 
   if (!response.ok) {
-    throw new Error((data as any)?.error || response.statusText || 'API Request Failed');
+    throw new ApiError((data as any)?.error || response.statusText || 'API Request Failed', response.status, data);
   }
 
   return data;

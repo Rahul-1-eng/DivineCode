@@ -44,21 +44,14 @@ interface ChatPost {
   timestamp: string;
 }
 
-// Ensure the embed formats correctly from standard Youtube, Shortlinks, or raw query parameters
-const getYouTubeEmbedUrl = (url: string) => {
-    if (!url || typeof url !== 'string') {
-      return 'https://www.youtube.com/embed?listType=search&search_query=software%20engineering%20interview%20explanation';
-    }
-
-    let videoId = '';
-    const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
+// Pulls the video id out of any youtube link format (watch/shorts/youtu.be/embed).
+// Returns null when there is no real id. Don't render an iframe without one:
+// search-based embeds are dead on YouTube's side and just show an error player.
+const getYouTubeEmbedUrl = (url?: string | null) => {
+    if (!url || typeof url !== 'string') return null;
+    const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|shorts\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
     const match = url.match(regex);
-    if (match && match[1]) {
-      videoId = match[1];
-      return `https://www.youtube.com/embed/${videoId}`;
-    }
-
-    return `https://www.youtube.com/embed?listType=search&search_query=${encodeURIComponent(url)}`;
+    return match && match[1] ? `https://www.youtube.com/embed/${match[1]}` : null;
 };
 
 export default function ProblemWorkspace() {
@@ -424,27 +417,28 @@ export default function ProblemWorkspace() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <h3 style={{ color: 'var(--text-main)', margin: 0 }}>Algorithmic Video Streaming</h3>
               
-              {problem.videoUrl ? (
+              {getYouTubeEmbedUrl(problem.videoUrl) ? (
                 <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 12, background: '#000' }}>
-                   <iframe 
-                      src={getYouTubeEmbedUrl(problem.videoUrl)} 
-                      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
-                      frameBorder="0" 
-                      allowFullScreen 
+                   <iframe
+                      src={getYouTubeEmbedUrl(problem.videoUrl)!}
+                      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
+                      allowFullScreen
                    />
                 </div>
-              ) : !problem.error ? (
-                <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 12, background: '#000' }}>
-                  {/* Dynamic Fallback resolution for undefined external video mappings */}
-                  <iframe 
-                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} 
-                    src={`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(problem.title + ' tutorial algorithm explanation')}`} 
-                    frameBorder="0" 
-                    allowFullScreen 
-                  />
-                </div>
               ) : (
-                <p style={{ color: 'var(--text-muted)' }}>Cannot establish video pipeline for this context.</p>
+                <div style={{ padding: '40px 24px', borderRadius: 12, background: 'var(--bg-card)', border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                  <div style={{ fontSize: 34, marginBottom: 10 }}>🎥</div>
+                  <div style={{ fontWeight: 700, marginBottom: 6, color: 'var(--text-main)' }}>No editorial video linked yet</div>
+                  <p style={{ color: 'var(--text-muted)', fontSize: 13.5, margin: '0 0 16px 0' }}>Watch a community walkthrough of this exact topic on YouTube instead.</p>
+                  <a
+                    href={`https://www.youtube.com/results?search_query=${encodeURIComponent(problem.title + ' algorithm explanation')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: 'var(--accent-primary)', fontWeight: 700, textDecoration: 'none' }}
+                  >
+                    Search matching lessons on YouTube →
+                  </a>
+                </div>
               )}
             </div>
           )}

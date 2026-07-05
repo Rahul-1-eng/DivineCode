@@ -20,18 +20,26 @@ const ActivityHeatmap = dynamic(() => import('../components/ActivityHeatmap'), {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
 const features = [
+  { 
+    title: 'Live AI Recruiter', 
+    href: '/recruiter', 
+    icon: '🎯', 
+    text: 'Premium 3-round FAANG mock interview. Face-to-face video, live code execution, and real-time behavioral grilling.' 
+  },
   { title: 'Verified Contests', href: '/contests', icon: '🏆', text: 'Codeforces-style gym rooms with live sync, cross-checks, and automatic Elo tracking.' },
   { title: 'Interview Tracks', href: '/interview', icon: '💼', text: 'Practice curated multi-format technical tracks with visual assessment metrics.' },
   { title: 'Create Mashups', href: '/contests/create', icon: '⚡', text: 'Instant problem pool lookup, handles aggregation, and cheat protection filters.' },
   { title: 'Duel Arena', href: '/duel', icon: '⚔️', text: 'Engage in real-time 1v1 speed debugging and MCQ battles on a live global clock.' },
   { title: 'AI Avatar Practice', href: '/practice', icon: '🤖', text: 'IDE environment equipped with interactive multi-tier hint engines and complexity analyzers.' },
+  { title: 'Real Recruiter Sessions', href: '/recruiter/book', icon: '🧑‍💼', text: 'Book paid 1:1 mock interviews with verified human recruiters. Pay via UPI, get verified, get grilled.' },
+  { title: 'Community Tutorials', href: '/community', icon: '🎬', text: 'Video walkthroughs and editorials posted by the community, with instant global notifications.' },
   { title: 'Execution Judge', href: '/judge', icon: '⚙️', text: 'Sandboxed distributed multi-language compiler with native Codeforces platform telemetry.' }
 ];
 
 const SUGGESTED_QUESTIONS = [
-  "How do I create a Codeforces mashup contest?",
-  "How do the Elo ratings and Coins work here?",
-  "How do I use the live team voice chat?"
+  "How many free AI interviews do I get?",
+  "How do I book a session with a real recruiter?",
+  "How do the Elo ratings and Coins work here?"
 ];
 
 const DAILY_QUOTES = [
@@ -93,12 +101,12 @@ export default function Home() {
     "⚡ System: Fetching global contest schedules..."
   ]);
 
-  const navLinks = [
+const navLinks = [
+    ['AI Recruiter 🎯', '/recruiter'], // <-- Added the new premium tab
     ['Practice Hub', '/practice'], 
     ['Duel Arena', '/duel'], 
     ['Contests', '/contests'], 
-    ['Community', '/community'], 
-    ['Create Room', '/contests/create']
+    ['Community', '/community']
   ];
 
   const quoteOfTheDay = useMemo(() => {
@@ -374,9 +382,11 @@ export default function Home() {
                 </div>
 
                 <div className="button-group" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                  <motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} href="/contests/create" style={{ display: 'inline-block', color: '#000', textDecoration: 'none', padding: 'clamp(10px, 2vw, 14px) clamp(16px, 3vw, 28px)', borderRadius: 999, fontWeight: 800, background: 'linear-gradient(135deg,#818cf8,#22d3ee)', boxShadow: '0 10px 30px var(--accent-glow)', fontSize: 'clamp(12px, 2vw, 14px)' }}>Deploy Mashup Room</motion.a>
-                  <motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} href="/duel" style={{ display: 'inline-block', color: 'var(--text-main)', textDecoration: 'none', padding: 'clamp(10px, 2vw, 14px) clamp(16px, 3vw, 28px)', borderRadius: 999, fontWeight: 800, border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: 'clamp(12px, 2vw, 14px)' }}>Enter Duel Arena ⚔️</motion.a>
-                </div>
+                <motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} href="/recruiter" style={{ display: 'inline-block', color: '#000', textDecoration: 'none', padding: 'clamp(10px, 2vw, 14px) clamp(16px, 3vw, 28px)', borderRadius: 999, fontWeight: 900, background: 'linear-gradient(135deg, #a5b4fc, #a855f7)', boxShadow: '0 10px 30px rgba(168,85,247,0.4)', fontSize: 'clamp(12px, 2vw, 14px)' }}>
+                  Face the AI Recruiter 🎯
+                </motion.a>
+                <motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} href="/contests/create" style={{ display: 'inline-block', color: 'var(--text-main)', textDecoration: 'none', padding: 'clamp(10px, 2vw, 14px) clamp(16px, 3vw, 28px)', borderRadius: 999, fontWeight: 800, border: '1px solid var(--border-color)', background: 'var(--bg-card)', fontSize: 'clamp(12px, 2vw, 14px)' }}>Deploy Mashup Room</motion.a>
+              </div>
               </div>
 
               <div className="hero-right" style={{ flex: '1 1 100%', width: '100%' }}>

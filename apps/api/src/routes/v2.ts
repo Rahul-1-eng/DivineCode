@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import { prisma } from '../prisma/client';
 import { enqueueJudgeSubmission } from '../queues/queues';
 import { canManageContest, sanitizeContestForViewer, viewerFromRequest } from '../modules/contests/contestRules';
+import { recruiterRouter } from './recruiterRoutes';
 import { randomUUID } from 'crypto';
 import { 
   createContestV2, listContestsV2, loadContestForViewer, reorderContestProblemV2, 
@@ -35,6 +36,8 @@ import { notificationRouter } from './notificationRoutes';
 import { authRouter } from './authRoutes';
 import { aiRouter } from './aiRoutes';
 import communityRoutes from './communityRoutes';
+import { liveRouter } from './liveRoutes';
+import { mailContestRegistered } from '../modules/email/emailService';
 
 const PLATFORM_OWNER_EMAIL = (process.env.PLATFORM_OWNER_EMAIL || '').trim().toLowerCase();
 
@@ -249,6 +252,9 @@ export function mountV2Routes(app: Express, io: Server) {
       email: viewer.email,
       name: viewer.name
     });
+    if (viewer.email && contest) {
+      mailContestRegistered(viewer.email, { id: contest.id, title: contest.title, startTime: contest.startTime });
+    }
     res.json(sanitizeContestForViewer(contest!, viewer));
   }));
   
@@ -847,6 +853,9 @@ export function mountV2Routes(app: Express, io: Server) {
   app.use('/api/v2', router);
   app.use('/api/v2/submissions', submissionRouter); 
   app.use('/api/v2/interview', interviewRouter);
+  app.use('/api/v2/recruiter', recruiterRouter);
+  app.use('/api/v2/live', liveRouter);
   app.use('/api/v2/profile', profileRouter);
   app.use('/api/v2', aiRouter); 
+
 }
