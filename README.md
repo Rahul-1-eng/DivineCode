@@ -9,7 +9,7 @@
 ![PWA](https://img.shields.io/badge/PWA-Installable-5a0fc8)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-# 🚀 DivineCode
+# 🚀 DivineCodes
 
 ### Real-Time Algorithmic Training, AI Interviews & a Live Recruiter Marketplace
 
