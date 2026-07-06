@@ -24,6 +24,10 @@ model User {
   resetPasswordToken          String?                  @unique
   resetPasswordExpires        DateTime?
   phone                       String?                  @unique // Mobile number — one per person, anchors the free-trial quota
+  phoneVerified               Boolean                  @default(false) // True once the number cleared an SMS OTP
+  pendingPhone                String? // Number awaiting OTP verification
+  phoneOtpHash                String? // sha256 of the active OTP — never stored in plaintext
+  phoneOtpExpiresAt           DateTime?
   freeInterviewsUsed          Int                      @default(0) // AI Recruiter free-trial sessions consumed (max 3)
   candidateProfiles           CandidateProfile[]
   interviewSessions           InterviewSession[]
@@ -51,6 +55,7 @@ model User {
   contestParticipants         ContestParticipant[]
   activityLog                 ActivityLog[]
   liveRooms                   LiveRoom[]
+  coinPurchases               CoinPurchase[]
 }
 
 model ActivityLog {
@@ -1038,8 +1043,9 @@ model RecruiterBooking {
   recruiterId String
   recruiter   HumanRecruiter @relation(fields: [recruiterId], references: [id])
 
-  preferredAt DateTime // Candidate's requested slot
-  note        String?  @db.Text
+  preferredAt  DateTime // Candidate's requested slot
+  note         String?  @db.Text
+  contactPhone String? // Candidate's number — the recruiter calls it to confirm the meet
 
   recruiterFeeInr Int // Snapshot of the recruiter fee at booking time
   platformFeeInr  Int // DivineCode's cut, collected into the admin UPI
@@ -1068,6 +1074,7 @@ model RecruiterBooking {
 enum BookingStatus {
   PENDING_PAYMENT
   AWAITING_VERIFICATION
+  AWAITING_RECRUITER_CONFIRMATION // Paid — recruiter must confirm they are free for the slot
   CONFIRMED
   COMPLETED
   CANCELLED
@@ -1099,4 +1106,81 @@ model LiveRoom {
 enum LiveRoomStatus {
   LIVE
   ENDED
+}
+
+// -----------------------------------------------------------------------------
+// COIN PURCHASES — real-money top-ups (₹10 → 50 🪙 anchor rate) so users who
+// burn their 3 free AI-interview trials can keep going. Same dual rail as
+// recruiter bookings: Razorpay (instant, signature-verified) or manual UPI +
+// UTR with admin verification.
+// -----------------------------------------------------------------------------
+
+model CoinPurchase {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  coins     Int // Coins credited when the payment clears
+  amountInr Int // Final price paid (after any coupon), snapshot at purchase time
+
+  couponCode    String? // Admin coupon applied at purchase time, if any
+  discountInr   Int     @default(0) // How much the coupon shaved off the pack price
+  listPriceInr  Int? // Pack price before the coupon, for the receipt trail
+
+  status            CoinPurchaseStatus @default(PENDING_PAYMENT)
+  paymentMethod     String? // "UPI_MANUAL" | "RAZORPAY"
+  upiTransactionRef String? // UTR the buyer submits after paying the admin UPI
+  razorpayOrderId   String? @unique
+  razorpayPaymentId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum CoinPurchaseStatus {
+  PENDING_PAYMENT
+  AWAITING_VERIFICATION
+  CREDITED
+  CANCELLED
+}
+
+// -----------------------------------------------------------------------------
+// COUPONS — admin-minted discount codes. Work on coin packs and AI interview
+// sessions. One redemption per user per coupon; caps + expiry enforced server-side.
+// -----------------------------------------------------------------------------
+
+model Coupon {
+  id         String        @id @default(cuid())
+  code       String        @unique // Stored uppercase; matched case-insensitively
+  percentOff Int // 1–100; 100 = fully free
+  appliesTo  CouponScope   @default(BOTH)
+  maxUses    Int? // null = unlimited total redemptions
+  usedCount  Int           @default(0)
+  expiresAt  DateTime?
+  active     Boolean       @default(true)
+  createdAt  DateTime      @default(now())
+
+  redemptions CouponRedemption[]
+}
+
+model CouponRedemption {
+  id       String   @id @default(cuid())
+  couponId String
+  coupon   Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId   String
+  context  String // "COINS" | "AI_SESSION"
+  refId    String? // CoinPurchase id or InterviewSession id
+  createdAt DateTime @default(now())
+
+  @@unique([couponId, userId]) // One shot per user per coupon
+  @@index([userId])
+}
+
+enum CouponScope {
+  COINS
+  AI_SESSION
+  BOTH
 }

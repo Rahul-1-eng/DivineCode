@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { prisma } from '../prisma/client';
 // Import the secure JWT verifier
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
+import { broadcastCommunityUpload } from '../modules/email/emailService';
 
 export const communityRouter = Router();
 
@@ -95,6 +96,9 @@ communityRouter.post('/upload', async (req, res) => {
     } else {
       console.warn("[Community Hub Warning]: Socket.io instance not found.");
     }
+
+    // Email blast so the upload reaches users who are not currently online.
+    broadcastCommunityUpload(title, user.name || user.username, user.email);
 
     res.status(201).json({ success: true, post: newPost });
   } catch (error: any) {

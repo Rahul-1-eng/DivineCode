@@ -15,8 +15,12 @@ import { executeSubmission } from '../modules/judge/judge0Service';
 import { createRazorpayOrder, verifyRazorpaySignature, razorpayEnabled, razorpayKeyId } from '../modules/payments/razorpayService';
 import {
   mailBookingCreated, mailPaymentUnderVerification, mailBookingConfirmed, mailBookingCancelled,
-  mailRecruiterApplied, mailRecruiterDecision, mailInterviewConcluded
+  mailRecruiterApplied, mailRecruiterDecision, mailInterviewConcluded, mailInterviewStarted,
+  mailBookingPaidAwaitingRecruiter, mailRecruiterAvailabilityRequest
 } from '../modules/email/emailService';
+import { todayLuckyDeal, validateCoupon, redeemCoupon, applyPercentOff, CouponError } from '../modules/payments/promoService';
+import { otpChannel, generateOtp, hashOtp, verifyOtpHash, deliverOtp } from '../modules/sms/otpService';
+import { sendNotification } from './notificationRoutes';
 
 export const recruiterRouter = Router();
 
@@ -152,7 +156,8 @@ recruiterRouter.post('/profile', async (req, res) => {
 
 // -----------------------------------------------------------------------------
 // 1b. Entitlement Probe — tells the wizard how this user's next session is paid:
-// free trial (and whether a phone number must be registered first) or coins.
+// free trial (and whether a phone number must be registered first) or coins,
+// plus today's lucky-day deal so the UI can show the banner and real price.
 // -----------------------------------------------------------------------------
 recruiterRouter.get('/entitlement', async (req, res) => {
   try {
@@ -164,20 +169,127 @@ recruiterRouter.get('/entitlement', async (req, res) => {
 
     const isAdmin = user.role === 'ADMIN';
     const freeTrialsLeft = Math.max(0, FREE_TRIALS - user.freeInterviewsUsed);
+    const otpAvailable = otpChannel() !== 'NONE';
+    const phoneOk = !!user.phone && (user.phoneVerified || !otpAvailable);
+    const lucky = todayLuckyDeal();
 
     res.json({
       success: true,
       isAdmin,
       freeTrialsLeft,
       totalFreeTrials: FREE_TRIALS,
-      needsPhone: freeTrialsLeft > 0 && !user.phone,
+      needsPhone: freeTrialsLeft > 0 && !phoneOk,
       phoneRegistered: !!user.phone,
+      phoneVerified: user.phoneVerified,
+      otpRequired: otpAvailable,
+      otpChannel: otpChannel(),
       coins: user.coins,
-      sessionCost: SESSION_COST
+      sessionCost: SESSION_COST,
+      sessionCostToday: applyPercentOff(SESSION_COST, lucky.aiSessionPercentOff),
+      luckyDeal: { level: lucky.level, label: lucky.label, aiSessionPercentOff: lucky.aiSessionPercentOff }
     });
   } catch (err: any) {
     console.error('[Recruiter Entitlement Error]', err);
     res.status(500).json({ error: 'Failed to resolve entitlement.' });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// 1c. Phone OTP — free trials are anchored to a verified mobile number. The
+// code goes out by SMS (Fast2SMS) when configured, else to the account email;
+// if neither channel exists, verification is skipped (legacy direct-set path).
+// -----------------------------------------------------------------------------
+recruiterRouter.post('/phone/request-otp', async (req, res) => {
+  try {
+    const viewer = await resolvedViewerFromRequest(req, true);
+    if (!viewer.email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = await prisma.user.findUnique({ where: { email: viewer.email } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Verify a new number, or the already-saved one for legacy accounts.
+    const phone = normalizePhone(req.body?.phone) || user.phone;
+    if (!phone) return res.status(400).json({ error: 'Enter a valid 10-digit mobile number.' });
+
+    const taken = await prisma.user.findFirst({ where: { phone, NOT: { id: user.id } }, select: { id: true } });
+    if (taken) {
+      return res.status(409).json({ error: 'This mobile number is already linked to another account — free trials are one set per person.', code: 'PHONE_TAKEN' });
+    }
+
+    if (otpChannel() === 'NONE') {
+      // No SMS gateway and no email creds — the platform cannot deliver an OTP.
+      // Fall back to the legacy unverified path rather than blocking trials.
+      console.warn('[OTP] No delivery channel configured — accepting phone without verification.');
+      await prisma.user.update({ where: { id: user.id }, data: { phone, phoneVerified: false, pendingPhone: null, phoneOtpHash: null, phoneOtpExpiresAt: null } });
+      return res.json({ success: true, otpRequired: false, phoneSaved: true });
+    }
+
+    const code = generateOtp();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        pendingPhone: phone,
+        phoneOtpHash: hashOtp(code),
+        phoneOtpExpiresAt: new Date(Date.now() + 10 * 60 * 1000)
+      }
+    });
+
+    const channel = await deliverOtp(phone, user.email, code);
+    res.json({
+      success: true,
+      otpRequired: true,
+      channel,
+      message: channel === 'SMS'
+        ? `OTP sent to +91 ${phone.slice(0, 2)}******${phone.slice(-2)}.`
+        : `SMS gateway not configured — the OTP was sent to your email ${user.email}.`
+    });
+  } catch (err: any) {
+    console.error('[OTP Request Error]', err);
+    res.status(500).json({ error: 'Failed to send the OTP. Please retry.' });
+  }
+});
+
+recruiterRouter.post('/phone/verify-otp', async (req, res) => {
+  try {
+    const viewer = await resolvedViewerFromRequest(req, true);
+    if (!viewer.email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = await prisma.user.findUnique({ where: { email: viewer.email } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const code = String(req.body?.code || '').trim();
+    if (!user.pendingPhone || !user.phoneOtpHash) {
+      return res.status(409).json({ error: 'No verification in progress — request an OTP first.' });
+    }
+    if (!user.phoneOtpExpiresAt || user.phoneOtpExpiresAt.getTime() < Date.now()) {
+      return res.status(410).json({ error: 'This OTP has expired — request a fresh one.' });
+    }
+    if (!verifyOtpHash(code, user.phoneOtpHash)) {
+      return res.status(400).json({ error: 'Incorrect OTP. Check the code and try again.' });
+    }
+
+    try {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          phone: user.pendingPhone,
+          phoneVerified: true,
+          pendingPhone: null,
+          phoneOtpHash: null,
+          phoneOtpExpiresAt: null
+        }
+      });
+    } catch (e: any) {
+      if (e?.code === 'P2002') {
+        return res.status(409).json({ error: 'This mobile number was just linked to another account.', code: 'PHONE_TAKEN' });
+      }
+      throw e;
+    }
+
+    res.json({ success: true, phoneVerified: true });
+  } catch (err: any) {
+    console.error('[OTP Verify Error]', err);
+    res.status(500).json({ error: 'Failed to verify the OTP.' });
   }
 });
 
@@ -201,13 +313,27 @@ recruiterRouter.post('/sessions', async (req, res) => {
 
     const isAdmin = user.role === 'ADMIN';
     const freeTrialsLeft = Math.max(0, FREE_TRIALS - user.freeInterviewsUsed);
+    const otpAvailable = otpChannel() !== 'NONE';
     let paymentMode: 'ADMIN' | 'FREE_TRIAL' | 'COINS' = 'COINS';
+
+    // Coin price for this session: lucky day and coupon both discount it, the
+    // better of the two wins (they never stack).
+    const lucky = todayLuckyDeal();
+    let sessionCost = SESSION_COST;
+    let appliedCoupon: { id: string; code: string } | null = null;
+    let discountLabel: string | null = null;
 
     if (isAdmin) {
       paymentMode = 'ADMIN';
     } else if (freeTrialsLeft > 0) {
-      // A trial is anchored to a mobile number — one quota per human, not per email.
-      if (!user.phone) {
+      // A trial is anchored to a mobile number — one quota per human, not per
+      // email. With an OTP channel live, the number must actually be verified.
+      if (otpAvailable) {
+        if (!user.phone || !user.phoneVerified) {
+          return res.status(400).json({ error: 'Verify your mobile number by OTP to claim your free interviews.', code: 'PHONE_OTP_REQUIRED', freeTrialsLeft });
+        }
+      } else if (!user.phone) {
+        // Legacy path: no OTP channel configured anywhere — accept a raw number.
         const phone = normalizePhone(req.body?.phone);
         if (!phone) {
           return res.status(400).json({ error: 'Register your mobile number to claim your free interviews.', code: 'PHONE_REQUIRED', freeTrialsLeft });
@@ -223,9 +349,28 @@ recruiterRouter.post('/sessions', async (req, res) => {
       }
       paymentMode = 'FREE_TRIAL';
     } else {
+      let percentOff = lucky.aiSessionPercentOff;
+      if (percentOff > 0) discountLabel = `lucky day ${percentOff}% off`;
+
+      if (req.body?.couponCode) {
+        try {
+          const coupon = await validateCoupon(req.body.couponCode, 'AI_SESSION', user.id);
+          if (coupon.percentOff > percentOff) {
+            percentOff = coupon.percentOff;
+            appliedCoupon = { id: coupon.id, code: coupon.code };
+            discountLabel = `coupon ${coupon.code} ${coupon.percentOff}% off`;
+          }
+        } catch (e: any) {
+          if (e instanceof CouponError) return res.status(400).json({ error: e.message, code: 'COUPON_INVALID' });
+          throw e;
+        }
+      }
+
+      sessionCost = applyPercentOff(SESSION_COST, percentOff);
+
       // Pre-flight coin check so we never burn an LLM call for a user who can't afford the session.
-      if (user.coins < SESSION_COST) {
-        return res.status(402).json({ error: 'Insufficient coins.', required: SESSION_COST });
+      if (user.coins < sessionCost) {
+        return res.status(402).json({ error: 'Insufficient coins.', required: sessionCost });
       }
     }
 
@@ -237,17 +382,29 @@ recruiterRouter.post('/sessions', async (req, res) => {
     // Execute the transaction
     const session = await prisma.$transaction(async (tx) => {
       if (paymentMode === 'COINS') {
-        const updatedUser = await tx.user.update({
-          where: { id: user.id },
-          data: { coins: { decrement: SESSION_COST } }
-        });
+        if (sessionCost > 0) {
+          const updatedUser = await tx.user.update({
+            where: { id: user.id },
+            data: { coins: { decrement: sessionCost } }
+          });
 
-        if (updatedUser.coins < 0) {
-          throw new Error("INSUFFICIENT_COINS");
+          if (updatedUser.coins < 0) {
+            throw new Error("INSUFFICIENT_COINS");
+          }
+        }
+
+        // The unique (couponId, userId) constraint makes a concurrent double
+        // redeem abort the whole transaction — no coupon is ever spent twice.
+        if (appliedCoupon) {
+          await redeemCoupon(tx, appliedCoupon.id, user.id, 'AI_SESSION');
         }
 
         await tx.activityLog.create({
-          data: { userId: user.id, eventDescription: "Unlocked Premium AI Recruiter Session", coinDelta: -SESSION_COST }
+          data: {
+            userId: user.id,
+            eventDescription: `Unlocked Premium AI Recruiter Session${discountLabel ? ` (${discountLabel})` : ''}`,
+            coinDelta: -sessionCost
+          }
         });
       } else if (paymentMode === 'FREE_TRIAL') {
         const updatedUser = await tx.user.update({
@@ -269,7 +426,7 @@ recruiterRouter.post('/sessions', async (req, res) => {
           userId: user.id,
           profileId: profile.id,
           mode: 'FULL_PIPELINE',
-          coinsSpent: paymentMode === 'COINS' ? SESSION_COST : 0,
+          coinsSpent: paymentMode === 'COINS' ? sessionCost : 0,
           status: 'IN_PROGRESS',
           currentRound: 1,
           rounds: {
@@ -294,10 +451,15 @@ recruiterRouter.post('/sessions', async (req, res) => {
     // interactive-transaction timeout aborts multi-statement writes mid-flight.
     }, { timeout: 30000, maxWait: 10000 });
 
-    res.status(201).json({ success: true, session, paymentMode });
+    mailInterviewStarted(user.email, session.id, paymentMode);
+
+    res.status(201).json({ success: true, session, paymentMode, coinsCharged: paymentMode === 'COINS' ? sessionCost : 0, discountApplied: discountLabel });
   } catch (err: any) {
     if (err.message === 'INSUFFICIENT_COINS') {
       return res.status(402).json({ error: 'Insufficient coins.', required: SESSION_COST });
+    }
+    if (err?.code === 'P2002' && String(err?.meta?.target || '').includes('couponId')) {
+      return res.status(409).json({ error: 'This coupon was already used — remove it and retry.', code: 'COUPON_USED' });
     }
     if (err.message === 'TRIALS_EXHAUSTED') {
       return res.status(402).json({ error: 'Your free trials are used up. Sessions now cost coins.', required: SESSION_COST });
@@ -346,13 +508,18 @@ recruiterRouter.get('/human-recruiters', async (req, res) => {
         })
       : [];
 
+    // Directory prices must match what booking creation will actually charge —
+    // including today's lucky-day platform-fee discount.
+    const lucky = todayLuckyDeal();
     res.json({
       success: true,
       viewerIsAdmin: isAdmin,
       myApplication,
       pendingApplications,
+      luckyDeal: { level: lucky.level, label: lucky.label, platformFeePercentOff: lucky.platformFeePercentOff },
       recruiters: recruiters.map(r => {
-        const platformFeeInr = Math.max(PLATFORM_FEE_MIN_INR, Math.round(r.feeInr * PLATFORM_FEE_RATE));
+        const basePlatformFee = Math.max(PLATFORM_FEE_MIN_INR, Math.round(r.feeInr * PLATFORM_FEE_RATE));
+        const platformFeeInr = applyPercentOff(basePlatformFee, lucky.platformFeePercentOff);
         return { ...r, platformFeeInr, totalInr: r.feeInr + platformFeeInr };
       })
     });
@@ -522,7 +689,7 @@ recruiterRouter.post('/bookings', async (req, res) => {
     const user = await prisma.user.findUnique({ where: { email: viewer.email } });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const { recruiterId, preferredAt, note } = req.body || {};
+    const { recruiterId, preferredAt, note, contactPhone } = req.body || {};
     const slot = preferredAt ? new Date(preferredAt) : null;
     if (!recruiterId || !slot || isNaN(slot.getTime())) {
       return res.status(400).json({ error: 'recruiterId and a valid preferredAt datetime are required.' });
@@ -531,12 +698,22 @@ recruiterRouter.post('/bookings', async (req, res) => {
       return res.status(400).json({ error: 'Pick a slot at least 1 hour from now.' });
     }
 
+    // The recruiter calls this number to confirm the meet before the session.
+    const phone = normalizePhone(contactPhone) || user.phone;
+    if (!phone) {
+      return res.status(400).json({ error: 'Add a 10-digit contact number — the recruiter calls you on it to confirm the meet.', code: 'PHONE_REQUIRED' });
+    }
+
     const recruiter = await prisma.humanRecruiter.findUnique({ where: { id: recruiterId } });
     if (!recruiter || !recruiter.active) {
       return res.status(404).json({ error: 'This recruiter is not available.' });
     }
 
-    const platformFeeInr = Math.max(PLATFORM_FEE_MIN_INR, Math.round(recruiter.feeInr * PLATFORM_FEE_RATE));
+    // Lucky days discount ONLY the platform's cut — the recruiter's fee is
+    // their income and always stays whole.
+    const lucky = todayLuckyDeal();
+    const basePlatformFee = Math.max(PLATFORM_FEE_MIN_INR, Math.round(recruiter.feeInr * PLATFORM_FEE_RATE));
+    const platformFeeInr = applyPercentOff(basePlatformFee, lucky.platformFeePercentOff);
     const totalInr = recruiter.feeInr + platformFeeInr;
 
     const booking = await prisma.recruiterBooking.create({
@@ -545,6 +722,7 @@ recruiterRouter.post('/bookings', async (req, res) => {
         recruiterId: recruiter.id,
         preferredAt: slot,
         note: note ? String(note).substring(0, 1000) : null,
+        contactPhone: phone,
         recruiterFeeInr: recruiter.feeInr,
         platformFeeInr,
         totalInr,
@@ -653,24 +831,34 @@ recruiterRouter.post('/bookings/:id/pay/verify', async (req, res) => {
       return res.status(400).json({ error: 'Payment signature verification failed. If money was deducted it will auto-refund — contact the admin otherwise.' });
     }
 
-    // Signature is cryptographic proof the gateway captured the money — the
-    // booking confirms instantly, no manual admin verification needed.
+    // Signature is cryptographic proof the gateway captured the money. The
+    // slot still needs the recruiter to confirm they are actually free — the
+    // live room is only minted when they accept.
     const updated = await prisma.recruiterBooking.update({
       where: { id: booking.id },
       data: {
-        status: 'CONFIRMED',
-        razorpayPaymentId: String(razorpay_payment_id),
-        meetingRoomId: mintMeetingRoom(booking.id)
+        status: 'AWAITING_RECRUITER_CONFIRMATION',
+        razorpayPaymentId: String(razorpay_payment_id)
       },
       include: { recruiter: true }
     });
 
-    mailBookingConfirmed(user.email, booking.recruiter.user?.email || null, {
+    const candidateName = user.name || user.username;
+    mailBookingPaidAwaitingRecruiter(user.email, {
+      id: booking.id, preferredAt: booking.preferredAt, recruiterName: booking.recruiter.name, totalInr: booking.totalInr
+    });
+    mailRecruiterAvailabilityRequest(booking.recruiter.user?.email || null, {
       id: booking.id,
       preferredAt: booking.preferredAt,
       recruiterName: booking.recruiter.name,
-      candidateName: user.name || user.username
+      candidateName,
+      candidatePhone: (booking as any).contactPhone || user.phone,
+      recruiterFeeInr: booking.recruiterFeeInr
     });
+    sendNotification(user.id, 'Payment confirmed ✓', `Waiting for ${booking.recruiter.name} to confirm your slot — expect a call.`, '/recruiter/book', 'SUCCESS');
+    if (booking.recruiter.userId) {
+      sendNotification(booking.recruiter.userId, 'Paid booking needs your confirmation', `${candidateName} paid for a session — confirm you are free.`, '/recruiter/book', 'WARNING');
+    }
 
     res.json({ success: true, booking: updated });
   } catch (err: any) {
@@ -743,8 +931,8 @@ recruiterRouter.get('/bookings', async (req, res) => {
     const myRecruiterProfile = await prisma.humanRecruiter.findUnique({ where: { userId: user.id } });
     const assignedBookings = myRecruiterProfile
       ? await prisma.recruiterBooking.findMany({
-          where: { recruiterId: myRecruiterProfile.id, status: { in: ['CONFIRMED', 'COMPLETED'] } },
-          include: { user: { select: { username: true, name: true } } },
+          where: { recruiterId: myRecruiterProfile.id, status: { in: ['AWAITING_RECRUITER_CONFIRMATION', 'CONFIRMED', 'COMPLETED'] } },
+          include: { user: { select: { username: true, name: true, phone: true } } },
           orderBy: { preferredAt: 'asc' },
           take: 50
         })
@@ -825,24 +1013,123 @@ recruiterRouter.post('/bookings/:id/verify', async (req, res) => {
       return res.status(409).json({ error: 'This booking is not awaiting verification.', status: booking.status });
     }
 
+    // Money confirmed — now the recruiter must confirm they are free before
+    // the live room is minted.
+    const updated = await prisma.recruiterBooking.update({
+      where: { id: booking.id },
+      data: { status: 'AWAITING_RECRUITER_CONFIRMATION' },
+      include: { recruiter: true }
+    });
+
+    const candidateName = booking.user.name || booking.user.username;
+    mailBookingPaidAwaitingRecruiter(booking.user.email, {
+      id: booking.id, preferredAt: booking.preferredAt, recruiterName: booking.recruiter.name, totalInr: booking.totalInr
+    });
+    mailRecruiterAvailabilityRequest(booking.recruiter.user?.email || null, {
+      id: booking.id,
+      preferredAt: booking.preferredAt,
+      recruiterName: booking.recruiter.name,
+      candidateName,
+      candidatePhone: (booking as any).contactPhone || booking.user.phone,
+      recruiterFeeInr: booking.recruiterFeeInr
+    });
+    sendNotification(booking.userId, 'Payment verified ✓', `Waiting for ${booking.recruiter.name} to confirm your slot — expect a call.`, '/recruiter/book', 'SUCCESS');
+    if (booking.recruiter.userId) {
+      sendNotification(booking.recruiter.userId, 'Paid booking needs your confirmation', `${candidateName} paid for a session — confirm you are free.`, '/recruiter/book', 'WARNING');
+    }
+
+    res.json({ success: true, booking: updated });
+  } catch (err: any) {
+    console.error('[Booking Verify Error]', err);
+    res.status(500).json({ error: 'Failed to verify the booking.' });
+  }
+});
+
+// Recruiter (or admin, for unlinked listings) confirms they are free for the
+// paid slot — THIS is what mints the live room and locks the session in.
+recruiterRouter.post('/bookings/:id/accept', async (req, res) => {
+  try {
+    const viewer = await resolvedViewerFromRequest(req, true);
+    if (!viewer.email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = await prisma.user.findUnique({ where: { email: viewer.email } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const booking = await prisma.recruiterBooking.findUnique({
+      where: { id: req.params.id },
+      include: { user: true, recruiter: { include: { user: { select: { email: true } } } } }
+    });
+    if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+
+    const isAdmin = user.role === 'ADMIN';
+    const isRecruiter = !!booking.recruiter.userId && booking.recruiter.userId === user.id;
+    if (!isAdmin && !isRecruiter) return res.status(403).json({ error: 'Only the recruiter or the admin can confirm this booking.' });
+    if (booking.status !== 'AWAITING_RECRUITER_CONFIRMATION') {
+      return res.status(409).json({ error: 'This booking is not awaiting recruiter confirmation.', status: booking.status });
+    }
+
     const updated = await prisma.recruiterBooking.update({
       where: { id: booking.id },
       data: { status: 'CONFIRMED', meetingRoomId: booking.meetingRoomId || mintMeetingRoom(booking.id) },
       include: { recruiter: true }
     });
 
-    // Both sides get the live room link the moment the money is confirmed.
+    // Both sides get the live room link + each other's number for the
+    // confirmation call.
     mailBookingConfirmed(booking.user.email, booking.recruiter.user?.email || null, {
       id: booking.id,
       preferredAt: booking.preferredAt,
       recruiterName: booking.recruiter.name,
-      candidateName: booking.user.name || booking.user.username
+      candidateName: booking.user.name || booking.user.username,
+      candidatePhone: (booking as any).contactPhone || booking.user.phone,
+      recruiterPhone: booking.recruiter.contactPhone
     });
+    sendNotification(booking.userId, 'Interview confirmed 🎉', `${booking.recruiter.name} confirmed your slot — they will call you before the session. Live room link is in your email.`, '/recruiter/book', 'SUCCESS');
 
     res.json({ success: true, booking: updated });
   } catch (err: any) {
-    console.error('[Booking Verify Error]', err);
-    res.status(500).json({ error: 'Failed to verify the booking.' });
+    console.error('[Booking Accept Error]', err);
+    res.status(500).json({ error: 'Failed to confirm the booking.' });
+  }
+});
+
+// Recruiter can't make the slot — the admin settles the refund manually.
+recruiterRouter.post('/bookings/:id/decline', async (req, res) => {
+  try {
+    const viewer = await resolvedViewerFromRequest(req, true);
+    if (!viewer.email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = await prisma.user.findUnique({ where: { email: viewer.email } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const booking = await prisma.recruiterBooking.findUnique({
+      where: { id: req.params.id },
+      include: { user: true, recruiter: true }
+    });
+    if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+
+    const isAdmin = user.role === 'ADMIN';
+    const isRecruiter = !!booking.recruiter.userId && booking.recruiter.userId === user.id;
+    if (!isAdmin && !isRecruiter) return res.status(403).json({ error: 'Only the recruiter or the admin can decline this booking.' });
+    if (booking.status !== 'AWAITING_RECRUITER_CONFIRMATION') {
+      return res.status(409).json({ error: 'This booking is not awaiting recruiter confirmation.', status: booking.status });
+    }
+
+    const updated = await prisma.recruiterBooking.update({
+      where: { id: booking.id },
+      data: { status: 'CANCELLED' },
+      include: { recruiter: true }
+    });
+
+    mailBookingCancelled(booking.user.email, {
+      id: booking.id, recruiterName: booking.recruiter.name, totalInr: booking.totalInr, wasPaid: true
+    });
+    sendNotification(booking.userId, 'Booking declined', `${booking.recruiter.name} is not available for that slot. The admin will settle your refund.`, '/recruiter/book', 'WARNING');
+
+    res.json({ success: true, booking: updated });
+  } catch (err: any) {
+    console.error('[Booking Decline Error]', err);
+    res.status(500).json({ error: 'Failed to decline the booking.' });
   }
 });
 

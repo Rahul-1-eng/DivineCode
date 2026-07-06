@@ -31,6 +31,7 @@ function loadRazorpay(): Promise<void> {
 const STATUS_META: Record<string, { label: string; color: string }> = {
   PENDING_PAYMENT: { label: 'Awaiting Your Payment', color: '#fbbf24' },
   AWAITING_VERIFICATION: { label: 'Payment Under Verification', color: '#22d3ee' },
+  AWAITING_RECRUITER_CONFIRMATION: { label: 'Waiting for Recruiter to Confirm', color: '#f472b6' },
   CONFIRMED: { label: 'Confirmed ✓', color: '#4ade80' },
   COMPLETED: { label: 'Completed', color: '#a5b4fc' },
   CANCELLED: { label: 'Cancelled', color: '#ef4444' }
@@ -78,12 +79,14 @@ export default function RecruiterMarketplace() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [razorpayAvailable, setRazorpayAvailable] = useState(false);
+  const [luckyDeal, setLuckyDeal] = useState<any>(null);
   const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
 
   // Booking flow state
   const [selected, setSelected] = useState<any>(null);
   const [preferredAt, setPreferredAt] = useState('');
   const [note, setNote] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
   const [isBooking, setIsBooking] = useState(false);
   const [payment, setPayment] = useState<any>(null); // instructions for the just-created booking
   const [utrInputs, setUtrInputs] = useState<Record<string, string>>({});
@@ -110,6 +113,7 @@ export default function RecruiterMarketplace() {
       setBookings(bookRes.bookings || []);
       setAssignedBookings(bookRes.assignedBookings || []);
       setRazorpayAvailable(!!bookRes.razorpayAvailable);
+      setLuckyDeal(recRes.luckyDeal || null);
       setIsAdmin(!!recRes.viewerIsAdmin || !!bookRes.viewerIsAdmin);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to load the marketplace.');
@@ -126,12 +130,13 @@ export default function RecruiterMarketplace() {
     try {
       const res = await fetchApi('/api/v2/recruiter/bookings', {
         method: 'POST',
-        body: JSON.stringify({ recruiterId: selected.id, preferredAt: new Date(preferredAt).toISOString(), note })
+        body: JSON.stringify({ recruiterId: selected.id, preferredAt: new Date(preferredAt).toISOString(), note, contactPhone })
       });
       setPayment({ ...res.payment, bookingId: res.booking.id });
       setSelected(null);
       setPreferredAt('');
       setNote('');
+      setContactPhone('');
       toast.success('Slot requested — complete the payment to lock it in.', { icon: '🧾' });
       loadAll();
     } catch (err: any) {
@@ -169,7 +174,7 @@ export default function RecruiterMarketplace() {
               method: 'POST',
               body: JSON.stringify(resp)
             });
-            toast.success('Payment verified — your interview is confirmed! The live room link is in your email.', { icon: '🎉', duration: 6000 });
+            toast.success('Payment verified! The recruiter will now confirm your slot and call you to confirm the meet — watch your email.', { icon: '🎉', duration: 7000 });
             setPayment(null);
             loadAll();
           } catch (err: any) {
@@ -223,6 +228,28 @@ export default function RecruiterMarketplace() {
       loadAll();
     } catch (err: any) {
       toast.error(err?.message || 'Cancellation failed.');
+    }
+  };
+
+  // Recruiter-side (or admin) decision on a paid slot: accept mints the live
+  // room and emails both sides; decline routes the refund to the admin.
+  const acceptBooking = async (bookingId: string) => {
+    try {
+      await fetchApi(`/api/v2/recruiter/bookings/${bookingId}/accept`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success('Slot confirmed — both sides got the live room link. Call the candidate to confirm the meet!', { icon: '✅', duration: 6000 });
+      loadAll();
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not confirm the booking.');
+    }
+  };
+
+  const declineBooking = async (bookingId: string) => {
+    try {
+      await fetchApi(`/api/v2/recruiter/bookings/${bookingId}/decline`, { method: 'POST', body: JSON.stringify({}) });
+      toast.success('Booking declined — the admin will settle the refund with the candidate.');
+      loadAll();
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not decline the booking.');
     }
   };
 
@@ -310,6 +337,12 @@ export default function RecruiterMarketplace() {
           </div>
           <button onClick={() => router.push('/recruiter')} style={STYLES.ghostBtn}>← AI Recruiter</button>
         </div>
+
+        {luckyDeal?.label && (
+          <div style={{ padding: '12px 18px', borderRadius: 12, background: 'rgba(74,222,128,0.09)', border: '1px solid rgba(74,222,128,0.4)', color: '#4ade80', fontWeight: 700, fontSize: 13.5 }}>
+            {luckyDeal.label}
+          </div>
+        )}
 
         {/* Fresh payment instructions (after creating a booking) */}
         <AnimatePresence>
@@ -442,12 +475,13 @@ export default function RecruiterMarketplace() {
                   <strong style={{ fontSize: 14 }}>Request a slot with {selected.name} — total ₹{selected.totalInr}</strong>
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                     <input type="datetime-local" value={preferredAt} onChange={(e) => setPreferredAt(e.target.value)} style={{ ...STYLES.input, width: 'auto', flex: '0 0 auto' }} />
+                    <input type="tel" placeholder="Your mobile number — the recruiter calls it to confirm" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} maxLength={13} style={{ ...STYLES.input, flex: 1, minWidth: 220, width: 'auto' }} />
                     <input placeholder="Anything the recruiter should focus on? (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ ...STYLES.input, flex: 1, minWidth: 220, width: 'auto' }} />
                     <button disabled={isBooking} onClick={createBooking} style={{ ...STYLES.primaryBtn, opacity: isBooking ? 0.6 : 1 }}>
                       {isBooking ? 'Requesting…' : 'Request Slot →'}
                     </button>
                   </div>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>The slot locks after payment — instantly for online payment, or once the admin verifies a manual UPI transfer.</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>After payment, the recruiter confirms they are free and calls you to confirm the meet — then the live room link arrives by email.</span>
                 </div>
               </motion.div>
             )}
@@ -522,25 +556,38 @@ export default function RecruiterMarketplace() {
           <section style={{ ...STYLES.panel, border: '1px solid rgba(74,222,128,0.4)' }}>
             <h2 style={{ ...STYLES.sectionTitle, color: '#4ade80' }}>My Interview Assignments (as Recruiter)</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {assignedBookings.map(b => (
-                <div key={b.id} style={{ padding: 16, borderRadius: 14, background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                  <div style={{ fontSize: 14 }}>
-                    <strong>{b.user?.name || b.user?.username}</strong>
-                    <span style={{ color: 'var(--text-muted)' }}> · {new Date(b.preferredAt).toLocaleString()} · you earn ₹{b.recruiterFeeInr}</span>
-                    {b.note && <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4 }}>Focus: {b.note}</span>}
+              {assignedBookings.map(b => {
+                const candidatePhone = b.contactPhone || b.user?.phone;
+                return (
+                  <div key={b.id} style={{ padding: 16, borderRadius: 14, background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                    <div style={{ fontSize: 14 }}>
+                      <strong>{b.user?.name || b.user?.username}</strong>
+                      <span style={{ color: 'var(--text-muted)' }}> · {new Date(b.preferredAt).toLocaleString()} · you earn ₹{b.recruiterFeeInr}</span>
+                      {candidatePhone && b.status !== 'COMPLETED' && (
+                        <span style={{ display: 'block', fontSize: 12.5, color: '#22d3ee', marginTop: 4 }}>📞 Candidate: {candidatePhone} — call to confirm the meet</span>
+                      )}
+                      {b.note && <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4 }}>Focus: {b.note}</span>}
+                    </div>
+                    {b.status === 'AWAITING_RECRUITER_CONFIRMATION' ? (
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button onClick={() => acceptBooking(b.id)} style={{ ...STYLES.primaryBtn, padding: '10px 22px', fontSize: 13, background: '#4ade80' }}>
+                          ✅ I'm Free — Confirm
+                        </button>
+                        <button onClick={() => declineBooking(b.id)} style={STYLES.ghostBtn}>Not Available</button>
+                      </div>
+                    ) : b.status === 'CONFIRMED' ? (
+                      <button
+                        onClick={() => router.push(`/recruiter/call/${b.id}`)}
+                        style={{ ...STYLES.primaryBtn, padding: '10px 22px', fontSize: 13, background: '#4ade80' }}
+                      >
+                        🎥 Join as Interviewer
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 12, fontWeight: 800, color: '#a5b4fc' }}>COMPLETED</span>
+                    )}
                   </div>
-                  {b.status === 'CONFIRMED' ? (
-                    <button
-                      onClick={() => router.push(`/recruiter/call/${b.id}`)}
-                      style={{ ...STYLES.primaryBtn, padding: '10px 22px', fontSize: 13, background: '#4ade80' }}
-                    >
-                      🎥 Join as Interviewer
-                    </button>
-                  ) : (
-                    <span style={{ fontSize: 12, fontWeight: 800, color: '#a5b4fc' }}>COMPLETED</span>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}
@@ -586,6 +633,20 @@ export default function RecruiterMarketplace() {
                         />
                         <button onClick={() => submitUtr(b.id)} style={{ ...STYLES.primaryBtn, padding: '10px 20px', fontSize: 13 }}>Submit</button>
                         <button onClick={() => cancelBooking(b.id)} style={STYLES.ghostBtn}>Cancel</button>
+                      </div>
+                    )}
+
+                    {b.status === 'AWAITING_RECRUITER_CONFIRMATION' && (
+                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                          💰 Payment received. {b.recruiter?.name} is confirming the slot — expect a call on your number to confirm the meet.
+                        </span>
+                        {isAdmin && (
+                          <>
+                            <button onClick={() => acceptBooking(b.id)} style={{ ...STYLES.primaryBtn, padding: '10px 20px', fontSize: 13, background: '#4ade80' }}>✓ Confirm on Recruiter's Behalf</button>
+                            <button onClick={() => declineBooking(b.id)} style={STYLES.ghostBtn}>Decline & Refund</button>
+                          </>
+                        )}
                       </div>
                     )}
 

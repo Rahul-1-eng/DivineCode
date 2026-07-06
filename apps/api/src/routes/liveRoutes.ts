@@ -10,6 +10,7 @@
 import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
+import { broadcastLiveStarted } from '../modules/email/emailService';
 
 export const liveRouter = Router();
 
@@ -136,6 +137,10 @@ liveRouter.post('/rooms', async (req, res) => {
       io.emit('live_room_started', room);
       io.emit('global_ticker', `🔴 ${user.username || user.name} just went LIVE: ${room.title}`);
     }
+
+    // Every user also gets the stream link by email — the bell only reaches
+    // whoever is already on the platform.
+    broadcastLiveStarted({ id: room.id, title: room.title }, user.name || user.username, user.email);
 
     res.status(201).json({ success: true, room });
   } catch (err: any) {

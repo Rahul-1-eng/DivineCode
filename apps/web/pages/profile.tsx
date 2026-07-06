@@ -240,7 +240,25 @@ export default function ProfilePage() {
             <h1 style={{ fontSize: 'clamp(28px, 6vw, 48px)', margin: '10px 0', wordBreak: 'break-word', lineHeight: 1.1 }}>{name}</h1>
             <p style={{ color: 'var(--text-muted)', margin: 0, wordBreak: 'break-word' }}>{session.user?.email}</p>
           </div>
-          {session.user?.image && <img src={session.user.image} alt="Profile" style={avatar} />}
+          {/* Google photos 403 without no-referrer; password accounts fall back
+              to the DB avatar, then to an initial-letter badge. */}
+          {(session.user?.image || userData?.avatarUrl) ? (
+            <img
+              src={session.user?.image || userData?.avatarUrl}
+              alt="Profile"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                const el = e.currentTarget;
+                if (userData?.avatarUrl && el.src !== userData.avatarUrl) el.src = userData.avatarUrl;
+                else el.style.display = 'none';
+              }}
+              style={avatar}
+            />
+          ) : (
+            <div style={{ ...avatar, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg, #6366f1, #22d3ee)', color: '#020617', fontSize: 'clamp(32px, 8vw, 44px)', fontWeight: 900 }}>
+              {(name || session.user?.email || '?').charAt(0).toUpperCase()}
+            </div>
+          )}
         </section>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 15, marginTop: 18 }}>
@@ -256,9 +274,10 @@ export default function ProfilePage() {
             <div style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Accuracy</div>
             <div style={{ color: userData?.stats?.accuracy >= 50 ? '#4ade80' : '#fbbf24', fontSize: 38, fontWeight: 900 }}>{userData?.stats?.accuracy || 0}%</div>
           </div>
-          <div style={{ ...card, textAlign: 'center', padding: '24px 15px' }}>
+          <div style={{ ...card, textAlign: 'center', padding: '24px 15px', cursor: 'pointer' }} onClick={() => { window.location.href = '/coins'; }} title="Open the coin wallet">
             <div style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 8, fontWeight: 'bold', textTransform: 'uppercase' }}>Total Coins</div>
             <div style={{ color: '#fcd34d', fontSize: 38, fontWeight: 900 }}>{userData?.coins || 0}</div>
+            <div style={{ color: '#22d3ee', fontSize: 12, fontWeight: 700, marginTop: 6 }}>Buy more — 50 for ₹10 →</div>
           </div>
         </div>
 

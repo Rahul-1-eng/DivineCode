@@ -336,7 +336,7 @@ const navLinks = [
                 {profile ? (
                   <>
                     <span style={{ padding: '6px 12px', borderRadius: 999, background: 'rgba(251,191,36,.1)', color: '#fbbf24', fontWeight: 700, fontSize: 'clamp(10px, 2vw, 12px)', border: '1px solid rgba(251,191,36,0.2)' }}>🏆 {profile.rating || 1200}</span>
-                    <span style={{ padding: '6px 12px', borderRadius: 999, background: 'var(--accent-glow)', color: 'var(--accent-primary)', fontWeight: 700, fontSize: 'clamp(10px, 2vw, 12px)', border: '1px solid var(--accent-glow)' }}>🪙 {profile.coins || 0}</span>
+                    <a href="/coins" title="Open the coin wallet — buy coins, redeem coupons" style={{ padding: '6px 12px', borderRadius: 999, background: 'var(--accent-glow)', color: 'var(--accent-primary)', fontWeight: 700, fontSize: 'clamp(10px, 2vw, 12px)', border: '1px solid var(--accent-glow)', textDecoration: 'none', cursor: 'pointer' }}>🪙 {profile.coins || 0} +</a>
                   </>
                 ) : profileError ? (
                   <span style={{ fontSize: '11px', color: '#ef4444', padding: '6px 12px' }}>⚠️ {profileError}</span>

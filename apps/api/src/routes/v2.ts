@@ -37,7 +37,8 @@ import { authRouter } from './authRoutes';
 import { aiRouter } from './aiRoutes';
 import communityRoutes from './communityRoutes';
 import { liveRouter } from './liveRoutes';
-import { mailContestRegistered } from '../modules/email/emailService';
+import { coinRouter } from './coinRoutes';
+import { mailContestRegistered, broadcastContestCreated } from '../modules/email/emailService';
 
 const PLATFORM_OWNER_EMAIL = (process.env.PLATFORM_OWNER_EMAIL || '').trim().toLowerCase();
 
@@ -460,6 +461,28 @@ export function mountV2Routes(app: Express, io: Server) {
     const payload = { ...req.body, ownerUserId: viewer.userId };
     const contest = await createContestV2(payload);
     req.app.get('io')?.emit('global_ticker', `⚡ Mashup Room Created: "${contest.title}" by ${viewer.name}`);
+
+    // Everyone hears about the new contest — bell notification + email blast.
+    const creatorName = viewer.name || 'A DivineCode user';
+    prisma.user.upsert({
+      where: { id: 'ALL' },
+      update: {},
+      create: { id: 'ALL', username: 'system_broadcast', email: 'system@divinecode.local', name: 'System Broadcast' }
+    }).then(() => prisma.notification.create({
+      data: {
+        userId: 'ALL',
+        title: '🏆 New Contest Created',
+        message: `${creatorName} created "${contest.title}" — register now!`,
+        link: `/contests/${contest.id}`,
+        type: 'INFO',
+        isRead: false
+      }
+    })).then(notification => {
+      req.app.get('io')?.emit('new_notification', notification);
+    }).catch(err => console.error('[Contest Broadcast Notification Error]', err?.message));
+
+    broadcastContestCreated({ id: contest.id, title: contest.title, startTime: contest.startTime }, creatorName, viewer.email);
+
     res.status(201).json(sanitizeContestForViewer(contest, viewer));
   }));
 
@@ -855,6 +878,7 @@ export function mountV2Routes(app: Express, io: Server) {
   app.use('/api/v2/interview', interviewRouter);
   app.use('/api/v2/recruiter', recruiterRouter);
   app.use('/api/v2/live', liveRouter);
+  app.use('/api/v2/coins', coinRouter);
   app.use('/api/v2/profile', profileRouter);
   app.use('/api/v2', aiRouter); 
 

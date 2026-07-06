@@ -48,18 +48,95 @@ export default function AiRecruiterGateway() {
   const [entitlement, setEntitlement] = useState<any>(null);
   const [phone, setPhone] = useState('');
 
-  useEffect(() => {
+  // Phone OTP verification (free trials are OTP-anchored when a channel exists)
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpChannel, setOtpChannel] = useState<string | null>(null);
+
+  // Coupon for coin-paid sessions
+  const [couponInput, setCouponInput] = useState('');
+  const [coupon, setCoupon] = useState<any>(null);
+
+  const loadEntitlement = () =>
     fetchApi('/api/v2/recruiter/entitlement')
       .then(setEntitlement)
       .catch(() => setEntitlement(null));
-  }, []);
+
+  useEffect(() => { loadEntitlement(); }, []);
 
   const usingFreeTrial = !!entitlement && !entitlement.isAdmin && entitlement.freeTrialsLeft > 0;
+  const baseCost = entitlement?.sessionCost ?? 100;
+  const luckyCost = entitlement?.sessionCostToday ?? baseCost;
+  const couponCost = coupon ? Math.max(0, Math.round(baseCost * (100 - coupon.percentOff) / 100)) : baseCost;
+  const todayCost = Math.min(luckyCost, couponCost); // best-of, mirroring the server
   const priceLabel = entitlement?.isAdmin
     ? 'ADMIN · FREE'
     : usingFreeTrial
       ? `FREE · ${entitlement.freeTrialsLeft}/${entitlement.totalFreeTrials} trials left`
-      : '100 🪙';
+      : todayCost === 0 ? 'FREE TODAY 🍀' : todayCost < baseCost ? `${todayCost} 🪙 (was ${baseCost})` : `${baseCost} 🪙`;
+
+  const needsOtpFlow = usingFreeTrial && entitlement?.needsPhone && entitlement?.otpRequired;
+
+  const requestOtp = async () => {
+    if (!/^[6-9]\d{9}$/.test(phone.replace(/\D/g, '').slice(-10))) {
+      return toast.error('Enter a valid 10-digit mobile number.');
+    }
+    setOtpBusy(true);
+    try {
+      const res = await fetchApi('/api/v2/recruiter/phone/request-otp', {
+        method: 'POST',
+        body: JSON.stringify({ phone })
+      });
+      if (res.otpRequired === false) {
+        toast.success('Mobile number saved.', { icon: '📱' });
+        loadEntitlement();
+      } else {
+        setOtpSent(true);
+        setOtpChannel(res.channel || null);
+        toast.success(res.message || 'OTP sent.', { icon: res.channel === 'EMAIL' ? '📧' : '📱', duration: 6000 });
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not send the OTP.');
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    if (!/^\d{6}$/.test(otpCode.trim())) return toast.error('Enter the 6-digit OTP.');
+    setOtpBusy(true);
+    try {
+      await fetchApi('/api/v2/recruiter/phone/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify({ code: otpCode.trim() })
+      });
+      toast.success('Mobile number verified — your free interviews are unlocked! 🎉');
+      setOtpSent(false);
+      setOtpCode('');
+      loadEntitlement();
+    } catch (err: any) {
+      toast.error(err?.message || 'OTP verification failed.');
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
+  const applyCoupon = async () => {
+    const code = couponInput.trim();
+    if (!code) return;
+    try {
+      const res = await fetchApi('/api/v2/coins/coupons/preview', {
+        method: 'POST',
+        body: JSON.stringify({ code, context: 'AI_SESSION' })
+      });
+      setCoupon(res);
+      toast.success(`Coupon ${res.code} applied — ${res.percentOff}% off this session!`, { icon: '🎟️' });
+    } catch (err: any) {
+      setCoupon(null);
+      toast.error(err?.message || 'Invalid coupon.');
+    }
+  };
 
   const handleResumeUpload = async (file: File) => {
     if (!file.name.toLowerCase().endsWith('.pdf')) {
@@ -102,7 +179,10 @@ export default function AiRecruiterGateway() {
     if (techStack.trim().length < 5) {
       return toast.error("Please provide a valid tech stack so the interviewer can tailor your rounds.");
     }
-    if (usingFreeTrial && entitlement?.needsPhone && !/^[6-9]\d{9}$/.test(phone.replace(/\D/g, '').slice(-10))) {
+    if (needsOtpFlow) {
+      return toast.error("Verify your mobile number by OTP above to claim your free interviews.");
+    }
+    if (usingFreeTrial && entitlement?.needsPhone && !entitlement?.otpRequired && !/^[6-9]\d{9}$/.test(phone.replace(/\D/g, '').slice(-10))) {
       return toast.error("Enter a valid 10-digit mobile number to claim your free interviews.");
     }
 
@@ -121,10 +201,13 @@ export default function AiRecruiterGateway() {
         })
       });
 
-      // 2. Consume a free trial (phone-anchored) or execute the coin deduction
+      // 2. Consume a free trial (OTP-verified phone) or execute the coin deduction
       const sessionRes = await fetchApi('/api/v2/recruiter/sessions', {
         method: 'POST',
-        body: JSON.stringify(entitlement?.needsPhone ? { phone } : {})
+        body: JSON.stringify({
+          ...(entitlement?.needsPhone && !entitlement?.otpRequired ? { phone } : {}),
+          ...(coupon ? { couponCode: coupon.code } : {})
+        })
       });
       if (sessionRes.success) {
         toast.success("Transaction Cleared. Launching Live Environment.", { id: loadingToast, icon: '⚡' });
@@ -134,12 +217,16 @@ export default function AiRecruiterGateway() {
       const code = err?.data?.code;
       if (code === 'PHONE_TAKEN') {
         toast.error("This mobile number is already linked to another account. Free trials are one set per person.", { id: loadingToast, duration: 6000 });
-      } else if (code === 'PHONE_REQUIRED') {
-        toast.error("Register your mobile number to claim the free interviews.", { id: loadingToast });
-      } else if (err.message?.includes('coins') || err.message?.includes('Insufficient')) {
-         toast.error("Transaction Failed: 100 coins required to spin up an instance.", { id: loadingToast });
+      } else if (code === 'PHONE_REQUIRED' || code === 'PHONE_OTP_REQUIRED') {
+        toast.error("Verify your mobile number to claim the free interviews.", { id: loadingToast });
+      } else if (code === 'COUPON_INVALID' || code === 'COUPON_USED') {
+        toast.error(err.message, { id: loadingToast, duration: 6000 });
+        setCoupon(null);
+      } else if (err?.status === 402 || err.message?.includes('coins') || err.message?.includes('Insufficient')) {
+        toast.error(`You need ${err?.data?.required ?? todayCost} coins for a session. Taking you to the coin store — 50 coins for just ₹10!`, { id: loadingToast, duration: 6000 });
+        setTimeout(() => router.push('/coins'), 1800);
       } else {
-         toast.error(`System Fault: ${err.message || 'Initialization aborted.'}`, { id: loadingToast });
+        toast.error(`System Fault: ${err.message || 'Initialization aborted.'}`, { id: loadingToast });
       }
       setStep(0); // Reset state machine on fault
     } finally {
@@ -176,6 +263,12 @@ export default function AiRecruiterGateway() {
                 </ul>
               </div>
 
+              {entitlement?.luckyDeal?.label && (
+                <div style={{ marginBottom: 18, padding: '12px 18px', borderRadius: 12, background: 'rgba(74,222,128,0.09)', border: '1px solid rgba(74,222,128,0.4)', color: '#4ade80', fontWeight: 700, fontSize: 13.5, textAlign: 'center' }}>
+                  {entitlement.luckyDeal.label}
+                </div>
+              )}
+
               <button onClick={() => setStep(1)} style={STYLES.primaryBtn}>
                 Initialize Sandbox <span style={{ background: 'rgba(0,0,0,0.15)', padding: '4px 12px', borderRadius: 999, fontSize: 13, marginLeft: 5 }}>{priceLabel}</span>
               </button>
@@ -183,6 +276,15 @@ export default function AiRecruiterGateway() {
               {usingFreeTrial && (
                 <p style={{ textAlign: 'center', marginTop: 14, marginBottom: 0, fontSize: 13, color: '#4ade80' }}>
                   🎁 Your first {entitlement.totalFreeTrials} full interviews are free — no coins needed.
+                </p>
+              )}
+
+              {!!entitlement && !entitlement.isAdmin && !usingFreeTrial && (
+                <p style={{ textAlign: 'center', marginTop: 14, marginBottom: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+                  Balance: <strong style={{ color: '#fbbf24' }}>{entitlement.coins} 🪙</strong>
+                  {' '}· <a onClick={() => router.push('/coins')} style={{ color: '#22d3ee', cursor: 'pointer', textDecoration: 'underline dotted' }}>
+                    Buy coins — 50 for ₹10 →
+                  </a>
                 </p>
               )}
 
@@ -279,28 +381,88 @@ export default function AiRecruiterGateway() {
                 />
               </div>
 
-              {/* Free trials are anchored to one mobile number per person */}
+              {/* Free trials are anchored to one OTP-verified mobile number per person */}
               {usingFreeTrial && entitlement?.needsPhone && (
                 <div style={{ marginTop: 25 }}>
                   <label style={STYLES.label}>Mobile Number (Claims Your {entitlement.totalFreeTrials} Free Interviews)</label>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="10-digit mobile number"
-                    maxLength={13}
-                    style={STYLES.input}
-                  />
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="10-digit mobile number"
+                      maxLength={13}
+                      disabled={otpSent}
+                      style={{ ...STYLES.input, flex: '1 1 200px', width: 'auto', opacity: otpSent ? 0.6 : 1 }}
+                    />
+                    {entitlement?.otpRequired && (
+                      <button
+                        onClick={requestOtp}
+                        disabled={otpBusy}
+                        style={{ ...STYLES.primaryBtn, width: 'auto', padding: '14px 22px', fontSize: 14, opacity: otpBusy ? 0.6 : 1 }}
+                      >
+                        {otpBusy && !otpSent ? 'Sending…' : otpSent ? 'Resend OTP' : 'Send OTP'}
+                      </button>
+                    )}
+                  </div>
+
+                  {otpSent && (
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="6-digit OTP"
+                        style={{ ...STYLES.input, flex: '1 1 140px', width: 'auto', letterSpacing: 6, fontFamily: 'monospace' }}
+                      />
+                      <button
+                        onClick={verifyOtp}
+                        disabled={otpBusy}
+                        style={{ ...STYLES.primaryBtn, width: 'auto', padding: '14px 22px', fontSize: 14, opacity: otpBusy ? 0.6 : 1 }}
+                      >
+                        {otpBusy ? 'Verifying…' : '✓ Verify'}
+                      </button>
+                      {otpChannel === 'EMAIL' && (
+                        <span style={{ flexBasis: '100%', fontSize: 12, color: '#22d3ee' }}>
+                          📧 SMS gateway not configured — the OTP landed in your email inbox.
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   <p style={{ margin: '8px 0 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
                     One free-trial quota per number — it can't be reused on another account.
                   </p>
                 </div>
               )}
 
+              {/* Coin payers can drop an admin coupon for a discounted session */}
+              {!entitlement?.isAdmin && !usingFreeTrial && (
+                <div style={{ marginTop: 25 }}>
+                  <label style={STYLES.label}>Coupon Code (Optional)</label>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <input
+                      type="text"
+                      value={couponInput}
+                      onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                      placeholder="e.g. DIVINE50"
+                      style={{ ...STYLES.input, flex: '1 1 160px', width: 'auto', fontFamily: 'monospace', letterSpacing: 2 }}
+                    />
+                    <button
+                      onClick={coupon ? () => { setCoupon(null); setCouponInput(''); } : applyCoupon}
+                      style={{ ...STYLES.secondaryBtn, width: 'auto', padding: '14px 22px', fontSize: 14 }}
+                    >
+                      {coupon ? `✕ Remove (−${coupon.percentOff}%)` : 'Apply'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div style={{ display: 'flex', gap: 15, marginTop: 40 }}>
                 <button disabled={isProcessing} onClick={() => setStep(1)} style={{ ...STYLES.secondaryBtn, flex: 1, opacity: isProcessing ? 0.5 : 1 }}>Back</button>
                 <button disabled={isProcessing} onClick={executePipelineInitialization} style={{ ...STYLES.primaryBtn, flex: 2, opacity: isProcessing ? 0.7 : 1 }}>
-                  {isProcessing ? 'Executing...' : entitlement?.isAdmin ? 'Launch (Admin · Free)' : usingFreeTrial ? `Start Free Interview (${entitlement.freeTrialsLeft} left)` : 'Commit Transaction (100 🪙)'}
+                  {isProcessing ? 'Executing...' : entitlement?.isAdmin ? 'Launch (Admin · Free)' : usingFreeTrial ? `Start Free Interview (${entitlement.freeTrialsLeft} left)` : todayCost === 0 ? 'Start Interview (FREE Today 🍀)' : `Commit Transaction (${todayCost} 🪙)`}
                 </button>
               </div>
             </motion.div>

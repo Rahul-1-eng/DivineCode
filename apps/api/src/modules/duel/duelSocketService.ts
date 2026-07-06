@@ -135,9 +135,9 @@ export function setupDuelSockets(io: Server) {
       // Start the strict server timer
       state.timeoutId = setTimeout(() => handleQuestionTimeout(roomId), 21000);
 
-      io.to(roomId).emit('duel:start', { 
-        roomId, 
-        players: [{ id: p1.id, name: p1.name, score: 0 }, { id: p2.id, name: p2.name, score: 0 }] 
+      io.to(roomId).emit('duel:start', {
+        roomId,
+        players: [{ id: p1.id, name: p1.name, score: 0 }, { id: p2.id, name: p2.name, score: 0 }]
       });
       emitState(roomId);
     } catch (err) {
