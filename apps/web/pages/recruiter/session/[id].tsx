@@ -502,12 +502,34 @@ export default function LiveInterviewSandbox() {
   const micDisabled = isThinking || !!verdict || !viewer.owner;
 
   return (
-    <div style={STYLES.container}>
+    <div className="iv-container" style={STYLES.container}>
       <Toaster position="bottom-right" />
 
+      <style>{`
+        /* Below 900px the split-screen stacks: editor on top, avatar + chat below. */
+        @media (max-width: 900px) {
+          .iv-container { height: auto !important; min-height: 100dvh; overflow: visible !important; }
+          .iv-workspace { flex-direction: column !important; overflow: visible !important; }
+          .iv-left { border-right: none !important; border-bottom: 1px solid var(--border-color); }
+          .iv-prompt { max-height: 30vh !important; }
+          .iv-editor { flex: none !important; height: 45vh; min-height: 280px; }
+          .iv-right { width: 100% !important; }
+          .iv-video { height: 230px !important; }
+          .iv-chatlog { flex: none !important; max-height: 45vh; min-height: 160px; }
+          .iv-header { flex-wrap: wrap; gap: 8px; padding: 10px 14px !important; }
+          .iv-verdict { overflow-y: auto; padding: 24px !important; }
+        }
+        @media (max-width: 480px) {
+          .iv-controlbar { flex-wrap: wrap; padding: 14px !important; }
+          .iv-controlbar button { flex: 1 1 auto; }
+          .iv-run-row { flex-wrap: wrap; }
+          .iv-run-row input { min-width: 140px; }
+        }
+      `}</style>
+
       {/* Upper Telemetry HUD */}
-      <header style={STYLES.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+      <header className="iv-header" style={STYLES.header}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 15, flexWrap: 'wrap' }}>
           <h2 style={{ margin: 0, fontSize: 18, color: 'var(--text-main)' }}>DivineCode Live-Action Sandbox</h2>
           <span style={{ background: 'var(--bg-card)', padding: '4px 10px', borderRadius: 6, fontSize: 13, border: '1px solid var(--border-color)', fontWeight: 'bold' }}>
             Round {session.currentRound}: {currentRound?.type.replace(/_/g, ' ')}
@@ -523,10 +545,10 @@ export default function LiveInterviewSandbox() {
         </div>
       </header>
 
-      <div style={STYLES.workspace}>
+      <div className="iv-workspace" style={STYLES.workspace}>
         {/* Left Matrix: Code Environment */}
-        <div style={STYLES.leftPane}>
-          <div style={STYLES.problemPrompt}>
+        <div className="iv-left" style={STYLES.leftPane}>
+          <div className="iv-prompt" style={STYLES.problemPrompt}>
             <h3 style={{ margin: '0 0 10px 0', color: 'var(--accent-primary)' }}>Active Problem Context</h3>
             <p style={{ color: 'var(--text-main)', lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
               {currentRound?.problemStatement || 'The interviewer is preparing your round briefing…'}
@@ -534,7 +556,7 @@ export default function LiveInterviewSandbox() {
           </div>
 
           {/* Integrated Monaco Instance */}
-          <div style={STYLES.editorWrapper}>
+          <div className="iv-editor" style={STYLES.editorWrapper}>
              <Editor
                 height="100%"
                 language={language === 'javascript' ? 'javascript' : language}
@@ -548,7 +570,7 @@ export default function LiveInterviewSandbox() {
           {/* Live Execution Console — real Wandbox compile & run (DSA round only) */}
           {currentRound?.type === 'OA_DSA' && !verdict && (
             <div style={{ borderTop: '1px solid var(--border-color)', background: 'var(--bg-panel-solid)', flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px' }}>
+              <div className="iv-run-row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', flexWrap: 'wrap' }}>
                 <select
                   value={language}
                   onChange={(e) => setLanguage(e.target.value)}
@@ -593,8 +615,8 @@ export default function LiveInterviewSandbox() {
         </div>
 
         {/* Right Matrix: Neural Recruiter & Comm Link */}
-        <div style={STYLES.rightPane}>
-          <div style={STYLES.videoMatrix}>
+        <div className="iv-right" style={STYLES.rightPane}>
+          <div className="iv-video" style={STYLES.videoMatrix}>
             <NeuralAvatar speaking={isAiSpeaking} />
 
             <video ref={videoRef} autoPlay playsInline muted style={STYLES.candidateWebcam} />
@@ -606,7 +628,7 @@ export default function LiveInterviewSandbox() {
             </div>
           </div>
 
-          <div ref={chatLogRef} style={STYLES.chatLog}>
+          <div ref={chatLogRef} className="iv-chatlog" style={STYLES.chatLog}>
             {transcript.map((log, i) => (
               log.role === 'system' ? (
                 <div key={i} style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, padding: '8px 0', borderBottom: '1px dashed var(--border-color)' }}>
@@ -641,7 +663,7 @@ export default function LiveInterviewSandbox() {
             </div>
           )}
 
-          <div style={STYLES.controlBar}>
+          <div className="iv-controlbar" style={STYLES.controlBar}>
              <button
                 onClick={toggleMic}
                 disabled={micDisabled}
@@ -667,7 +689,7 @@ export default function LiveInterviewSandbox() {
       {/* Terminal Verdict Overlay */}
       <AnimatePresence>
         {verdict && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={STYLES.verdictOverlay}>
+          <motion.div className="iv-verdict" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={STYLES.verdictOverlay}>
             <div style={{ fontSize: 72, marginBottom: 10 }}>{verdict === 'PASSED' ? '🎉' : '📉'}</div>
             <h1 style={{ margin: '0 0 10px 0', color: '#fff', fontSize: 'clamp(28px, 4vw, 40px)' }}>
               {verdict === 'PASSED' ? 'Offer Extended' : 'Loop Concluded'}

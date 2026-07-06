@@ -240,8 +240,16 @@ export default function AiRecruiterGateway() {
   return (
     <main style={STYLES.main}>
       <Toaster position="top-center" toastOptions={{ style: { background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)' } }} />
-      
-      <div style={STYLES.card}>
+
+      <style>{`
+        @media (max-width: 480px) {
+          .wizard-card { padding: 26px 18px !important; }
+          .wizard-actions { flex-direction: column-reverse !important; }
+          .wizard-actions button { flex: none !important; width: 100%; }
+        }
+      `}</style>
+
+      <div className="wizard-card" style={STYLES.card}>
         <AnimatePresence mode="wait">
           
           {/* Node 0: The Paywall */}
@@ -318,7 +326,7 @@ export default function AiRecruiterGateway() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 15, marginTop: 40 }}>
+              <div className="wizard-actions" style={{ display: 'flex', gap: 15, marginTop: 40 }}>
                 <button onClick={() => setStep(0)} style={{ ...STYLES.secondaryBtn, flex: 1 }}>Abort</button>
                 <button onClick={() => setStep(2)} style={{ ...STYLES.primaryBtn, flex: 2 }}>Proceed to Stack</button>
               </div>
@@ -459,7 +467,7 @@ export default function AiRecruiterGateway() {
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: 15, marginTop: 40 }}>
+              <div className="wizard-actions" style={{ display: 'flex', gap: 15, marginTop: 40 }}>
                 <button disabled={isProcessing} onClick={() => setStep(1)} style={{ ...STYLES.secondaryBtn, flex: 1, opacity: isProcessing ? 0.5 : 1 }}>Back</button>
                 <button disabled={isProcessing} onClick={executePipelineInitialization} style={{ ...STYLES.primaryBtn, flex: 2, opacity: isProcessing ? 0.7 : 1 }}>
                   {isProcessing ? 'Executing...' : entitlement?.isAdmin ? 'Launch (Admin · Free)' : usingFreeTrial ? `Start Free Interview (${entitlement.freeTrialsLeft} left)` : todayCost === 0 ? 'Start Interview (FREE Today 🍀)' : `Commit Transaction (${todayCost} 🪙)`}

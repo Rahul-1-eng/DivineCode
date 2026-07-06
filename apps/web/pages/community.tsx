@@ -193,7 +193,19 @@ export default function CommunityHubPage() {
   return (
     <main style={page}>
       <Toaster position="top-center" toastOptions={{ style: { background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)' } }} />
-      
+
+      <style>{`
+        @media (max-width: 768px) {
+          .tutorial-grid, .live-rooms-grid { gap: 16px !important; }
+        }
+        @media (max-width: 480px) {
+          .tutorial-grid, .live-rooms-grid { grid-template-columns: 1fr !important; }
+          .hub-empty { padding: 60px 20px !important; }
+          .modal-actions { flex-direction: column !important; }
+          .modal-actions button { flex: none !important; width: 100% !important; }
+        }
+      `}</style>
+
       <section style={{ maxWidth: 1200, margin: '0 auto' }}>
        <nav style={nav}>
           <a href="/" style={brand}>
@@ -233,7 +245,7 @@ export default function CommunityHubPage() {
               <button onClick={openGoLive} style={goLiveBtn}><span style={liveDot} /> Start Streaming</button>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+            <div className="live-rooms-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 16 }}>
               {liveRooms.map(room => (
                 <a key={room.id} href={`/live/${room.id}`} style={{ textDecoration: 'none' }}>
                   <div style={{ ...card, padding: 18, gap: 10, border: '1px solid rgba(239,68,68,0.45)', cursor: 'pointer' }}>
@@ -259,13 +271,13 @@ export default function CommunityHubPage() {
         </section>
 
         {loading ? (
-          <div style={{ textAlign: 'center', padding: 100, color: 'var(--text-muted)' }}>Loading videos...</div>
+          <div className="hub-empty" style={{ textAlign: 'center', padding: 100, color: 'var(--text-muted)' }}>Loading videos...</div>
         ) : posts.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 100, background: 'var(--bg-panel)', borderRadius: 24, border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+          <div className="hub-empty" style={{ textAlign: 'center', padding: 100, background: 'var(--bg-panel)', borderRadius: 24, border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
             No community videos uploaded yet. Be the first!
           </div>
         ) : (
-          <div style={grid}>
+          <div className="tutorial-grid" style={grid}>
             {posts.map(post => {
               const isAuthor = session?.user?.email && post.author?.email && session.user.email === post.author.email;
               return (
@@ -357,7 +369,7 @@ export default function CommunityHubPage() {
                 <textarea placeholder="Which problems, which approaches, Q&A at the end…" value={goLiveForm.topic} onChange={e => setGoLiveForm({ ...goLiveForm, topic: e.target.value })} style={{ ...input, minHeight: 90, resize: 'vertical' }} />
               </div>
 
-              <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
+              <div className="modal-actions" style={{ display: 'flex', gap: 12, marginTop: 10 }}>
                 <button type="button" onClick={() => setShowGoLive(false)} style={{ ...ghostBtn, flex: 1 }}>Cancel</button>
                 <button type="submit" disabled={startingLive} style={{ ...goLiveBtn, flex: 2, justifyContent: 'center', opacity: startingLive ? 0.6 : 1 }}>
                   {startingLive ? 'Starting…' : '🔴 Start Streaming & Notify Everyone'}
@@ -396,7 +408,7 @@ export default function CommunityHubPage() {
                 <textarea placeholder="Briefly describe the algorithm using markdown formatting (e.g., **bold**, `code`)." value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} style={{...input, minHeight: 120, fontFamily: 'monospace', resize: 'vertical'}} required />
               </div>
 
-              <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
+              <div className="modal-actions" style={{ display: 'flex', gap: 12, marginTop: 10 }}>
                 <button type="button" onClick={() => setShowUploadModal(false)} style={{...ghostBtn, flex: 1}}>Cancel</button>
                 <button type="submit" disabled={uploading} style={{...button, flex: 2, background: uploading ? 'var(--border-color)' : 'linear-gradient(135deg,#a5b4fc,#22d3ee)'}}>
                   {uploading ? 'Saving...' : isEditing ? 'Save Changes' : 'Publish & Notify Community 🚀'}
@@ -426,4 +438,4 @@ const ghostBtn: CSSProperties = { padding: '8px 16px', borderRadius: 999, border
 const label: CSSProperties = { display: 'block', color: 'var(--text-muted)', fontSize: 13, fontWeight: 'bold', marginBottom: 6 };
 const input: CSSProperties = { width: '100%', padding: 14, borderRadius: 12, background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)', boxSizing: 'border-box', outline: 'none', fontSize: 15, fontFamily: 'inherit' };
 const modalOverlay: CSSProperties = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 100, padding: 20 };
-const modalContent: CSSProperties = { background: 'var(--bg-panel)', padding: 'clamp(20px, 4vw, 32px)', borderRadius: 24, width: '100%', maxWidth: 550, border: '1px solid var(--border-color)', boxShadow: '0 40px 100px rgba(0,0,0,0.5)', boxSizing: 'border-box' };
+const modalContent: CSSProperties = { background: 'var(--bg-panel)', padding: 'clamp(20px, 4vw, 32px)', borderRadius: 24, width: '100%', maxWidth: 550, border: '1px solid var(--border-color)', boxShadow: '0 40px 100px rgba(0,0,0,0.5)', boxSizing: 'border-box', maxHeight: '85vh', overflowY: 'auto' };

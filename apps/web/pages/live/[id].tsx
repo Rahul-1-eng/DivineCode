@@ -95,11 +95,22 @@ export default function DivineLiveRoom() {
   }
 
   return (
-    <main style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-main)', color: 'var(--text-main)', overflow: 'hidden' }}>
+    <main className="live-shell" style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-main)', color: 'var(--text-main)', overflow: 'hidden' }}>
       <Toaster position="bottom-right" />
 
+      <style>{`
+        /* Mobile URL bars eat into 100vh and cut off the Jitsi controls; dvh tracks the real visible height. */
+        @supports (height: 100dvh) { .live-shell { height: 100dvh !important; } }
+        @media (max-width: 768px) {
+          .room-meta { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; }
+          .room-meta::-webkit-scrollbar { display: none; }
+          .room-meta > * { flex: 0 0 auto; }
+          .room-meta > span:nth-of-type(2) { max-width: 55vw !important; }
+        }
+      `}</style>
+
       <header style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
+        <div className="room-meta" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
           <span style={styles.liveBadge}>
             <span style={styles.liveDot} /> LIVE
           </span>

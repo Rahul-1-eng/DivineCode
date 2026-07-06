@@ -5,6 +5,7 @@
  */
 
 import type { AppProps } from 'next/app';
+import Head from 'next/head';
 import { SessionProvider } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import { ThemeProvider } from 'next-themes';
@@ -31,6 +32,11 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <SessionProvider session={pageProps.session}>
+      {/* Without a viewport tag phones render at ~980px desktop width and
+          zoom out — every page looks broken on mobile regardless of CSS. */}
+      <Head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+      </Head>
       <ThemeProvider attribute="data-theme" defaultTheme="dark">
         {/* Global Style overrides to enforce absolute theme token syncing */}
         <style dangerouslySetInnerHTML={{ __html: `

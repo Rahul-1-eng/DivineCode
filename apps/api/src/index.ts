@@ -4,6 +4,11 @@
  * @description Entry point for the DivineCode API server, including auth, CORS, and socket bootstrap.
  */
 import './config/env';
+import dns from 'dns';
+// Some Windows/ISP setups advertise IPv6 routes that silently black-hole —
+// Node then hangs on the AAAA record for googleapis hosts before ever trying
+// IPv4, which surfaces as 30s+ AI chat timeouts. Prefer IPv4 like curl -4.
+dns.setDefaultResultOrder('ipv4first');
 import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import path from 'path';

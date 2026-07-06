@@ -58,7 +58,7 @@ export default function ForgotPassword() {
               {message}
             </div>
             <p style={{ color: '#94a3b8', fontSize: 14 }}>
-              *Check your backend console for the link while in development mode!
+              The reset link was emailed to you — check your inbox and the spam folder.
             </p>
             <button onClick={() => router.push('/signin')} style={{ width: '100%', padding: 12, background: 'transparent', border: '1px solid #334155', color: '#eef2ff', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' }}>
               Return to Sign In

@@ -401,7 +401,39 @@ export function mountV2Routes(app: Express, io: Server) {
       res.json({ success: true, html: data });
     } catch (e) {
       console.warn(`[Proxy] Scrape failed for ${url}, sending fallback.`);
-      res.json({ requiresRedirect: true, url }); 
+      res.json({ requiresRedirect: true, url });
+    }
+  });
+
+  // Resolves the top embeddable YouTube videos for a query by scraping the
+  // public search page (no API key). Powers in-screen video solutions in the
+  // workspace instead of bouncing users out to youtube.com.
+  router.get('/proxy/youtube-search', async (req, res) => {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.status(400).json({ error: 'Query required' });
+    try {
+      const { data } = await axios.get(`https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)',
+          'Accept-Language': 'en'
+        },
+        timeout: 8000
+      });
+      const videos: { videoId: string; title: string }[] = [];
+      const seen = new Set<string>();
+      const re = /"videoRenderer":\{"videoId":"([\w-]{11})".{0,1200}?"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(data)) && videos.length < 6) {
+        if (seen.has(m[1])) continue;
+        seen.add(m[1]);
+        let title = m[2];
+        try { title = JSON.parse(`"${m[2]}"`); } catch { /* keep escaped form */ }
+        videos.push({ videoId: m[1], title });
+      }
+      res.json({ success: videos.length > 0, videos });
+    } catch (e) {
+      console.warn(`[Proxy] YouTube search failed for "${q}".`);
+      res.json({ success: false, videos: [] });
     }
   });
 

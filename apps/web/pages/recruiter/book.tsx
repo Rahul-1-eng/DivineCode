@@ -52,7 +52,7 @@ function RecruiterFormFields({ form, setForm }: { form: any; setForm: (updater: 
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((prev: any) => ({ ...prev, [key]: e.target.value }));
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: 12 }}>
       <input placeholder="Full name" value={form.name} onChange={set('name')} style={STYLES.input} />
       <input placeholder="Title (e.g. Senior SWE)" value={form.title} onChange={set('title')} style={STYLES.input} />
       <input placeholder="Company (e.g. ex-Google)" value={form.company} onChange={set('company')} style={STYLES.input} />
@@ -325,6 +325,14 @@ export default function RecruiterMarketplace() {
   return (
     <main style={STYLES.main}>
       <Toaster position="top-center" toastOptions={{ style: { background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)' } }} />
+
+      <style>{`
+        @media (max-width: 480px) {
+          .rm-pay-online { width: 100%; }
+          .rm-pay-row > a, .rm-pay-row > button { width: 100% !important; text-align: center; box-sizing: border-box; }
+        }
+      `}</style>
+
       <div style={STYLES.shell}>
 
         {/* Header */}
@@ -355,7 +363,8 @@ export default function RecruiterMarketplace() {
                   <button
                     onClick={() => payOnline(payment.bookingId)}
                     disabled={!!payingBookingId}
-                    style={{ ...STYLES.primaryBtn, fontSize: 15, padding: '15px 32px', opacity: payingBookingId ? 0.6 : 1 }}
+                    className="rm-pay-online"
+                    style={{ ...STYLES.primaryBtn, fontSize: 15, padding: '15px 32px', maxWidth: '100%', opacity: payingBookingId ? 0.6 : 1 }}
                   >
                     {payingBookingId ? 'Opening gateway…' : '💳 Pay Online — Card · UPI · NetBanking · Wallet'}
                   </button>
@@ -369,13 +378,13 @@ export default function RecruiterMarketplace() {
                 {(payment.razorpayAvailable || razorpayAvailable) ? 'Or pay manually: ' : ''}
                 Pay <strong style={{ fontSize: 17 }}>₹{payment.amountInr}</strong> to UPI ID{' '}
                 <strong
-                  style={{ cursor: 'pointer', textDecoration: 'underline dotted' }}
+                  style={{ cursor: 'pointer', textDecoration: 'underline dotted', wordBreak: 'break-all' }}
                   title="Click to copy"
                   onClick={() => { navigator.clipboard?.writeText(payment.upiId); toast.success('UPI ID copied'); }}
                 >{payment.upiId}</strong>{' '}
                 from any UPI app (GPay / PhonePe / Paytm). Mention reference <code>{String(payment.bookingId).slice(-8)}</code>.
               </p>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div className="rm-pay-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                 <a href={payment.upiLink} style={{ ...STYLES.primaryBtn, textDecoration: 'none', display: 'inline-block' }}>📲 Open UPI App (mobile)</a>
                 <input
                   placeholder="Paste UTR / transaction reference after paying"
@@ -433,7 +442,7 @@ export default function RecruiterMarketplace() {
               No recruiters are listed yet. {isAdmin ? 'Add one below, or approve a pending application.' : 'Check back soon — or apply below and become the first.'}
             </p>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 16 }}>
               {recruiters.map(r => (
                 <div key={r.id} style={{ background: 'var(--bg-card)', border: `1px solid ${selected?.id === r.id ? 'var(--accent-primary)' : 'var(--border-color)'}`, borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -474,7 +483,7 @@ export default function RecruiterMarketplace() {
                 <div style={{ marginTop: 20, padding: 20, borderRadius: 14, background: 'var(--bg-card)', border: '1px solid var(--accent-primary)', display: 'flex', flexDirection: 'column', gap: 14 }}>
                   <strong style={{ fontSize: 14 }}>Request a slot with {selected.name} — total ₹{selected.totalInr}</strong>
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                    <input type="datetime-local" value={preferredAt} onChange={(e) => setPreferredAt(e.target.value)} style={{ ...STYLES.input, width: 'auto', flex: '0 0 auto' }} />
+                    <input type="datetime-local" value={preferredAt} onChange={(e) => setPreferredAt(e.target.value)} style={{ ...STYLES.input, width: 'auto', flex: '1 1 220px', maxWidth: '100%' }} />
                     <input type="tel" placeholder="Your mobile number — the recruiter calls it to confirm" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} maxLength={13} style={{ ...STYLES.input, flex: 1, minWidth: 220, width: 'auto' }} />
                     <input placeholder="Anything the recruiter should focus on? (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ ...STYLES.input, flex: 1, minWidth: 220, width: 'auto' }} />
                     <button disabled={isBooking} onClick={createBooking} style={{ ...STYLES.primaryBtn, opacity: isBooking ? 0.6 : 1 }}>

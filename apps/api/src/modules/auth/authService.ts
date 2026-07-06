@@ -7,6 +7,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { prisma } from '../../prisma/client';
 import jwt from "jsonwebtoken";
+import { sendMail } from '../email/emailService';
 export async function registerUser({ username, email, name, password }: any) {
   if (!username || !email || !password) throw new Error('Username, email and password are required fields.');
 
@@ -94,12 +95,19 @@ export async function generatePasswordResetToken(email: string) {
   const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
   const resetLink = `${clientOrigin}/reset-password?token=${resetToken}`;
 
-  console.log(`\n========================================`);
-  console.log(`🔑 PASSWORD RESET LINK FOR ${user.email}`);
-  console.log(resetLink);
-  console.log(`========================================\n`);
+  // The link goes ONLY to the account's inbox. Returning it in the response
+  // (the old devLink) let anyone reset anyone's password — never bring it back.
+  sendMail(
+    user.email,
+    'Reset your DivineCode password',
+    'Password reset requested 🔑',
+    `Someone (hopefully you) asked to reset the password for <strong>${user.email}</strong>. The link below works for 1 hour. If this wasn't you, just ignore this email — your password stays unchanged.`,
+    { label: 'Reset My Password', url: resetLink }
+  );
 
-  return { success: true, message: 'If that account exists, a reset link has been generated.', devLink: resetLink };
+  console.log(`🔑 Password reset link emailed to ${user.email}`);
+
+  return { success: true, message: 'If that account exists, a reset link has been emailed to it. Check your inbox and spam folder.' };
 }
 
 export async function resetPassword({ token, newPassword }: any) {

@@ -115,6 +115,17 @@ export function sendMailBroadcast(recipients: string[], subject: string, title: 
   }
 }
 
+// Placeholder/test accounts (seeded recruiters, example.com testers) bounce on
+// every broadcast, and repeated bounces erode the Gmail account's sending
+// reputation — deliver only to domains that can actually receive.
+function isDeliverableEmail(email: string): boolean {
+  const domain = email.split('@')[1] || '';
+  if (!domain.includes('.')) return false;
+  if (/\.(local|test|invalid|localhost)$/i.test(domain)) return false;
+  if (/(^|\.)example\.(com|org|net)$/i.test(domain)) return false;
+  return true;
+}
+
 // Every real account on the platform, minus the system broadcast user and the
 // actor who triggered the event (they already know — they did it).
 async function allUserEmails(excludeEmails: Array<string | null | undefined> = []): Promise<string[]> {
@@ -123,7 +134,7 @@ async function allUserEmails(excludeEmails: Array<string | null | undefined> = [
     where: { NOT: { id: 'ALL' } },
     select: { email: true }
   });
-  return users.map(u => u.email).filter(e => e && e.includes('@') && !skip.has(e.toLowerCase()));
+  return users.map(u => u.email).filter(e => e && e.includes('@') && isDeliverableEmail(e) && !skip.has(e.toLowerCase()));
 }
 
 // -----------------------------------------------------------------------------

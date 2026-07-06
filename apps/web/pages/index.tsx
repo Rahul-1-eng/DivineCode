@@ -195,7 +195,9 @@ const navLinks = [
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, history: payloadHistory, image: imageBase64 }),
-        signal: AbortSignal.timeout(30000) 
+        // The backend walks a fallback chain of Gemini models (12s cap each)
+        // when the primary is overloaded — give it room to finish.
+        signal: AbortSignal.timeout(55000)
       });
 
       if (!res.ok) throw new Error(`API returned ${res.status}: ${res.statusText}`);
@@ -213,7 +215,10 @@ const navLinks = [
     } catch (err) {
       let errorMsg = '';
       const errorString = String(err);
-      
+      // AbortSignal.timeout throws "TimeoutError: signal timed out" — neither
+      // word matches a case-sensitive 'timeout' check, so classify lowercase.
+      const lowerError = errorString.toLowerCase();
+
       if (errorString.includes('429') || errorString.includes('rate')) {
         errorMsg = '⚠️ Google Gemini API rate limited (60 requests/min on free tier). Try again in a moment.';
         
@@ -225,8 +230,8 @@ const navLinks = [
         } else {
           errorMsg += ' 💡 Fix: Upgrade Gemini API to paid tier or ask admin to switch to Claude API.';
         }
-      } else if (errorString.includes('timeout')) {
-        errorMsg = '⏱️ Request timeout. Backend service may be slow. Try again.';
+      } else if (lowerError.includes('timeout') || lowerError.includes('timed out') || lowerError.includes('abort')) {
+        errorMsg = '⏱️ The AI is taking longer than usual (the model is under heavy demand). Please try again in a moment.';
       } else if (errorString.includes('401') || errorString.includes('403')) {
         errorMsg = '🔐 API authentication failed. Check backend configuration (AI_API_KEY).';
       } else {

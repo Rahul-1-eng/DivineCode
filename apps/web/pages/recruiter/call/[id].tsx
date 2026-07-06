@@ -47,11 +47,21 @@ export default function LiveInterviewCall() {
   const scheduled = new Date(call.scheduledAt);
 
   return (
-    <main style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-main)', color: 'var(--text-main)', overflow: 'hidden' }}>
+    <main className="call-shell" style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-main)', color: 'var(--text-main)', overflow: 'hidden' }}>
       <Toaster position="bottom-right" />
 
+      <style>{`
+        /* Mobile URL bars eat into 100vh and cut off the Jitsi controls; dvh tracks the real visible height. */
+        @supports (height: 100dvh) { .call-shell { height: 100dvh !important; } }
+        @media (max-width: 768px) {
+          .room-meta { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; }
+          .room-meta::-webkit-scrollbar { display: none; }
+          .room-meta > * { flex: 0 0 auto; }
+        }
+      `}</style>
+
       <header style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        <div className="room-meta" style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', minWidth: 0 }}>
           <span style={{ fontWeight: 900, fontSize: 17 }}>⚡ DivineCode <span style={{ color: '#4ade80' }}>Live Interview</span></span>
           <span style={styles.chip}>
             {call.candidateName} × {call.recruiterName}

@@ -82,6 +82,14 @@ export default function ProblemWorkspace() {
   const [customInput, setCustomInput] = useState('');
   const [isTerminalMode, setIsTerminalMode] = useState(false);
 
+  // In-screen solution videos: when no editorial video is linked, the backend
+  // finds real matching YouTube videos so playback happens in this panel
+  // instead of bouncing the user out to youtube.com.
+  const [videoResults, setVideoResults] = useState<{ videoId: string; title: string }[]>([]);
+  const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
+  const [videoSearching, setVideoSearching] = useState(false);
+  const [videoSearched, setVideoSearched] = useState(false);
+
   // Ready-to-go snippets prioritizing competitive programming setups
   const battleKits = [
     { name: 'IICPC Fast IO Boilerplate (C++)', code: '#include <bits/stdc++.h>\nusing namespace std;\n\n#define int long long\n#define pb push_back\n#define all(x) (x).begin(), (x).end()\n\nvoid solve() {\n    // Implementation here\n}\n\nint32_t main() {\n    ios_base::sync_with_stdio(0); cin.tie(0); cout.tie(0);\n    int t = 1; cin >> t;\n    while(t--) solve();\n    return 0;\n}' },
@@ -142,15 +150,19 @@ export default function ProblemWorkspace() {
 
           setIsTerminalMode(parsedTestcases.length === 0);
           setProblemLoadError('');
+          // No placeholder text when the description is missing — a fake
+          // description made hasDescription true and hid the external-site
+          // fallback (the "View Original Problem" link never appeared).
+          const realDescription = data.description || data.customDescription || '';
           setProblem({
             id: data.id,
             title: data.title,
             videoUrl: data.videoUrl,
             difficulty: data.difficulty,
             rating: data.rating,
-            descriptionHtml: data.description || data.customDescription || '<p>Problem description is unavailable right now. The workspace remains usable for code practice.</p>',
-            description: data.description || data.customDescription || 'Problem description is unavailable right now. The workspace remains usable for code practice.',
-            content: data.description || data.customDescription || 'Problem description is unavailable right now. The workspace remains usable for code practice.',
+            descriptionHtml: realDescription,
+            description: realDescription,
+            content: realDescription,
             testcases: rawTestcases,
             originalUrl: data.externalUrl,
           });
@@ -174,6 +186,22 @@ export default function ProblemWorkspace() {
       newSocket.disconnect(); 
     };
   }, [id, session]);
+
+  useEffect(() => {
+    if (workspaceTab !== 'video' || !problem || problem.error) return;
+    if (getYouTubeEmbedUrl(problem.videoUrl)) return;
+    if (videoSearched || videoSearching) return;
+
+    setVideoSearching(true);
+    fetchApi(`/api/v2/proxy/youtube-search?q=${encodeURIComponent(`${problem.title} algorithm solution explanation`)}`, { requireAuth: false })
+      .then(res => {
+        const vids = Array.isArray(res?.videos) ? res.videos : [];
+        setVideoResults(vids);
+        if (vids.length > 0) setActiveVideoId(vids[0].videoId);
+      })
+      .catch(() => setVideoResults([]))
+      .finally(() => { setVideoSearching(false); setVideoSearched(true); });
+  }, [workspaceTab, problem, videoSearched, videoSearching]);
 
   const sampleData = useMemo(() => {
     if (!problem || !problem.testcases) return { input: '', output: '' };
@@ -277,7 +305,8 @@ export default function ProblemWorkspace() {
     </main>
   );
 
-  const monacoLanguage = language === 'cpp' ? 'cpp' : language === 'python' ? 'python' : 'c';
+  // Every value here is a valid Monaco language id, so no remapping needed.
+  const monacoLanguage = language;
   const problemDescriptionHtml = problem.descriptionHtml || problem.description || problem.content || '';
   const hasDescription = problemDescriptionHtml && problemDescriptionHtml.replace(/<[^>]*>/g, '').trim().length > 10;
   const editorTheme = theme === 'light' ? 'light' : 'vs-dark';
@@ -360,15 +389,30 @@ export default function ProblemWorkspace() {
               
               {hasDescription ? (
                 <div style={{ color: 'var(--text-main)', lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: problemDescriptionHtml }} />
+              ) : problem.originalUrl ? (
+                // The description panel itself becomes the window onto the
+                // original site — no bouncing out to an external tab. The link
+                // stays as fallback for sites that refuse to be embedded.
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, padding: '10px 14px', borderRadius: 10, background: 'var(--accent-glow)', border: '1px solid var(--accent-primary)' }}>
+                    <span style={{ color: 'var(--text-main)', fontSize: 13, lineHeight: 1.5 }}>
+                      This problem couldn't be extracted natively, so the original page is loaded below. If it stays blank, the site blocks embedding — use the button.
+                    </span>
+                    <a href={problem.originalUrl} target="_blank" rel="noreferrer" style={{ background: 'var(--accent-primary)', color: '#000', padding: '8px 16px', borderRadius: 8, textDecoration: 'none', fontWeight: 'bold', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                      View Original Problem ↗
+                    </a>
+                  </div>
+                  <iframe
+                    src={problem.originalUrl}
+                    title="Original problem statement"
+                    sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                    style={{ width: '100%', height: '62vh', border: '1px solid var(--border-color)', borderRadius: 12, background: '#fff' }}
+                  />
+                </div>
               ) : (
                 <div style={{ padding: 30, background: 'var(--accent-glow)', borderRadius: 12, border: '1px solid var(--accent-primary)', textAlign: 'center', marginTop: 20 }}>
                    <h3 style={{ color: 'var(--text-main)', margin: '0 0 10px' }}>Problem Details Hidden</h3>
-                   <p style={{ color: 'var(--text-muted)', marginBottom: 20 }}>Due to platform constraints, this description cannot be rendered natively.</p>
-                   {problem.originalUrl && (
-                     <a href={problem.originalUrl} target="_blank" rel="noreferrer" style={{ background: 'var(--accent-primary)', color: '#000', padding: '10px 20px', borderRadius: 8, textDecoration: 'none', fontWeight: 'bold', display: 'inline-block' }}>
-                       View Original Problem ↗
-                     </a>
-                   )}
+                   <p style={{ color: 'var(--text-muted)', margin: 0 }}>This problem has no stored description or source link yet. The workspace remains fully usable for code practice.</p>
                 </div>
               )}
 
@@ -425,10 +469,37 @@ export default function ProblemWorkspace() {
                       allowFullScreen
                    />
                 </div>
+              ) : videoSearching ? (
+                <div style={{ padding: '40px 24px', borderRadius: 12, background: 'var(--bg-card)', border: '1px solid var(--border-color)', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  🔎 Finding the best solution walkthroughs for “{problem.title}”…
+                </div>
+              ) : activeVideoId ? (
+                <>
+                  {/* Real matched videos play right here — no external tab needed */}
+                  <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 12, background: '#000' }}>
+                    <iframe
+                      src={`https://www.youtube.com/embed/${activeVideoId}`}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {videoResults.map(v => (
+                      <button
+                        key={v.videoId}
+                        onClick={() => setActiveVideoId(v.videoId)}
+                        style={{ textAlign: 'left', padding: '10px 14px', borderRadius: 10, cursor: 'pointer', fontSize: 13.5, lineHeight: 1.4, background: v.videoId === activeVideoId ? 'var(--accent-glow)' : 'var(--bg-card)', color: 'var(--text-main)', border: `1px solid ${v.videoId === activeVideoId ? 'var(--accent-primary)' : 'var(--border-color)'}` }}
+                      >
+                        {v.videoId === activeVideoId ? '▶ ' : ''}{v.title}
+                      </button>
+                    ))}
+                  </div>
+                </>
               ) : (
                 <div style={{ padding: '40px 24px', borderRadius: 12, background: 'var(--bg-card)', border: '1px solid var(--border-color)', textAlign: 'center' }}>
                   <div style={{ fontSize: 34, marginBottom: 10 }}>🎥</div>
-                  <div style={{ fontWeight: 700, marginBottom: 6, color: 'var(--text-main)' }}>No editorial video linked yet</div>
+                  <div style={{ fontWeight: 700, marginBottom: 6, color: 'var(--text-main)' }}>No matching video found right now</div>
                   <p style={{ color: 'var(--text-muted)', fontSize: 13.5, margin: '0 0 16px 0' }}>Watch a community walkthrough of this exact topic on YouTube instead.</p>
                   <a
                     href={`https://www.youtube.com/results?search_query=${encodeURIComponent(problem.title + ' algorithm explanation')}`}
@@ -476,10 +547,14 @@ export default function ProblemWorkspace() {
         <div style={{ padding: '12px 16px', background: 'var(--bg-main)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', flexWrap: 'wrap', gap: 10 }}>
           
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            {/* Labels mirror the exact Wandbox compilers the judge runs
+                (WANDBOX_COMPILERS) — no advertised language is fake. */}
             <select value={language} onChange={e => setLanguage(e.target.value)} style={{ background: 'var(--bg-panel-solid)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '8px 12px', borderRadius: 8, outline: 'none', cursor: 'pointer' }}>
-              <option value="cpp">C++ (GCC 9.2)</option>
-              <option value="python">Python 3</option>
-              <option value="c">C</option>
+              <option value="cpp">C++ (GCC 13.2)</option>
+              <option value="c">C (GCC 13.2)</option>
+              <option value="python">Python 3.13</option>
+              <option value="java">Java (JDK 22)</option>
+              <option value="javascript">JavaScript (Node 20)</option>
             </select>
 
             <div style={{ position: 'relative' }}>
