@@ -84,6 +84,35 @@ export function adminEmail(): string {
   return GMAIL_USER;
 }
 
+// Deploy debugging: can THIS server see the Gmail creds, log into SMTP, and
+// (optionally) actually deliver? Surfaces the real SMTP error instead of
+// leaving it buried in server logs nobody can reach from the outside.
+export async function emailHealth(sendTestTo?: string): Promise<{ configured: boolean; verified: boolean; testSent?: boolean; error?: string }> {
+  if (!emailEnabled()) {
+    return { configured: false, verified: false, error: 'GMAIL_USER / GMAIL_APP_PASSWORD are not set on this server.' };
+  }
+  const t = getTransporter()!;
+  try {
+    await t.verify();
+  } catch (err: any) {
+    return { configured: true, verified: false, error: err?.message || 'SMTP verify failed.' };
+  }
+  if (sendTestTo) {
+    try {
+      await t.sendMail({
+        from: `"DivineCode" <${GMAIL_USER}>`,
+        to: sendTestTo,
+        subject: 'DivineCode email health check ✅',
+        html: brandedHtml('Email pipeline is working', 'This test was sent from the deployed server itself. Notifications are being delivered correctly.')
+      });
+      return { configured: true, verified: true, testSent: true };
+    } catch (err: any) {
+      return { configured: true, verified: true, testSent: false, error: err?.message || 'Send failed.' };
+    }
+  }
+  return { configured: true, verified: true };
+}
+
 // -----------------------------------------------------------------------------
 // Broadcast (all-users) delivery — recipients ride BCC so nobody sees anyone
 // else's address. Chunked because Gmail rejects oversized recipient lists.

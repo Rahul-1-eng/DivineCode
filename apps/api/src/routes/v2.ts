@@ -38,7 +38,7 @@ import { aiRouter } from './aiRoutes';
 import communityRoutes from './communityRoutes';
 import { liveRouter } from './liveRoutes';
 import { coinRouter } from './coinRoutes';
-import { mailContestRegistered, broadcastContestCreated } from '../modules/email/emailService';
+import { mailContestRegistered, broadcastContestCreated, emailHealth, adminEmail } from '../modules/email/emailService';
 
 const PLATFORM_OWNER_EMAIL = (process.env.PLATFORM_OWNER_EMAIL || '').trim().toLowerCase();
 
@@ -403,6 +403,14 @@ export function mountV2Routes(app: Express, io: Server) {
       console.warn(`[Proxy] Scrape failed for ${url}, sending fallback.`);
       res.json({ requiresRedirect: true, url });
     }
+  });
+
+  // Deploy debugging: reports whether THIS server can log into Gmail SMTP.
+  // Pass ?key=<CRON_SECRET> to also deliver a real test mail to the admin inbox.
+  router.get('/email/health', async (req, res) => {
+    const withTest = !!process.env.CRON_SECRET && req.query.key === process.env.CRON_SECRET;
+    const result = await emailHealth(withTest ? adminEmail() : undefined);
+    res.json(result);
   });
 
   // Resolves the top embeddable YouTube videos for a query by scraping the

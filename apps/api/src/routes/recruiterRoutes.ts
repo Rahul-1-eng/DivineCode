@@ -27,6 +27,11 @@ export const recruiterRouter = Router();
 const SESSION_COST = 100;
 const FREE_TRIALS = 3;
 
+// Phone OTP is opt-in: by default a unique mobile number alone claims the free
+// trials (OTP mails were unreliable in production). Set REQUIRE_PHONE_OTP=true
+// once a real SMS gateway is configured to enforce verification again.
+const phoneOtpRequired = () => process.env.REQUIRE_PHONE_OTP === 'true' && otpChannel() !== 'NONE';
+
 // Platform's UPI collection handle (maps to the admin's mobile). All booking
 // money lands here; recruiter payouts are settled manually by the admin.
 const PLATFORM_UPI_ID = (process.env.PLATFORM_UPI_ID || process.env.ADMIN_UPI_ID || 'divinecode@upi').trim();
@@ -169,7 +174,7 @@ recruiterRouter.get('/entitlement', async (req, res) => {
 
     const isAdmin = user.role === 'ADMIN';
     const freeTrialsLeft = Math.max(0, FREE_TRIALS - user.freeInterviewsUsed);
-    const otpAvailable = otpChannel() !== 'NONE';
+    const otpAvailable = phoneOtpRequired();
     const phoneOk = !!user.phone && (user.phoneVerified || !otpAvailable);
     const lucky = todayLuckyDeal();
 
@@ -216,10 +221,9 @@ recruiterRouter.post('/phone/request-otp', async (req, res) => {
       return res.status(409).json({ error: 'This mobile number is already linked to another account — free trials are one set per person.', code: 'PHONE_TAKEN' });
     }
 
-    if (otpChannel() === 'NONE') {
-      // No SMS gateway and no email creds — the platform cannot deliver an OTP.
-      // Fall back to the legacy unverified path rather than blocking trials.
-      console.warn('[OTP] No delivery channel configured — accepting phone without verification.');
+    if (!phoneOtpRequired()) {
+      // OTP disabled (default) or no delivery channel — save the number
+      // directly rather than blocking trials.
       await prisma.user.update({ where: { id: user.id }, data: { phone, phoneVerified: false, pendingPhone: null, phoneOtpHash: null, phoneOtpExpiresAt: null } });
       return res.json({ success: true, otpRequired: false, phoneSaved: true });
     }
@@ -313,7 +317,7 @@ recruiterRouter.post('/sessions', async (req, res) => {
 
     const isAdmin = user.role === 'ADMIN';
     const freeTrialsLeft = Math.max(0, FREE_TRIALS - user.freeInterviewsUsed);
-    const otpAvailable = otpChannel() !== 'NONE';
+    const otpAvailable = phoneOtpRequired();
     let paymentMode: 'ADMIN' | 'FREE_TRIAL' | 'COINS' = 'COINS';
 
     // Coin price for this session: lucky day and coupon both discount it, the
