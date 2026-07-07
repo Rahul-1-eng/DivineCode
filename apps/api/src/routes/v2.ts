@@ -38,6 +38,7 @@ import { aiRouter } from './aiRoutes';
 import communityRoutes from './communityRoutes';
 import { liveRouter } from './liveRoutes';
 import { coinRouter } from './coinRoutes';
+import { feedbackRouter } from './feedbackRoutes';
 import { mailContestRegistered, broadcastContestCreated, emailHealth, adminEmail } from '../modules/email/emailService';
 
 const PLATFORM_OWNER_EMAIL = (process.env.PLATFORM_OWNER_EMAIL || '').trim().toLowerCase();
@@ -920,6 +921,7 @@ export function mountV2Routes(app: Express, io: Server) {
   app.use('/api/v2/live', liveRouter);
   app.use('/api/v2/coins', coinRouter);
   app.use('/api/v2/profile', profileRouter);
-  app.use('/api/v2', aiRouter); 
+  app.use('/api/v2/feedback', feedbackRouter);
+  app.use('/api/v2', aiRouter);
 
 }

@@ -273,12 +273,12 @@ export default function ContestProblemWorkspace() {
     if (!id || !session?.user?.email) return; 
     
     try {
-      socketRef.current = io(API_BASE_URL, { 
-        transports: ['websocket'], 
+      socketRef.current = io(API_BASE_URL, {
+        transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-        reconnectionAttempts: 5
+        reconnectionAttempts: Infinity
       });
       const socket = socketRef.current;
       

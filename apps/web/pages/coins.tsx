@@ -12,6 +12,7 @@ import { useRouter } from 'next/router';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../lib/api';
+import ContextLoader from '../components/ContextLoader';
 
 // Razorpay Checkout ships as a plain script; one load serves every payment.
 let razorpayScript: Promise<void> | null = null;
@@ -423,7 +424,7 @@ export default function CoinsWallet() {
         <section style={STYLES.panel}>
           <h2 style={STYLES.sectionTitle}>Purchase History</h2>
           {!loaded ? (
-            <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
+            <ContextLoader context="coins" compact />
           ) : purchases.length === 0 ? (
             <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No purchases yet — grab a pack above when your free trials run out.</p>
           ) : (

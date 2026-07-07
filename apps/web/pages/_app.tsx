@@ -6,13 +6,17 @@
 
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
 import { SessionProvider } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import { ThemeProvider } from 'next-themes';
+import { motion } from 'framer-motion';
 import CommandPalette from '../components/CommandPalette';
+import PageChrome from '../components/PageChrome';
 
 export default function App({ Component, pageProps }: AppProps) {
   const [isOffline, setIsOffline] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -93,7 +97,16 @@ export default function App({ Component, pageProps }: AppProps) {
         )}
         
         <CommandPalette />
-        <Component {...pageProps} />
+        <PageChrome />
+        {/* Every navigation gets a soft rise-in so page changes feel alive */}
+        <motion.div
+          key={router.route}
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, ease: 'easeOut' }}
+        >
+          <Component {...pageProps} />
+        </motion.div>
       </ThemeProvider>
     </SessionProvider>
   );

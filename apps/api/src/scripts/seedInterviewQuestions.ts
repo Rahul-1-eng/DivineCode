@@ -10,13 +10,10 @@ import { PrismaClient, InterviewTrackType } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Seeding Curated Interview Tracks and Quality Questions...');
+  console.log('🌱 Seeding Curated Interview Tracks and Quality Questions (additive — user progress is preserved)...');
 
-  // 1. Wipe old data safely to prevent duplicates
-  await prisma.interviewQuestion.deleteMany({});
-  await prisma.interviewTrack.deleteMany({});
-
-  // 2. Insert Tracks
+  // Upsert tracks by slug; NEVER wipe — deleting questions cascades into
+  // InterviewProgress and silently erases every user's mastery history.
   const trackData = [
     { slug: 'dbms', title: 'Database Management', type: InterviewTrackType.DATABASE, description: 'SQL, NoSQL, Indexing, Transactions' },
     { slug: 'networks', title: 'Computer Networks', type: InterviewTrackType.NETWORKS, description: 'TCP/IP, Routing, Protocols' },
@@ -24,11 +21,15 @@ async function main() {
     { slug: 'dsa', title: 'Data Structures & Algorithms', type: InterviewTrackType.DSA, description: 'Graphs, DP, Trees' },
     { slug: 'system-design', title: 'System Design', type: InterviewTrackType.SYSTEM_DESIGN, description: 'Scalability, Distributed Systems' },
     { slug: 'oops', title: 'Object Oriented Programming', type: InterviewTrackType.OOPS, description: 'Inheritance, Polymorphism, Design Patterns' },
-    { slug: 'architecture', title: 'Computer Architecture', type: InterviewTrackType.SYSTEM_DESIGN, description: 'MIPS, Pipelines, Assembly' } 
+    { slug: 'architecture', title: 'Computer Architecture', type: InterviewTrackType.SYSTEM_DESIGN, description: 'MIPS, Pipelines, Assembly' }
   ];
 
   for (const t of trackData) {
-    await prisma.interviewTrack.create({ data: { ...t, order: trackData.indexOf(t) } });
+    await prisma.interviewTrack.upsert({
+      where: { slug: t.slug },
+      update: { title: t.title, type: t.type, description: t.description },
+      create: { ...t, order: trackData.indexOf(t) }
+    });
   }
 
   const tracks = await prisma.interviewTrack.findMany();
@@ -198,14 +199,117 @@ async function main() {
       prompt: 'When executing a "lw" (load word) instruction in MIPS, the calculated memory address must be a multiple of what value?',
       options: ['1', '2', '4', '8'],
       correctIndices: [2], difficulty: 'Easy', isApproved: true, tags: ['mips', 'memory']
+    },
+
+    // --- SENIOR / EXPERT LEVEL ADDITIONS ---
+    {
+      trackId: getTrackId(InterviewTrackType.DATABASE),
+      title: 'MVCC Snapshot Visibility',
+      prompt: 'In PostgreSQL\'s MVCC, a row version is visible to a transaction when:',
+      options: ['It has the highest transaction ID', 'Its inserting transaction committed before the reader\'s snapshot AND it is not deleted by a transaction visible in that snapshot', 'It is the most recently written version on disk', 'The reader holds a shared row lock'],
+      correctIndices: [1], difficulty: 'Expert', isApproved: true, tags: ['postgres', 'mvcc', 'isolation'], sourceCompany: 'Stripe'
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.DATABASE),
+      title: 'Write Amplification in LSM Trees',
+      prompt: 'Compared to B-trees, LSM-tree storage engines (RocksDB, Cassandra) primarily trade what for faster writes?',
+      options: ['Read amplification and background compaction cost', 'Durability guarantees', 'Transaction support', 'Index size only'],
+      correctIndices: [0], difficulty: 'Expert', isApproved: true, tags: ['lsm', 'storage-engines'], sourceCompany: 'Meta'
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.OPERATING_SYSTEM),
+      title: 'False Sharing',
+      prompt: 'Two threads on different cores update two DIFFERENT variables that happen to sit in the same cache line. Performance collapses because:',
+      options: ['The OS serializes the threads', 'Each write invalidates the other core\'s cache line copy, forcing constant coherence traffic', 'The variables become corrupted', 'Page faults occur on every write'],
+      correctIndices: [1], difficulty: 'Expert', isApproved: true, tags: ['cache-coherence', 'concurrency'], sourceCompany: 'Google'
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.OPERATING_SYSTEM),
+      title: 'io_uring Advantage',
+      prompt: 'Linux io_uring outperforms epoll-based I/O primarily by:',
+      options: ['Using faster disks', 'Sharing lock-free submission/completion ring buffers between user and kernel space, reducing syscalls', 'Running I/O in the GPU', 'Bypassing the filesystem'],
+      correctIndices: [1], difficulty: 'Expert', isApproved: true, tags: ['linux', 'async-io']
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.DSA),
+      title: 'Amortized Union-Find',
+      prompt: 'With both path compression AND union by rank, m operations on n elements take:',
+      options: ['O(m log n)', 'O(m α(n)) where α is the inverse Ackermann function', 'O(m √n)', 'O(m) exactly'],
+      correctIndices: [1], difficulty: 'Expert', isApproved: true, tags: ['union-find', 'amortized-analysis']
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.DSA),
+      title: 'Suffix Automaton Size',
+      prompt: 'The suffix automaton of a string of length n has at most how many states?',
+      options: ['n', '2n - 1', 'n²', 'n log n'],
+      correctIndices: [1], difficulty: 'Expert', isApproved: true, tags: ['strings', 'automata'], sourceCompany: 'Codeforces'
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.SYSTEM_DESIGN, 'system-design'),
+      title: 'Quorum Arithmetic',
+      prompt: 'A Dynamo-style store with replication factor N=5 uses W=3 write quorum. What is the minimum read quorum R that guarantees read-your-writes consistency?',
+      options: ['1', '2', '3', '5'],
+      correctIndices: [2], difficulty: 'Expert', isApproved: true, tags: ['quorum', 'replication'], sourceCompany: 'Amazon'
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.SYSTEM_DESIGN, 'system-design'),
+      title: 'Exactly-Once Semantics',
+      prompt: 'In distributed messaging, "exactly-once delivery" in practice is achieved by:',
+      options: ['TCP retransmission', 'At-least-once delivery combined with idempotent consumers or deduplication', 'UDP multicast', 'Synchronous replication alone'],
+      correctIndices: [1], difficulty: 'Expert', isApproved: true, tags: ['messaging', 'idempotency'], sourceCompany: 'Uber'
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.SYSTEM_DESIGN, 'system-design'),
+      title: 'Cache Stampede Defense',
+      prompt: 'A hot cache key expires and 10,000 concurrent requests hit the database simultaneously. The standard mitigations are:',
+      options: ['Bigger database connection pool', 'Request coalescing (single-flight), probabilistic early expiration, or stale-while-revalidate', 'Longer TTLs everywhere', 'Sharding the cache key'],
+      correctIndices: [1], difficulty: 'Expert', isApproved: true, tags: ['caching', 'thundering-herd'], sourceCompany: 'Netflix'
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.NETWORKS),
+      title: 'TCP Incast Collapse',
+      prompt: 'In datacenter many-to-one fan-in traffic (e.g., a scatter-gather query), throughput suddenly collapses because:',
+      options: ['DNS resolution overload', 'Shallow switch buffers overflow causing synchronized packet loss and retransmission timeouts', 'TLS handshakes queue up', 'The NIC overheats'],
+      correctIndices: [1], difficulty: 'Expert', isApproved: true, tags: ['datacenter', 'tcp'], sourceCompany: 'Microsoft'
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.NETWORKS),
+      title: 'QUIC vs TCP+TLS',
+      prompt: 'QUIC (HTTP/3) eliminates head-of-line blocking that persists in HTTP/2 because:',
+      options: ['It compresses headers better', 'Independent streams are multiplexed over UDP, so one lost packet only stalls its own stream', 'It uses more connections', 'It disables congestion control'],
+      correctIndices: [1], difficulty: 'Hard', isApproved: true, tags: ['quic', 'http3'], sourceCompany: 'Google'
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.OOPS),
+      title: 'Liskov Substitution Violation',
+      prompt: 'Class Square extends Rectangle, overriding setWidth to also set height. This violates LSP because:',
+      options: ['Squares are not rectangles mathematically', 'Code that mutates a Rectangle\'s width expecting the height unchanged breaks when handed a Square', 'Inheritance is always wrong', 'The override is not virtual'],
+      correctIndices: [1], difficulty: 'Hard', isApproved: true, tags: ['solid', 'lsp'], sourceCompany: 'Amazon'
+    },
+    {
+      trackId: getTrackId(InterviewTrackType.DSA),
+      title: 'Reservoir Sampling',
+      prompt: 'To pick a uniformly random element from a stream of unknown length using O(1) memory, you replace the current pick when seeing item i with probability:',
+      options: ['1/2', '1/i', '1/n', 'i/n'],
+      correctIndices: [1], difficulty: 'Expert', isApproved: true, tags: ['streaming', 'randomized'], sourceCompany: 'Meta'
     }
   ];
 
-  console.log('✅ Injecting curated question bank...');
-  await prisma.interviewQuestion.createMany({ data: curatedQuestions });
+  // Insert only questions that don't exist yet (matched by title) so re-runs
+  // top up the bank without duplicating or destroying anything.
+  const existing = await prisma.interviewQuestion.findMany({ select: { title: true } });
+  const known = new Set(existing.map(q => q.title));
+  const fresh = curatedQuestions.filter(q => !known.has(q.title));
 
-  console.log(`\n🚀 SECURE DEPLOYMENT COMPLETE!`);
-  console.log(`🤖 The platform is now seeded with exactly ${curatedQuestions.length} high-quality questions.`);
+  if (fresh.length > 0) {
+    console.log(`✅ Adding ${fresh.length} new questions (${curatedQuestions.length - fresh.length} already present, skipped)...`);
+    await prisma.interviewQuestion.createMany({ data: fresh });
+  } else {
+    console.log('✅ Question bank already up to date — nothing to add.');
+  }
+
+  const total = await prisma.interviewQuestion.count();
+  console.log(`\n🚀 DONE. The platform now has ${total} interview questions.`);
 }
 
 main()

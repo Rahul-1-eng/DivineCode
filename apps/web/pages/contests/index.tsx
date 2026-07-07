@@ -9,6 +9,7 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/router';
 import { motion } from 'framer-motion';
 import { fetchApi } from '../../lib/api';
+import ContextLoader from '../../components/ContextLoader';
 
 function getDynamicStatus(contest: any) {
   const start = new Date(contest.startTime).getTime();
@@ -24,6 +25,7 @@ export default function ContestsList() {
   const router = useRouter();
   const [contests, setContests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [, setClockTick] = useState(0);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -38,6 +40,13 @@ export default function ContestsList() {
         setLoading(false);
       });
   }, [session, status]);
+
+  // Re-evaluate Live/Scheduled/Ended badges every 30s so a contest flips to
+  // "Live" the moment its start time passes — no refresh needed.
+  useEffect(() => {
+    const t = setInterval(() => setClockTick(n => n + 1), 30000);
+    return () => clearInterval(t);
+  }, []);
 
   const running = contests.filter(c => getDynamicStatus(c) === 'RUNNING');
   const scheduled = contests.filter(c => getDynamicStatus(c) === 'SCHEDULED');
@@ -90,10 +99,7 @@ export default function ContestsList() {
         </div>
 
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '100px 0', color: 'var(--accent-primary)' }}>
-             <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ width: 40, height: 40, border: '3px solid var(--accent-glow)', borderTopColor: 'var(--accent-primary)', borderRadius: '50%', margin: '0 auto 16px' }} />
-             Loading Contests...
-          </div>
+          <ContextLoader context="contest" />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
             

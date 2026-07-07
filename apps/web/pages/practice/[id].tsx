@@ -123,7 +123,7 @@ export default function ProblemWorkspace() {
     if (!id) return;
     
     // Connect to synchronization socket for live collaboration
-    const newSocket = io(API_BASE_URL, { transports: ['websocket'] });
+    const newSocket = io(API_BASE_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelayMax: 5000, timeout: 10000 });
     setSocket(newSocket);
     newSocket.emit('join-workspace', id);
 

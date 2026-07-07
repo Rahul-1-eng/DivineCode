@@ -7,6 +7,7 @@
 import axios from 'axios';
 import { prisma } from '../../prisma/client';
 import Anthropic from '@anthropic-ai/sdk';
+import { geminiGenerateContent, geminiConfigured } from './geminiKeys';
 // -----------------------------------------------------------------------------
 // Engine Configuration & Telemetry
 // -----------------------------------------------------------------------------
@@ -16,7 +17,9 @@ const CACHE_TTL_MS = 3600000; // 1 hour threshold to reduce redundant LLM calls
 // gemini-1.5-flash was retired (404s now); the -latest alias tracks whatever
 // stable flash Google currently serves, so this never rots again.
 const getAiModel = () => process.env.AI_MODEL || 'gemini-flash-latest';
-const getApiKey = () => process.env.GEMINI_API_KEY || process.env.AI_API_KEY;
+// Kept for "is Gemini configured at all" checks; actual requests go through the
+// key POOL (geminiKeys.ts) which rotates on quota exhaustion automatically.
+const getApiKey = () => process.env.GEMINI_API_KEY || process.env.AI_API_KEY || (process.env.GEMINI_API_KEYS || '').split(',')[0]?.trim();
 // Anthropic gets its OWN key — passing the Gemini key to the Claude client was
 // silently breaking every USE_CLAUDE_API branch with auth errors.
 const getClaudeKey = () => (process.env.ANTHROPIC_API_KEY || '').trim();
@@ -211,8 +214,7 @@ export async function analyzeSubmissionLogic(submissionId: string, problemDescri
   const prompt = `You are an expert code reviewer. Problem Description: ${sanitizeDescriptionForPrompt(problemDescription)}\nSubmitted Code:\n${userCode}\nAnalyze this code. Provide exactly four things:\n1. A short paragraph of feedback on the logic (is it optimal?).\n2. The Big-O Time Complexity (e.g., O(N log N)).\n3. A similarity score from 0.0 to 1.0 indicating how similar this is to a standard copied template or known online solution. (0.0 = highly original, 1.0 = exact copy of common online solution).\n4. A boolean indicating if it seems highly plagiarized or AI-generated (true if similarity score > 0.85).\nRespond strictly with JSON:\n{"feedback": "...", "complexity": "O(...)", "similarityScore": 0.8, "isPlagiarized": false}`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
+    const data = await geminiGenerateContent(getAiModel(), { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
     const result = parseAiJsonResponse<LogicAnalysisResult>(data.candidates[0].content.parts[0].text);
 
     await prisma.submission.update({
@@ -294,10 +296,9 @@ export async function askAiChatbot(query: string, history: any[] = [], imageBase
       });
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { 
+    const data = await geminiGenerateContent(getAiModel(), {
       contents: [{ role: 'user', parts }],
-      generationConfig: { maxOutputTokens: 1024, temperature: 0.7 } 
+      generationConfig: { maxOutputTokens: 1024, temperature: 0.7 }
     });
     
     const reply = data.candidates[0].content.parts[0].text.trim();
@@ -385,8 +386,7 @@ export async function conductAiInterview(problemPrompt: string, userResponse: st
       }
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { 
+    const data = await geminiGenerateContent(getAiModel(), {
       contents: [{ role: 'user', parts: [{ text: prompt }] }]
       // Removed the strict responseMimeType config so Gemini doesn't crash on off-topic text
     });
@@ -428,8 +428,7 @@ export async function extractProblemFromTextOrImage(rawTextOrUrl: string) {
   const prompt = `You are a competitive programming parser. I will provide either raw scraped HTML, or OCR text from an image. Extract the problem details into a clean format. Find the hidden system tests if you can deduce them.\nData:\n${rawTextOrUrl}\nRespond strictly with JSON:\n{"title": "...", "descriptionHtml": "...", "testcases": [{"input": "...", "expectedOutput": "..."}], "requiresRedirect": false}`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
+    const data = await geminiGenerateContent(getAiModel(), { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
     return parseAiJsonResponse<ExtractionResult>(data.candidates[0].content.parts[0].text);
   } catch (error) {
     return { title: "Origin Mapping Fault", descriptionHtml: "Direct navigation required.", testcases: [], requiresRedirect: true };
@@ -444,8 +443,7 @@ export async function extractProblemFromImageBase64(base64Data: string, mimeType
   const prompt = `You are an expert Optical Character Recognition (OCR) system and competitive programming parser. I have provided an image of a coding problem. 1. Extract all text accurately. 2. Format the problem description beautifully into HTML (use <h3>, <p>, <ul>, and <pre> tags for constraints and code). 3. Identify the sample inputs and outputs. 4. Generate 5 additional tricky hidden test cases based on the constraints.\nRespond strictly with JSON:\n{"title": "Extracted Problem Title", "descriptionHtml": "<div class='problem-statement'>...</div>", "testcases": [{"input": "...", "expectedOutput": "..."}]}`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { contents: [{ parts: [ { text: prompt }, { inlineData: { mimeType, data: cleanBase64 } } ] }], generationConfig: { responseMimeType: "application/json" } });
+    const data = await geminiGenerateContent(getAiModel(), { contents: [{ parts: [ { text: prompt }, { inlineData: { mimeType, data: cleanBase64 } } ] }], generationConfig: { responseMimeType: "application/json" } });
     return parseAiJsonResponse<ExtractionResult>(data.candidates[0].content.parts[0].text);
   } catch (error: any) {
     throw new Error("OCR parsing failed on provided image buffer.");
@@ -459,8 +457,7 @@ export async function generateTestCasesWithAI(problemDescription: string, master
   const prompt = `You are an expert competitive programming judge. Problem Description: ${sanitizeDescriptionForPrompt(problemDescription)}\nMaster Solution (Always Correct):\n${masterSolution}\nGenerate 20 tricky, edge-case system test cases for this problem. Include edge cases like 0, negative numbers, maximum constraints, or empty arrays where applicable. This is for the serial judge system. Respond strictly with a JSON array of objects. Do not include markdown formatting.\nFormat: [{"input": "...", "expectedOutput": "...", "explanation": "..."}]`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
+    const data = await geminiGenerateContent(getAiModel(), { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
     return parseAiJsonResponse<TestCase[]>(data.candidates[0].content.parts[0].text, true);
   } catch (error: any) {
     return [];
@@ -474,8 +471,7 @@ export async function findFailingTestCaseWithAI(problemDescription: string, user
   const prompt = `You are an expert competitive programming tutor. Problem Description: ${sanitizeDescriptionForPrompt(problemDescription)}\nUser's Failing Code:\n${userCode}\nThe user's code is getting a "Wrong Answer" or "Runtime Error". 1. Find the logical flaw. 2. Provide exactly ONE short test case input that makes their code fail. 3. Provide the expected correct output for that input. 4. Provide a 1-sentence hint (do NOT give them the code solution).\nRespond strictly with a JSON object.\nFormat: {"input": "...", "expectedOutput": "...", "hint": "..."}`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
+    const data = await geminiGenerateContent(getAiModel(), { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
     return parseAiJsonResponse<DebugResult>(data.candidates[0].content.parts[0].text);
   } catch (error: any) {
     throw new Error("Failed to parse AI inference debug response.");
@@ -489,8 +485,7 @@ export async function generateSolutionExplanationWithAI(problemDescription: stri
   const prompt = `You are an AI programming tutor. A student is stuck on this problem:\n${sanitizeDescriptionForPrompt(problemDescription)}\nBreak down the optimal approach step-by-step. Do not just output raw code. Explain the logic, data structures used, and time complexity. Respond strictly with a JSON object.\nFormat: {"summary": "...", "steps": ["step 1...", "step 2..."], "complexity": "..."}`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
+    const data = await geminiGenerateContent(getAiModel(), { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
     return parseAiJsonResponse<SolutionExplanation>(data.candidates[0].content.parts[0].text);
   } catch (error: any) {
     throw new Error("Failed to generate structural explanation.");
@@ -504,11 +499,10 @@ export async function generateToughTestCases(problemDescriptionHtml: string) {
   const prompt = `You are an expert competitive programming judge. Read the following problem description:\n${sanitizeDescriptionForPrompt(problemDescriptionHtml)}\nGenerate exactly 20 tricky, edge-case system test cases for this problem to feed the serial judge. Respond strictly with a JSON array of objects. Format: [{"input": "...", "expectedOutput": "..."}]`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
+    const data = await geminiGenerateContent(getAiModel(), { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
     return parseAiJsonResponse<TestCase[]>(data.candidates[0].content.parts[0].text, true);
   } catch (error: any) {
-    return []; 
+    return [];
   }
 }
 
@@ -519,8 +513,7 @@ export async function debugCodeWithAI(userCode: string, problemDescription: stri
   const prompt = `You are a competitive programming debugger. Problem Description: ${sanitizeDescriptionForPrompt(problemDescription)}\nUser Code: ${userCode}\nFind the logical error. Provide: 1. A short hint about the bug. 2. A minimal input that breaks the code. 3. The expected correct output for that input.\nReturn ONLY JSON: {"hint": "...", "input": "...", "expectedOutput": "..."}`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
+    const data = await geminiGenerateContent(getAiModel(), { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
     return parseAiJsonResponse<DebugResult>(data.candidates[0].content.parts[0].text);
   } catch (error: any) {
     return { hint: "Syntax constraint mapping failure.", input: "", expectedOutput: "" };
@@ -570,8 +563,7 @@ export async function analyzeUserWeaknesses(submissions: { problemTitle: string,
       }
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${getAiModel()}:generateContent?key=${apiKey}`;
-    const { data } = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
+    const data = await geminiGenerateContent(getAiModel(), { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
     return parseAiJsonResponse<WeaknessAnalysis>(data.candidates[0].content.parts[0].text);
   } catch (error: any) {
     // Graceful silent failure to prevent blocking UI telemetry during report generation
@@ -661,22 +653,23 @@ async function callClaudeRaw(prompt: string): Promise<string> {
 }
 
 async function callGeminiRaw(prompt: string): Promise<string> {
-  const key = (process.env.GEMINI_API_KEY || process.env.AI_API_KEY || '').trim();
-  if (!key) throw new Error('GEMINI_API_KEY / AI_API_KEY not configured.');
+  if (!geminiConfigured()) throw new Error('GEMINI_API_KEYS / GEMINI_API_KEY / AI_API_KEY not configured.');
 
   let lastErr: any;
 
   for (const model of GEMINI_MODEL_CHAIN) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+        // The pool rotates keys automatically on quota exhaustion (429), so a
+        // dead key never takes the interview down; the model chain here only
+        // has to survive model-level faults (404s, safety blocks, 5xx).
         // maxOutputTokens must leave headroom for the model's internal "thinking"
         // tokens (Gemini 2.5+/3.5 count them against this cap). At 2048 the model
         // can exhaust the entire budget thinking and return an empty candidate.
-        const { data } = await axios.post(url, {
+        const data = await geminiGenerateContent(model, {
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
           generationConfig: { responseMimeType: 'application/json', temperature: 0.7, maxOutputTokens: 8192 }
-        }, { timeout: RECRUITER_TIMEOUT_MS });
+        }, RECRUITER_TIMEOUT_MS);
 
         const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!text || !String(text).trim()) throw new Error('Gemini returned an empty candidate (possible safety block).');
@@ -702,12 +695,12 @@ async function recruiterInference<T>(prompt: string, validate: (raw: any) => T):
   if (USE_CLAUDE_API && (process.env.ANTHROPIC_API_KEY || '').trim()) {
     providers.push({ name: 'claude', call: callClaudeRaw });
   }
-  if ((process.env.GEMINI_API_KEY || process.env.AI_API_KEY || '').trim()) {
+  if (geminiConfigured()) {
     providers.push({ name: 'gemini', call: callGeminiRaw });
   }
 
   if (providers.length === 0) {
-    throw new RecruiterAiUnavailableError('No AI provider configured. Set ANTHROPIC_API_KEY or GEMINI_API_KEY/AI_API_KEY.');
+    throw new RecruiterAiUnavailableError('No AI provider configured. Set ANTHROPIC_API_KEY or GEMINI_API_KEYS/GEMINI_API_KEY/AI_API_KEY.');
   }
 
   const failures: string[] = [];

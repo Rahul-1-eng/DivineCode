@@ -23,6 +23,7 @@ import { startQueueWorkers } from './workers/index';
 import { setupDuelSockets } from './modules/duel/duelSocketService';
 import { upsertGoogleUser } from './storage';
 import { loginUser } from './modules/auth/authService';
+import { banGuard } from './modules/moderation/banGuard';
 
 declare global {
   namespace Express {
@@ -101,6 +102,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 app.use('/api/v2/ai', aiLimiter);
 app.use('/api/v2/interview/*/mock', aiLimiter);
+
+// Blocked accounts: every mutating /api request is rejected while a ban is
+// active. Reads stay open so the user can see why they were blocked.
+app.use('/api', banGuard());
 
 const server = http.createServer(app);
 
@@ -195,7 +200,12 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     const result = await loginUser(req.body);
     return res.json(result);
   } catch (err: unknown) {
-    return res.status(401).json({ error: 'Invalid username or password.' });
+    // Surface the ban message so blocked users know why they can't sign in;
+    // wrong-credential errors stay generic.
+    const message = err instanceof Error && err.message.startsWith('This account is blocked')
+      ? err.message
+      : 'Invalid username or password.';
+    return res.status(401).json({ error: message });
   }
 });
 

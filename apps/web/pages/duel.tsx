@@ -74,7 +74,7 @@ export default function DuelPage() {
   };
 
   useEffect(() => {
-    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelayMax: 5000, timeout: 10000 });
     socketRef.current = socket;
     
     socket.on('connect', () => { setConnected(true); setStatus('Connected. Ready for matchmaking.'); });

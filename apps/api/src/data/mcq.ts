@@ -87,5 +87,117 @@ export const mcqQuestions = [
     correctIndex: 2,
     type: "logical",
     concept: "Syllogism"
+  },
+  {
+    id: 11,
+    question: "A server farm has 3 load balancers, each routing to 4 app servers, each connecting to 2 database replicas. If exactly one database replica fails, what is the maximum number of end-to-end request paths that remain available?",
+    options: ["12", "24", "18", "20"],
+    correctIndex: 0,
+    type: "logical",
+    concept: "Combinatorial Path Counting"
+  },
+  {
+    id: 12,
+    question: "In a single-elimination coding tournament with 128 participants, how many total matches are played to crown one champion?",
+    options: ["64", "127", "128", "255"],
+    correctIndex: 1,
+    type: "logical",
+    concept: "Invariant Thinking (every match eliminates exactly one)"
+  },
+  {
+    id: 13,
+    question: "You have two ropes; each takes exactly 60 minutes to burn but burns unevenly. What is the shortest time you can measure exactly 45 minutes by burning them?",
+    options: ["Impossible", "45 minutes using both ropes", "75 minutes", "90 minutes"],
+    correctIndex: 1,
+    type: "logical",
+    concept: "Classic Interview Puzzle (rope burning)"
+  },
+  {
+    id: 14,
+    question: "A hash table doubles its capacity when the load factor hits 0.75. Starting at capacity 16, after inserting 100 elements (no deletions), what is its capacity?",
+    options: ["128", "256", "64", "512"],
+    correctIndex: 1,
+    type: "logical",
+    concept: "Amortized Growth Simulation"
+  },
+  {
+    id: 15,
+    question: "Three microservices log timestamps with clock skews of +2s, -1s and +4s from true time. Service A logs an event at 10:00:05 (its clock, skew +2s). Service C (skew +4s) logs a reaction to it. What is the earliest TRUE time Service C could have logged?",
+    options: ["10:00:03", "10:00:07", "10:00:05", "10:00:01"],
+    correctIndex: 0,
+    type: "logical",
+    concept: "Distributed Clocks & Skew Reasoning"
+  },
+  {
+    id: 16,
+    question: "In a Git repo, commit C is on both branches X and Y. X has 3 commits after C, Y has 2 commits after C. A merge of Y into X (no conflicts, non-fast-forward) produces how many parents on the merge commit?",
+    options: ["1", "2", "3", "5"],
+    correctIndex: 1,
+    type: "logical",
+    concept: "DAG Structure Reasoning"
+  },
+  {
+    id: 17,
+    question: "You flip a fair coin repeatedly. What is the expected number of flips to see two heads in a row (HH)?",
+    options: ["4", "6", "8", "3"],
+    correctIndex: 1,
+    type: "logical",
+    concept: "Expected Value & Markov Chains"
+  },
+  {
+    id: 18,
+    question: "A rate limiter allows 10 requests per rolling 60-second window. A client sends 10 requests at t=0s and wants to send 5 more as early as possible. At what time can ALL 5 be accepted at once?",
+    options: ["t=30s", "t=60s", "t=61s", "Never in one burst"],
+    correctIndex: 1,
+    type: "logical",
+    concept: "Sliding Window Reasoning"
+  },
+  {
+    id: 19,
+    question: "25 horses, 5 per race, no stopwatch. What is the minimum number of races needed to find the 3 fastest horses?",
+    options: ["5", "6", "7", "8"],
+    correctIndex: 2,
+    type: "logical",
+    concept: "Classic Optimization Puzzle"
+  },
+  {
+    id: 20,
+    question: "An array of 1,000,001 integers contains every number from 1 to 1,000,000 exactly once, plus one duplicate. Using O(1) extra space, the fastest way to find the duplicate is:",
+    options: ["Sort and scan — O(n log n)", "Sum the array and subtract n(n+1)/2 — O(n)", "Nested loops — O(n²)", "Binary search on value ranges — O(n log n)"],
+    correctIndex: 1,
+    type: "logical",
+    concept: "Arithmetic Invariants"
+  },
+  {
+    id: 21,
+    question: "B+ tree of order 100 storing 1 billion keys: roughly how many disk reads does a point lookup need (root cached in RAM)?",
+    options: ["~30", "~4", "~100", "~10"],
+    correctIndex: 1,
+    type: "tech",
+    concept: "log₁₀₀(10⁹) ≈ 4.5 — index depth intuition"
+  },
+  {
+    id: 22,
+    question: "A CPU-bound task takes 100s single-threaded; 90% of it parallelizes perfectly. Per Amdahl's law, the best possible time on unlimited cores is:",
+    options: ["0s", "10s", "1s", "50s"],
+    correctIndex: 1,
+    type: "tech",
+    concept: "Amdahl's Law"
+  },
+  {
+    id: 23,
+    question: "Two transactions both read balance=100, each adds 50, and both write 150. The anomaly that serializable isolation would have prevented is:",
+    options: ["Dirty read", "Phantom read", "Lost update", "Write skew"],
+    correctIndex: 2,
+    type: "tech",
+    concept: "Transaction Anomalies"
+  },
+  {
+    id: 24,
+    question: "A Bloom filter reports 'present'. What do you actually know?",
+    options: ["The element was definitely inserted", "The element might have been inserted", "The element was inserted exactly once", "Nothing at all"],
+    correctIndex: 1,
+    type: "tech",
+    concept: "Probabilistic Data Structures"
   }
 ];

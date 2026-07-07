@@ -8,6 +8,8 @@ import { Router } from 'express';
 import { prisma } from '../prisma/client';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 import { normalizeCodeForAST, calculateStructuralSimilarity } from '../utils/plagiarism';
+import { sendMail, emailHealth, adminEmail } from '../modules/email/emailService';
+import { clearBanCache } from '../modules/moderation/banGuard';
 
 export const adminRouter = Router();
 
@@ -32,6 +34,108 @@ const verifyAdmin = async (req: any, res: any, next: any) => {
 };
 
 adminRouter.use(verifyAdmin);
+
+// Gmail pipeline check from the admin panel: verifies SMTP login, and with
+// ?test=1 delivers a real mail to the admin inbox so delivery is provably live.
+adminRouter.get('/email/health', async (req, res) => {
+  try {
+    const result = await emailHealth(req.query.test ? adminEmail() : undefined);
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// User moderation — block / unblock accounts for a chosen duration.
+// A blocked user can still browse public pages but every authenticated write
+// (submissions, bookings, chat, contests) is rejected until the ban lapses.
+// -----------------------------------------------------------------------------
+
+// Paginated user directory for the moderation panel.
+adminRouter.get('/users', async (req, res) => {
+  try {
+    const search = String(req.query.search || '').trim();
+    const where: any = search ? {
+      OR: [
+        { username: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } }
+      ]
+    } : {};
+    const users = await prisma.user.findMany({
+      where,
+      take: 50,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true, username: true, email: true, name: true, role: true,
+        rating: true, coins: true, createdAt: true,
+        bannedUntil: true, banReason: true
+      }
+    });
+    const now = Date.now();
+    return res.json(users.map(u => ({
+      ...u,
+      isBanned: !!u.bannedUntil && u.bannedUntil.getTime() > now
+    })));
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Block a user. durationHours = 0 / omitted → permanent (100 years).
+adminRouter.post('/users/:id/block', async (req, res) => {
+  try {
+    const { durationHours, reason } = req.body || {};
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+    if (target.role === 'ADMIN') return res.status(400).json({ error: 'Admins cannot be blocked.' });
+
+    const hours = Number(durationHours);
+    const bannedUntil = Number.isFinite(hours) && hours > 0
+      ? new Date(Date.now() + hours * 3600 * 1000)
+      : new Date(Date.now() + 100 * 365 * 24 * 3600 * 1000); // effectively permanent
+
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { bannedUntil, banReason: String(reason || 'Violation of platform rules.').slice(0, 500) }
+    });
+    clearBanCache(target.email);
+
+    sendMail(target.email,
+      'Your DivineCode account has been restricted',
+      'Account restricted by moderation',
+      `Your account has been blocked ${Number.isFinite(hours) && hours > 0 ? `until <strong>${bannedUntil.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST</strong>` : '<strong>indefinitely</strong>'}.<br/><br/>
+       Reason: <em>${String(reason || 'Violation of platform rules.').slice(0, 500)}</em><br/><br/>
+       If you believe this is a mistake, reply to this email to appeal.`);
+
+    return res.json({ success: true, bannedUntil });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+adminRouter.post('/users/:id/unblock', async (req, res) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { bannedUntil: null, banReason: null }
+    });
+    clearBanCache(target.email);
+
+    sendMail(target.email,
+      'Your DivineCode account has been restored',
+      'Welcome back — restriction lifted',
+      'The block on your account has been removed. All platform features are available again.');
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 // Fetch Platform Metrics
 adminRouter.get('/metrics', async (req, res) => {

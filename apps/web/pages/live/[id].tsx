@@ -31,7 +31,7 @@ export default function DivineLiveRoom() {
 
     // Presence: join the socket room so the viewer counter is real, and get
     // told immediately if the host ends the stream.
-    const socket: Socket = io(getApiBaseUrlForClient(), { transports: ['websocket'] });
+    const socket: Socket = io(getApiBaseUrlForClient(), { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelayMax: 5000, timeout: 10000 });
     socket.emit('join-live-room', id);
     socket.on('live-viewer-count', (payload: { roomId: string; count: number }) => {
       if (payload.roomId === id) setViewers(Math.max(1, payload.count));

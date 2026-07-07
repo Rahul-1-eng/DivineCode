@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import { fetchApi } from '../../../lib/api';
+import FeedbackModal from '../../../components/FeedbackModal';
 
 // --- Structural Interfaces ---
 interface ContestResultPayload {
@@ -92,8 +93,10 @@ export default function ContestResolutionDashboard() {
 
   return (
     <main style={STYLES.page}>
+      {/* Post-contest feedback — asked once per contest */}
+      <FeedbackModal kind="CONTEST" refId={String(id || '')} open={true} />
       <div style={STYLES.container}>
-        
+
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <div style={STYLES.statusBadge}>Evaluation Matrix Finalized</div>
           <h1 style={{ fontSize: 'clamp(28px, 5vw, 42px)', margin: '15px 0 5px' }}>{result.contestName}</h1>

@@ -136,7 +136,7 @@ const navLinks = [
         setLiveEvents(["🌐 System: Operating in standalone mode."]);
       });
 
-    const socket = io(API_BASE_URL, { transports: ['websocket'] });
+    const socket = io(API_BASE_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelayMax: 5000, timeout: 10000 });
     socket.on('global_ticker', (newEvent: string) => {
       setLiveEvents(prev => [newEvent, ...prev].slice(0, 10));
     });

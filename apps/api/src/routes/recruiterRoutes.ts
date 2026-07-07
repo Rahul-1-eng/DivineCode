@@ -27,10 +27,12 @@ export const recruiterRouter = Router();
 const SESSION_COST = 100;
 const FREE_TRIALS = 3;
 
-// Phone OTP is opt-in: by default a unique mobile number alone claims the free
-// trials (OTP mails were unreliable in production). Set REQUIRE_PHONE_OTP=true
-// once a real SMS gateway is configured to enforce verification again.
-const phoneOtpRequired = () => process.env.REQUIRE_PHONE_OTP === 'true' && otpChannel() !== 'NONE';
+// Phone OTP is ON by default: anyone could type any mobile number, so the
+// number must clear a code before it anchors free trials. Delivery is SMS when
+// Fast2SMS is configured, otherwise the code goes to the account's REGISTERED
+// email (never asked from the user — it's the one linked to the platform).
+// Set REQUIRE_PHONE_OTP=false to fall back to the legacy unverified path.
+const phoneOtpRequired = () => process.env.REQUIRE_PHONE_OTP !== 'false' && otpChannel() !== 'NONE';
 
 // Platform's UPI collection handle (maps to the admin's mobile). All booking
 // money lands here; recruiter payouts are settled manually by the admin.

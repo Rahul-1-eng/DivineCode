@@ -10,6 +10,7 @@ import { useRouter } from 'next/router';
 import { motion } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../../../lib/api';
+import FeedbackModal from '../../../components/FeedbackModal';
 
 const REC_META: Record<string, { label: string; color: string; bg: string }> = {
   STRONG_HIRE: { label: 'Strong Hire', color: '#4ade80', bg: 'rgba(74,222,128,0.12)' },
@@ -262,6 +263,8 @@ export default function InterviewDebriefReport() {
   return (
     <main style={STYLES.main}>
       <Toaster position="bottom-right" />
+      {/* One-time feedback ask now that the loop is over */}
+      <FeedbackModal kind="AI_INTERVIEW" refId={String(id || '')} open={true} />
       <div style={STYLES.shell}>
 
         {/* Verdict Banner */}

@@ -4,10 +4,11 @@
  * @description Route handlers for AI-driven features including chat, test-case generation, and performance analysis.
  */
 import { Router, Request, Response, NextFunction } from 'express';
-import axios from 'axios';
 import { prisma } from '../prisma/client';
 import { generateTestCasesWithAI, debugCodeWithAI, generateToughTestCases, analyzeUserWeaknesses, PLATFORM_GUIDE } from '../modules/ai/aiService';
+import { geminiGenerateContent, geminiConfigured } from '../modules/ai/geminiKeys';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
+import { isMostlyEnglish } from '../utils/language';
 
 export const aiRouter = Router();
 
@@ -35,8 +36,7 @@ function asyncRoute(handler: AsyncHandler) {
 
 aiRouter.post('/ai/chat', asyncRoute(async (req, res) => {
   const { message, history, image } = req.body;
-  const apiKey = process.env.AI_API_KEY;
-  if (!apiKey) return res.json({ reply: "I am unable to think right now. Please check the AI_API_KEY in the environment variables." });
+  if (!geminiConfigured()) return res.json({ reply: "I am unable to think right now. Please check the GEMINI_API_KEYS / AI_API_KEY in the environment variables." });
 
   try {
     const contents = [];
@@ -67,11 +67,11 @@ aiRouter.post('/ai/chat', asyncRoute(async (req, res) => {
     let lastErr: any = null;
     for (const modelName of CHAT_MODEL_CHAIN) {
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-        const { data } = await axios.post(url, {
+        // Key pool rotates automatically on quota errors — no redeploy needed.
+        const data = await geminiGenerateContent(modelName, {
           systemInstruction: { parts: [{ text: PLATFORM_GUIDE }] },
           contents
-        }, { timeout: CHAT_TIMEOUT_MS });
+        }, CHAT_TIMEOUT_MS);
 
         const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!text || !String(text).trim()) throw new Error('Empty candidate (possible safety block).');
@@ -140,13 +140,20 @@ aiRouter.get('/ai-dataset', asyncRoute(async (req, res) => {
     ]
   } : {};
 
-  const problems = await prisma.aiProblemDataset.findMany({
+  const rawProblems = await prisma.aiProblemDataset.findMany({
     where: whereClause,
     orderBy: { createdAt: 'desc' },
     skip: (page - 1) * limit,
     take: limit
   });
-  
+
+  // Safety net for legacy rows imported before the English-only filter:
+  // downgrade non-English statements to redirect-only so no Japanese/Chinese
+  // text ever reaches the question UI, and drop rows whose very title is CJK.
+  const problems = rawProblems
+    .filter(p => isMostlyEnglish(p.title))
+    .map(p => isMostlyEnglish(p.descriptionHtml || '') ? p : { ...p, descriptionHtml: '' });
+
   const totalFilteredCount = await prisma.aiProblemDataset.count({ where: whereClause });
   const totalCount = await prisma.aiProblemDataset.count(); 
   

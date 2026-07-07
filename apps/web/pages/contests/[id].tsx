@@ -511,7 +511,7 @@ export default function ContestRoomPage() {
   useEffect(() => {
       if (!id || !contest || isFinal) return; 
       
-      socketRef.current = io(API_BASE_URL, { transports: ['websocket'], reconnection: true });
+      socketRef.current = io(API_BASE_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelayMax: 5000, timeout: 10000 });
       const socket = socketRef.current;
       
       socket.on('connect', () => { 

@@ -11,6 +11,8 @@ import { useRouter } from 'next/router';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../../../lib/api';
 import JitsiRoom from '../../../components/JitsiRoom';
+import FeedbackModal from '../../../components/FeedbackModal';
+import ContextLoader from '../../../components/ContextLoader';
 
 export default function LiveInterviewCall() {
   const router = useRouter();
@@ -18,6 +20,13 @@ export default function LiveInterviewCall() {
 
   const [call, setCall] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showFeedback, setShowFeedback] = useState(false);
+
+  const leaveWithFeedback = () => {
+    // Candidates rate the session before heading back; recruiters/admins skip straight out.
+    if (call?.viewerRole === 'CANDIDATE') setShowFeedback(true);
+    else router.push('/recruiter/book');
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -41,7 +50,7 @@ export default function LiveInterviewCall() {
   }
 
   if (!call) {
-    return <main style={styles.center}><div>Opening the interview room…</div></main>;
+    return <main style={styles.center}><ContextLoader context="interview" label="Opening the interview room…" /></main>;
   }
 
   const scheduled = new Date(call.scheduledAt);
@@ -73,7 +82,7 @@ export default function LiveInterviewCall() {
             You joined as {call.viewerRole === 'RECRUITER' ? 'Interviewer' : call.viewerRole === 'ADMIN' ? 'Admin Observer' : 'Candidate'}
           </span>
         </div>
-        <button onClick={() => router.push('/recruiter/book')} style={styles.leaveBtn}>Leave</button>
+        <button onClick={leaveWithFeedback} style={styles.leaveBtn}>Leave</button>
       </header>
 
       <div style={{ flex: 1, minHeight: 0 }}>
@@ -83,10 +92,18 @@ export default function LiveInterviewCall() {
           subject={call.subject}
           onLeave={() => {
             toast('You left the interview room.');
-            router.push('/recruiter/book');
+            leaveWithFeedback();
           }}
         />
       </div>
+
+      {/* Post-interview feedback — shown once, then back to bookings */}
+      <FeedbackModal
+        kind="HUMAN_INTERVIEW"
+        refId={String(id || '')}
+        open={showFeedback}
+        onClose={() => router.push('/recruiter/book')}
+      />
     </main>
   );
 }

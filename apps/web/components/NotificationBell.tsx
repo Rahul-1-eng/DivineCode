@@ -59,7 +59,7 @@ export default function NotificationBell() {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 30000);
     
-    const socket = io(API_BASE_URL, { transports: ['websocket'] });
+    const socket = io(API_BASE_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelayMax: 5000, timeout: 10000 });
     
     if (session?.user?.email) {
        socket.on('connect', () => {

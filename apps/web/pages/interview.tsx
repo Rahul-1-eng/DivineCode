@@ -9,6 +9,20 @@ import { useSession } from 'next-auth/react';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../lib/api';
 import VoiceInterviewer from '../components/VoiceInterviewer';
+import ContextLoader from '../components/ContextLoader';
+
+// Deterministic day-seeded shuffle — everyone sees a different question order
+// every midnight, so the drill never feels like the same static list.
+function dailyShuffle<T>(list: T[]): T[] {
+  let seed = Math.floor(Date.now() / 86400000);
+  const rng = () => { seed = ((seed * 1664525 + 1013904223) >>> 0); return seed / 4294967296; };
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
 
 export default function InterviewPage() {
   const { data: session, status } = useSession();
@@ -81,7 +95,7 @@ export default function InterviewPage() {
 
   const filtered = useMemo(() => {
     let list = selectedTrack === 'All' ? questions : questions.filter(q => q.trackId === selectedTrack);
-    
+
     if (filterStatus !== 'All') {
       list = list.filter(q => {
         const stat = progress[q.id] || 'NOT_STARTED';
@@ -89,7 +103,7 @@ export default function InterviewPage() {
         return stat === filterStatus;
       });
     }
-    return list;
+    return dailyShuffle(list);
   }, [questions, selectedTrack, filterStatus, progress]);
 
   // Extracted 'currentIndex' to break the endless reset feedback loop
@@ -251,7 +265,7 @@ export default function InterviewPage() {
 
             <div style={{ display: 'grid', gap: 16 }}>
               {loading ? (
-                <div style={{...card, minHeight: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)'}}>Loading curriculum...</div>
+                <div style={{...card, minHeight: 300, display: 'flex', alignItems: 'center', justifyContent: 'center'}}><ContextLoader context="interview" label="Loading the curriculum…" /></div>
               ) : filtered.length === 0 ? (
                 <div style={{...card, textAlign: 'center', color: 'var(--text-muted)', padding: 60}}>No questions match your current filters.</div>
               ) : (

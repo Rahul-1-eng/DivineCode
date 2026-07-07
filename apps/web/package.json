@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
+    "chess.js": "^1.4.0",
     "framer-motion": "^12.40.0",
     "jsonwebtoken": "^9.0.2",
     "jspdf": "^4.2.1",

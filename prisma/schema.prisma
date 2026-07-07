@@ -29,7 +29,10 @@ model User {
   phoneOtpHash                String? // sha256 of the active OTP — never stored in plaintext
   phoneOtpExpiresAt           DateTime?
   freeInterviewsUsed          Int                      @default(0) // AI Recruiter free-trial sessions consumed (max 3)
+  bannedUntil                 DateTime? // Non-null and in the future = account is blocked until then
+  banReason                   String? // Shown to the blocked user so they know why
   candidateProfiles           CandidateProfile[]
+  feedbacks                   Feedback[]
   interviewSessions           InterviewSession[]
   recruiterBookings           RecruiterBooking[]
   recruiterProfile            HumanRecruiter?
@@ -1183,4 +1186,27 @@ enum CouponScope {
   COINS
   AI_SESSION
   BOTH
+}
+
+// Post-experience feedback — collected after AI interviews, live recruiter
+// calls, and contests so the admin can see how each experience landed.
+model Feedback {
+  id        String       @id @default(cuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      FeedbackKind
+  refId     String? // InterviewSession / RecruiterBooking / Contest id
+  rating    Int // 1–5 stars
+  comments  String?
+  createdAt DateTime     @default(now())
+
+  @@unique([userId, kind, refId]) // One feedback per user per experience
+  @@index([kind, createdAt])
+}
+
+enum FeedbackKind {
+  AI_INTERVIEW
+  HUMAN_INTERVIEW
+  CONTEST
+  PLATFORM
 }

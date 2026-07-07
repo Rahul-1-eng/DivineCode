@@ -10,6 +10,7 @@ import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import { motion } from 'framer-motion';
 import { fetchApi } from '../lib/api';
+import ContextLoader from '../components/ContextLoader';
 
 export default function AdminDashboard() {
   const { data: session, status } = useSession();
@@ -24,13 +25,72 @@ export default function AdminDashboard() {
   const [error, setError] = useState('');
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<'reports' | 'interview' | 'plagiarism'>('reports');
+  const [activeTab, setActiveTab] = useState<'reports' | 'interview' | 'plagiarism' | 'users' | 'feedback'>('reports');
 
   // Plagiarism Scanner State
   const [scanContestId, setScanContestId] = useState('');
   const [scanning, setScanning] = useState(false);
   const [plagiarismPairs, setPlagiarismPairs] = useState<any[] | null>(null);
   const [selectedPair, setSelectedPair] = useState<any>(null);
+
+  // User Moderation State
+  const [users, setUsers] = useState<any[]>([]);
+  const [userSearch, setUserSearch] = useState('');
+  const [banTarget, setBanTarget] = useState<any>(null);
+  const [banHours, setBanHours] = useState('24');
+  const [banReason, setBanReason] = useState('');
+
+  // Feedback + Email Health State
+  const [feedbackData, setFeedbackData] = useState<{ feedbacks: any[]; summary: any[] } | null>(null);
+  const [emailStatus, setEmailStatus] = useState<string>('');
+
+  const loadUsers = async (search = '') => {
+    try {
+      const data = await fetchApi(`/api/v2/admin/users${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+      if (Array.isArray(data)) setUsers(data);
+    } catch (err) { console.error('Failed to load users', err); }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'users' && users.length === 0) loadUsers();
+    if (activeTab === 'feedback' && !feedbackData) {
+      fetchApi('/api/v2/feedback/all').then(res => { if (res.success) setFeedbackData(res); }).catch(() => {});
+    }
+  }, [activeTab]);
+
+  const handleBlock = async () => {
+    if (!banTarget) return;
+    try {
+      await fetchApi(`/api/v2/admin/users/${banTarget.id}/block`, {
+        method: 'POST',
+        body: JSON.stringify({ durationHours: Number(banHours) || 0, reason: banReason })
+      });
+      setBanTarget(null);
+      setBanReason('');
+      loadUsers(userSearch);
+    } catch (err: any) { alert(err.message || 'Block failed'); }
+  };
+
+  const handleUnblock = async (userId: string) => {
+    try {
+      await fetchApi(`/api/v2/admin/users/${userId}/unblock`, { method: 'POST' });
+      loadUsers(userSearch);
+    } catch (err: any) { alert(err.message || 'Unblock failed'); }
+  };
+
+  const checkEmailHealth = async (withTest: boolean) => {
+    setEmailStatus('Checking Gmail pipeline…');
+    try {
+      const res = await fetchApi(`/api/v2/admin/email/health${withTest ? '?test=1' : ''}`);
+      if (!res.configured) setEmailStatus('❌ Not configured — GMAIL_USER / GMAIL_APP_PASSWORD are missing on the server.');
+      else if (!res.verified) setEmailStatus(`❌ SMTP login FAILED: ${res.error || 'unknown error'}`);
+      else if (withTest && res.testSent) setEmailStatus('✅ SMTP verified AND a real test mail was delivered to the admin inbox. Gmail service is working.');
+      else if (withTest && !res.testSent) setEmailStatus(`⚠️ SMTP login OK but the test send failed: ${res.error || 'unknown error'}`);
+      else setEmailStatus('✅ SMTP login verified. Gmail service is configured correctly.');
+    } catch (err: any) {
+      setEmailStatus(`❌ Health check failed: ${err.message || 'network error'}`);
+    }
+  };
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -109,7 +169,7 @@ const handleApproveQuestion = async (questionId: string) => {
     }
   };
 
-  if (loading) return <div style={{ minHeight: '100vh', background: '#020617', color: '#38bdf8', display: 'grid', placeItems: 'center' }}>Loading Command Center...</div>;
+  if (loading) return <div style={{ minHeight: '100vh', background: '#020617', color: '#38bdf8', display: 'grid', placeItems: 'center' }}><ContextLoader label="Opening command center…" /></div>;
 
   if (error) {
     return (
@@ -203,11 +263,23 @@ const handleApproveQuestion = async (questionId: string) => {
             >
                 🕵️ AST Plagiarism Scanner
             </button>
-            <button 
-                onClick={() => setActiveTab('interview')} 
+            <button
+                onClick={() => setActiveTab('interview')}
                 style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: activeTab === 'interview' ? '#a855f7' : '#1e293b', color: activeTab === 'interview' ? '#000' : '#94a3b8', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}
             >
                 🧠 Pending AI Interviews ({pendingQuestions.length})
+            </button>
+            <button
+                onClick={() => setActiveTab('users')}
+                style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: activeTab === 'users' ? '#fbbf24' : '#1e293b', color: activeTab === 'users' ? '#000' : '#94a3b8', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}
+            >
+                👥 User Moderation
+            </button>
+            <button
+                onClick={() => setActiveTab('feedback')}
+                style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: activeTab === 'feedback' ? '#4ade80' : '#1e293b', color: activeTab === 'feedback' ? '#000' : '#94a3b8', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}
+            >
+                ⭐ Feedback & Email
             </button>
         </div>
 
@@ -353,8 +425,139 @@ const handleApproveQuestion = async (questionId: string) => {
               </div>
           )}
 
+          {activeTab === 'users' && (
+            <div style={{ padding: '24px' }}>
+              <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+                <input
+                  value={userSearch}
+                  onChange={e => setUserSearch(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && loadUsers(userSearch)}
+                  placeholder="Search by username, email or name…"
+                  style={{ flex: 1, minWidth: 240, padding: '12px 16px', background: '#1e293b', color: '#fff', border: '1px solid #334155', borderRadius: 8, outline: 'none' }}
+                />
+                <button onClick={() => loadUsers(userSearch)} style={{ background: '#fbbf24', color: '#000', border: 'none', padding: '12px 24px', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}>Search</button>
+              </div>
+
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#64748b', fontSize: 12, textTransform: 'uppercase', background: 'rgba(2, 6, 23, 0.5)' }}>
+                      <th style={{ padding: '14px 18px' }}>User</th>
+                      <th style={{ padding: '14px 18px' }}>Email</th>
+                      <th style={{ padding: '14px 18px' }}>Status</th>
+                      <th style={{ padding: '14px 18px', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.length === 0 ? (
+                      <tr><td colSpan={4} style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>No users loaded. Try a search.</td></tr>
+                    ) : users.map(u => (
+                      <tr key={u.id} style={{ borderTop: '1px solid #1e293b' }}>
+                        <td style={{ padding: '14px 18px', color: '#38bdf8', fontWeight: 'bold' }}>@{u.username} {u.role === 'ADMIN' && <span style={{ color: '#fbbf24', fontSize: 11 }}>ADMIN</span>}</td>
+                        <td style={{ padding: '14px 18px', color: '#94a3b8' }}>{u.email}</td>
+                        <td style={{ padding: '14px 18px' }}>
+                          {u.isBanned
+                            ? <span style={{ color: '#f87171', fontWeight: 'bold' }}>⛔ Blocked until {new Date(u.bannedUntil).toLocaleString()}<br /><span style={{ fontWeight: 400, fontSize: 12 }}>{u.banReason}</span></span>
+                            : <span style={{ color: '#4ade80' }}>● Active</span>}
+                        </td>
+                        <td style={{ padding: '14px 18px', textAlign: 'right' }}>
+                          {u.role !== 'ADMIN' && (u.isBanned
+                            ? <button onClick={() => handleUnblock(u.id)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 13 }}>Unblock</button>
+                            : <button onClick={() => { setBanTarget(u); setBanHours('24'); setBanReason(''); }} style={{ background: 'transparent', color: '#f87171', border: '1px solid rgba(248,113,113,0.5)', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 13 }}>Block…</button>)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'feedback' && (
+            <div style={{ padding: '24px' }}>
+              {/* Gmail pipeline health */}
+              <div style={{ background: 'rgba(2,6,23,0.5)', border: '1px solid #1e293b', borderRadius: 12, padding: 20, marginBottom: 24 }}>
+                <h3 style={{ margin: '0 0 12px', color: '#eef2ff' }}>📬 Gmail Service Health</h3>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+                  <button onClick={() => checkEmailHealth(false)} style={{ background: '#334155', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}>Verify SMTP Login</button>
+                  <button onClick={() => checkEmailHealth(true)} style={{ background: '#4ade80', color: '#000', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}>Send Real Test Email</button>
+                </div>
+                {emailStatus && <div style={{ color: '#e2e8f0', fontSize: 14, lineHeight: 1.6 }}>{emailStatus}</div>}
+              </div>
+
+              {/* Star averages */}
+              {feedbackData?.summary && feedbackData.summary.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 24 }}>
+                  {feedbackData.summary.map((s: any) => (
+                    <div key={s.kind} style={{ background: 'rgba(2,6,23,0.5)', border: '1px solid #1e293b', borderRadius: 12, padding: 18 }}>
+                      <div style={{ color: '#94a3b8', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>{s.kind.replace('_', ' ')}</div>
+                      <div style={{ fontSize: 28, fontWeight: 900, color: '#fbbf24' }}>⭐ {Number(s._avg?.rating || 0).toFixed(1)}</div>
+                      <div style={{ color: '#64748b', fontSize: 12 }}>{s._count?._all || 0} responses</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Feedback stream */}
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#64748b', fontSize: 12, textTransform: 'uppercase', background: 'rgba(2, 6, 23, 0.5)' }}>
+                      <th style={{ padding: '14px 18px' }}>Date</th>
+                      <th style={{ padding: '14px 18px' }}>User</th>
+                      <th style={{ padding: '14px 18px' }}>Experience</th>
+                      <th style={{ padding: '14px 18px' }}>Rating</th>
+                      <th style={{ padding: '14px 18px' }}>Comments</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {!feedbackData || feedbackData.feedbacks.length === 0 ? (
+                      <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>No feedback yet.</td></tr>
+                    ) : feedbackData.feedbacks.map((f: any) => (
+                      <tr key={f.id} style={{ borderTop: '1px solid #1e293b' }}>
+                        <td style={{ padding: '14px 18px', color: '#94a3b8', whiteSpace: 'nowrap' }}>{new Date(f.createdAt).toLocaleDateString()}</td>
+                        <td style={{ padding: '14px 18px', color: '#38bdf8' }}>@{f.user?.username}</td>
+                        <td style={{ padding: '14px 18px', color: '#a855f7', fontSize: 13 }}>{f.kind.replace('_', ' ')}</td>
+                        <td style={{ padding: '14px 18px', color: '#fbbf24', fontWeight: 'bold' }}>{'⭐'.repeat(f.rating)}</td>
+                        <td style={{ padding: '14px 18px', color: '#e2e8f0', maxWidth: 340 }}>{f.comments || <span style={{ color: '#475569' }}>—</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
+
+      {/* BLOCK USER MODAL */}
+      {banTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.85)', zIndex: 1100, display: 'grid', placeItems: 'center', padding: 20 }}>
+          <div style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 16, padding: 28, width: '100%', maxWidth: 440 }}>
+            <h3 style={{ margin: '0 0 6px', color: '#f87171' }}>⛔ Block @{banTarget.username}</h3>
+            <p style={{ margin: '0 0 18px', color: '#94a3b8', fontSize: 14 }}>The user is emailed the reason and duration. All their write actions are rejected until the block lifts.</p>
+
+            <label style={{ display: 'block', color: '#94a3b8', fontSize: 13, marginBottom: 6, fontWeight: 'bold' }}>DURATION</label>
+            <select value={banHours} onChange={e => setBanHours(e.target.value)} style={{ width: '100%', padding: '12px 14px', background: '#1e293b', color: '#fff', border: '1px solid #334155', borderRadius: 8, marginBottom: 16 }}>
+              <option value="1">1 hour</option>
+              <option value="24">24 hours</option>
+              <option value="72">3 days</option>
+              <option value="168">1 week</option>
+              <option value="720">30 days</option>
+              <option value="0">Permanent</option>
+            </select>
+
+            <label style={{ display: 'block', color: '#94a3b8', fontSize: 13, marginBottom: 6, fontWeight: 'bold' }}>REASON (sent to the user)</label>
+            <textarea value={banReason} onChange={e => setBanReason(e.target.value)} rows={3} placeholder="e.g. Plagiarized contest submissions" style={{ width: '100%', boxSizing: 'border-box', padding: 12, background: '#1e293b', color: '#fff', border: '1px solid #334155', borderRadius: 8, resize: 'vertical', marginBottom: 20 }} />
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setBanTarget(null)} style={{ flex: 1, background: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '12px 0', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={handleBlock} style={{ flex: 2, background: '#ef4444', color: '#fff', border: 'none', padding: '12px 0', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}>Block User</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

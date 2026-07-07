@@ -9,6 +9,11 @@ import { useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../lib/api';
+import FloatingWindow from '../components/FloatingWindow';
+import ContextLoader from '../components/ContextLoader';
+import ChessGame from '../components/games/ChessGame';
+import Minesweeper from '../components/games/Minesweeper';
+import MemoryMatrix from '../components/games/MemoryMatrix';
 
 const SUGGESTED_QUESTIONS = [
   "Can you suggest a roadmap for learning Dynamic Programming?",
@@ -37,7 +42,7 @@ export default function PracticePage() {
   const [activeTab, setActiveTab] = useState<'coding' | 'logical' | 'community'>('coding');
   const [communityProblems, setCommunityProblems] = useState<any[]>([]);
   const [communityError, setCommunityError] = useState('');
-  const [logicalMode, setLogicalMode] = useState<'daily'|'sliding'|'base'|'bigo'>('daily');
+  const [logicalMode, setLogicalMode] = useState<'daily'|'sliding'|'base'|'bigo'|'chess'|'mines'|'memory'>('daily');
 
   // Coding Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -73,19 +78,34 @@ export default function PracticePage() {
     { role: 'ai', text: 'Hello! I have access to over 5,000+ DSA questions. How can I help you practice today? Upload an image if you have a specific unexpected question!' }
   ]);
 
-  // FULLY DYNAMIC API FETCH
+  // FULLY DYNAMIC API FETCH — cached copy paints instantly, then the network
+  // response refreshes it in the background (stale-while-revalidate).
   useEffect(() => {
     if (status === 'loading') return;
+
+    try {
+      const cached = sessionStorage.getItem('dc-practice-data');
+      if (cached) {
+        const { problems: p, mcqs: m } = JSON.parse(cached);
+        if (Array.isArray(p) && p.length) { setProblems(p); setLoading(false); }
+        if (Array.isArray(m) && m.length) setMcqData(m);
+      }
+    } catch { /* cache is best-effort only */ }
 
     Promise.allSettled([
       fetchApi('/api/v2/ai-dataset'),
       fetchApi('/api/v2/mcqs')
-    ]).then(([dsaRes, mcqRes]) => { 
-      if (dsaRes.status === 'fulfilled') setProblems(Array.isArray(dsaRes.value.problems) ? dsaRes.value.problems : []); 
-      if (mcqRes.status === 'fulfilled') setMcqData(Array.isArray(mcqRes.value) ? mcqRes.value : []);
-      setLoading(false); 
+    ]).then(([dsaRes, mcqRes]) => {
+      const freshProblems = dsaRes.status === 'fulfilled' && Array.isArray(dsaRes.value.problems) ? dsaRes.value.problems : null;
+      const freshMcqs = mcqRes.status === 'fulfilled' && Array.isArray(mcqRes.value) ? mcqRes.value : null;
+      if (freshProblems) setProblems(freshProblems);
+      if (freshMcqs) setMcqData(freshMcqs);
+      if (freshProblems || freshMcqs) {
+        try { sessionStorage.setItem('dc-practice-data', JSON.stringify({ problems: freshProblems || [], mcqs: freshMcqs || [] })); } catch { /* quota */ }
+      }
+      setLoading(false);
     }).catch(() => setLoading(false));
-  }, [session, status]); 
+  }, [session, status]);
 
   // COMMUNITY HUB FETCH
   useEffect(() => {
@@ -120,32 +140,45 @@ export default function PracticePage() {
   // --- QUESTION OF THE DAY LOGIC ---
   const dailyChallenges = useMemo(() => {
     if (!problems || problems.length < 3) return [];
-    
-    // Seeded random based on current day so it changes exactly at midnight
+
+    // Seeded Fisher-Yates keyed on the calendar date: a genuinely different
+    // trio every midnight (the old parity-comparator barely reordered anything).
     const today = new Date().toDateString();
     let seed = 0;
-    for (let i = 0; i < today.length; i++) seed += today.charCodeAt(i);
-    
-    const shuffled = [...problems].sort((a, b) => (a.title.charCodeAt(0) + seed) % 2 === 0 ? 1 : -1);
-    
-    const lc = shuffled.find(p => p.platform === 'LeetCode') || shuffled[0];
-    const cf = shuffled.find(p => p.platform === 'Codeforces' && p.id !== lc?.id) || shuffled[1];
-    const hard = shuffled.find(p => p.difficulty === 'Hard' && p.id !== lc?.id && p.id !== cf?.id) || shuffled[2];
-    
+    for (let i = 0; i < today.length; i++) seed = ((seed * 31 + today.charCodeAt(i)) >>> 0);
+    const rng = () => { seed = ((seed * 1664525 + 1013904223) >>> 0); return seed / 4294967296; };
+    const shuffled = [...problems];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    const easy = shuffled.find(p => p.difficulty === 'Easy') || shuffled[0];
+    const medium = shuffled.find(p => p.difficulty === 'Medium' && p.id !== easy?.id) || shuffled[1];
+    const hard = shuffled.find(p => p.difficulty === 'Hard' && p.id !== easy?.id && p.id !== medium?.id) || shuffled[2];
+
+    // Label with the problem's REAL platform — an AtCoder task must never
+    // wear a "Codeforces" badge.
     return [
-      { ...lc, dayLabel: 'Codeforces Core (Easy)', dColor: '#4ade80' },
-      { ...cf, dayLabel: 'LeetCode Vector (Medium)', dColor: '#fbbf24' },
-      { ...hard, dayLabel: 'Extreme Platform Arena (Hard)', dColor: '#f87171' }
+      { ...easy, dayLabel: `${easy.platform || 'DivineCode'} Warm-up (Easy)`, dColor: '#4ade80' },
+      { ...medium, dayLabel: `${medium.platform || 'DivineCode'} Builder (Medium)`, dColor: '#fbbf24' },
+      { ...hard, dayLabel: `${hard.platform || 'DivineCode'} Arena (Hard)`, dColor: '#f87171' }
     ].filter(Boolean);
   }, [problems]);
 
-  // Dynamically uses backend dataset for daily MCQs
+  // Dynamically uses backend dataset for daily MCQs — a seeded shuffle keyed
+  // on the day picks 5 fresh puzzles every midnight.
   const dailyLogicalGames = useMemo(() => {
     const logicalPool = mcqData.filter(q => q.type === 'logical');
     if (logicalPool.length === 0) return [];
-    const dayOfYear = Math.floor(Date.now() / 86400000);
-    const startIndex = dayOfYear % Math.max(1, logicalPool.length - 2);
-    return logicalPool.slice(startIndex, startIndex + 3);
+    let seed = Math.floor(Date.now() / 86400000);
+    const rng = () => { seed = ((seed * 1664525 + 1013904223) >>> 0); return seed / 4294967296; };
+    const shuffled = [...logicalPool];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled.slice(0, Math.min(5, shuffled.length));
   }, [mcqData]);
 
   const submitLogicalGames = () => {
@@ -157,8 +190,20 @@ export default function PracticePage() {
 
   // --- SLIDING PUZZLE LOGIC ---
   const initPuzzle = () => {
+    // Shuffle by applying random legal moves from the solved state — a naive
+    // random permutation is unsolvable half the time (15-puzzle parity).
     let arr = Array.from({length: 15}, (_, i) => i + 1).concat([0]);
-    arr.sort(() => Math.random() - 0.5);
+    let zero = 15;
+    for (let step = 0; step < 250; step++) {
+      const candidates = [zero - 1, zero + 1, zero - 4, zero + 4].filter(n =>
+        n >= 0 && n < 16 &&
+        !(zero % 4 === 0 && n === zero - 1) &&
+        !(zero % 4 === 3 && n === zero + 1)
+      );
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      [arr[zero], arr[pick]] = [arr[pick], arr[zero]];
+      zero = pick;
+    }
     setPuzzleGrid(arr);
     setPuzzleMoves(0);
   };
@@ -342,10 +387,37 @@ export default function PracticePage() {
             
             <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
               <button onClick={() => setLogicalMode('daily')} style={logicalMode === 'daily' ? activePill : inactivePill}>📝 Daily MCQs</button>
+              <button onClick={() => setLogicalMode('chess')} style={logicalMode === 'chess' ? activePill : inactivePill}>♟️ Chess</button>
+              <button onClick={() => setLogicalMode('mines')} style={logicalMode === 'mines' ? activePill : inactivePill}>💣 Minesweeper</button>
+              <button onClick={() => setLogicalMode('memory')} style={logicalMode === 'memory' ? activePill : inactivePill}>🧠 Memory Matrix</button>
               <button onClick={() => setLogicalMode('base')} style={logicalMode === 'base' ? activePill : inactivePill}>🔢 Base Converter</button>
               <button onClick={() => setLogicalMode('bigo')} style={logicalMode === 'bigo' ? activePill : inactivePill}>⏱️ Big-O Guesser</button>
               <button onClick={() => setLogicalMode('sliding')} style={logicalMode === 'sliding' ? activePill : inactivePill}>🧩 Sliding Puzzle</button>
             </div>
+
+            {logicalMode === 'chess' && (
+              <div style={{ padding: '10px 0' }}>
+                <h2 style={{ color: 'var(--text-main)', margin: '0 0 6px', textAlign: 'center' }}>Grandmaster Arena</h2>
+                <p style={{ color: 'var(--text-muted)', margin: '0 0 10px', textAlign: 'center' }}>Full chess rules. Beat the engine or duel a friend on one screen.</p>
+                <ChessGame />
+              </div>
+            )}
+
+            {logicalMode === 'mines' && (
+              <div style={{ padding: '10px 0' }}>
+                <h2 style={{ color: 'var(--text-main)', margin: '0 0 6px', textAlign: 'center' }}>Minefield Protocol</h2>
+                <p style={{ color: 'var(--text-muted)', margin: '0 0 10px', textAlign: 'center' }}>Pure deduction under pressure — clear the field without triggering a mine.</p>
+                <Minesweeper />
+              </div>
+            )}
+
+            {logicalMode === 'memory' && (
+              <div style={{ padding: '10px 0' }}>
+                <h2 style={{ color: 'var(--text-main)', margin: '0 0 6px', textAlign: 'center' }}>Memory Matrix</h2>
+                <p style={{ color: 'var(--text-muted)', margin: '0 0 10px', textAlign: 'center' }}>Spatial-span training: the grid grows as your recall does.</p>
+                <MemoryMatrix />
+              </div>
+            )}
 
             {logicalMode === 'daily' && (
               <>
@@ -365,7 +437,7 @@ export default function PracticePage() {
                   </div>
                 </div>
 
-                {loading ? <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Initializing puzzle engine...</p>
+                {loading ? <ContextLoader context="practice" label="Initializing puzzle engine…" />
                 : dailyLogicalGames.length === 0 ? <p style={{ color: '#f87171', textAlign: 'center', padding: 40 }}>Could not fetch today's puzzles from the server.</p>
                 : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 30 }}>
@@ -527,9 +599,8 @@ export default function PracticePage() {
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td colSpan={5} style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
-                          <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ display: 'inline-block', width: 30, height: 30, border: '3px solid var(--accent-glow)', borderTopColor: 'var(--accent-primary)', borderRadius: '50%' }} />
-                          <p style={{ marginTop: 15 }}>Loading 5000+ Questions...</p>
+                        <td colSpan={5}>
+                          <ContextLoader context="practice" label="Loading the question bank…" />
                         </td>
                       </tr>
                     ) : filteredProblems.length === 0 ? (
@@ -583,15 +654,16 @@ export default function PracticePage() {
         )}
       </section>
 
-      {/* FLOATING AI CHATBOT */}
+      {/* FLOATING AI CHATBOT — draggable & resizable */}
       <div style={floatingAiWrapper}>
         <AnimatePresence>
           {isChatOpen && (
-            <motion.div initial={{ opacity: 0, y: 20, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: 0.95 }} style={chatWindow}>
-              <div style={chatHeader}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><div style={avatarImg}>🤖</div><strong style={{ color: 'var(--text-main)' }}>Divine AI Guide</strong></div>
-                <button onClick={() => setIsChatOpen(false)} style={closeBtn}>×</button>
-              </div>
+            <FloatingWindow
+              title={<><div style={avatarImg}>🤖</div><strong style={{ color: 'var(--text-main)' }}>Divine AI Guide</strong></>}
+              onClose={() => setIsChatOpen(false)}
+              defaultWidth={360}
+              defaultHeight={500}
+            >
               <div style={chatBody}>
                 {chatMessages.map((msg, i) => (
                    <div key={i} style={{ ...chatBubble, alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', background: msg.role === 'user' ? 'var(--accent-primary)' : 'var(--bg-card)', color: msg.role === 'user' ? '#000' : 'var(--text-main)' }}>
@@ -625,7 +697,7 @@ export default function PracticePage() {
                 <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendMessage()} placeholder="Ask me anything..." style={chatInputStyle} />
                 <button onClick={handleSendMessage} style={sendBtn}>↑</button>
               </div>
-            </motion.div>
+            </FloatingWindow>
           )}
         </AnimatePresence>
         {!isChatOpen && <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => setIsChatOpen(true)} style={floatingBtn}>🤖 AI Guide</motion.button>}
@@ -655,10 +727,7 @@ const tagStyle: CSSProperties = { background: 'var(--accent-glow)', color: 'var(
 
 const floatingAiWrapper: CSSProperties = { position: 'fixed', bottom: 30, right: 30, zIndex: 50, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' };
 const floatingBtn: CSSProperties = { background: 'var(--accent-primary)', color: '#000', border: 'none', padding: '15px 25px', borderRadius: 999, fontSize: 16, fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 10px 25px var(--accent-glow)' };
-const chatWindow: CSSProperties = { width: 'clamp(280px, 90vw, 350px)', height: 'clamp(300px, 80vh, 480px)', background: 'var(--bg-panel-solid)', border: '1px solid var(--accent-primary)', borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' };
-const chatHeader: CSSProperties = { background: 'var(--bg-panel)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)' };
 const avatarImg: CSSProperties = { width: 30, height: 30, background: 'var(--bg-main)', borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 18 };
-const closeBtn: CSSProperties = { background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 24, cursor: 'pointer' };
 const chatBody: CSSProperties = { flex: 1, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 };
 const chatBubble: CSSProperties = { maxWidth: '85%', padding: '10px 14px', borderRadius: 12, fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', border: '1px solid var(--border-color)' };
 const chatFooter: CSSProperties = { padding: 12, background: 'var(--bg-panel)', borderTop: '1px solid var(--border-color)', display: 'flex', gap: 8, alignItems: 'center' };

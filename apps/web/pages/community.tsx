@@ -47,7 +47,7 @@ export default function CommunityHubPage() {
     loadCommunityPosts();
     loadLiveRooms();
 
-    const socket = io(API_BASE_URL, { transports: ['websocket'] });
+    const socket = io(API_BASE_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelayMax: 5000, timeout: 10000 });
 
     socket.on('new_community_post', (post) => {
       setPosts(prev => {

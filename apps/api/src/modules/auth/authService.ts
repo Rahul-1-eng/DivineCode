@@ -54,6 +54,11 @@ export async function loginUser({ handle, password }: any) {
   const isValid = await bcrypt.compare(password, existingUser.passwordHash);
   if (!isValid) throw new Error('Invalid credentials.');
 
+  // Moderation gate: blocked accounts cannot start new sessions.
+  if (existingUser.bannedUntil && existingUser.bannedUntil.getTime() > Date.now()) {
+    throw new Error(`This account is blocked${existingUser.banReason ? `: ${existingUser.banReason}` : ''}. Restriction lifts on ${existingUser.bannedUntil.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST.`);
+  }
+
   const signingSecret = process.env.NEXTAUTH_SECRET || 'divinecode-local-dev-secret';
   const token = jwt.sign(
   {
