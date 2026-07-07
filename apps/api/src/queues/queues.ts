@@ -86,10 +86,26 @@ export function getPlagiarismQueue() {
 export async function startCronJobs() {
   const queue = getAutoFinalizeQueue();
   await queue.add('check-expired-contests', {}, {
-    repeat: { pattern: '* * * * *' }, 
-    jobId: 'cron-check-expired-contests' 
+    repeat: { pattern: '* * * * *' },
+    jobId: 'cron-check-expired-contests'
   });
-  console.log('⏱️ Auto-finalize cron job scheduled.');
+
+  // Live Codeforces standings: every 2 minutes, enqueue a sync for every
+  // RUNNING contest that has CF problems (keeps standings fresh without
+  // anyone pressing the manual Sync button).
+  await queue.add('sync-running-cf-contests', {}, {
+    repeat: { pattern: '*/2 * * * *' },
+    jobId: 'cron-sync-running-cf-contests'
+  });
+
+  // Nightly profile refresh: re-pull CF/LC/AtCoder/CodeChef ratings for every
+  // user with linked handles. 3:17 AM to stay clear of platform peak load.
+  await queue.add('refresh-external-ratings', {}, {
+    repeat: { pattern: '17 3 * * *' },
+    jobId: 'cron-refresh-external-ratings'
+  });
+
+  console.log('⏱️ Cron jobs scheduled: auto-finalize, CF live sync, nightly ratings refresh.');
 }
 
 export async function enqueueJudgeSubmission(submissionId: string) {
@@ -97,8 +113,15 @@ export async function enqueueJudgeSubmission(submissionId: string) {
   return { id: String(job.id), name: job.name, queue: QUEUE_NAMES.judge };
 }
 
-export async function enqueueCodeforcesContestSync(contestId: string) {
-  const job = await getExternalSyncQueue().add('sync-codeforces-contest', { contestId });
+export async function enqueueCodeforcesContestSync(contestId: string, dedupeKey?: string) {
+  // A dedupeKey collapses repeat requests (e.g. cron ticks) into one queued
+  // job; BullMQ skips adds whose jobId already exists. Callers pass a
+  // time-bucketed key so future syncs are not blocked by completed jobs.
+  const job = await getExternalSyncQueue().add(
+    'sync-codeforces-contest',
+    { contestId },
+    dedupeKey ? { jobId: dedupeKey, removeOnComplete: true, removeOnFail: 100 } : undefined
+  );
   return { id: String(job.id), name: job.name, queue: QUEUE_NAMES.externalSync };
 }
 

@@ -1180,6 +1180,24 @@ recruiterRouter.post('/bookings/:id/cancel', async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
+// Recruiter permit — a user whose account is linked to an APPROVED marketplace
+// recruiter listing holds the same session powers an admin does: open any
+// interview session, force-advance (skip) rounds, and read the debrief.
+// Walking candidates through the pipeline is literally their job.
+// -----------------------------------------------------------------------------
+async function isApprovedRecruiter(userId: string): Promise<boolean> {
+  try {
+    const listing = await prisma.humanRecruiter.findUnique({
+      where: { userId },
+      select: { status: true }
+    });
+    return listing?.status === 'APPROVED';
+  } catch {
+    return false;
+  }
+}
+
+// -----------------------------------------------------------------------------
 // 3. Fetch Session State (For resuming page reloads)
 // -----------------------------------------------------------------------------
 recruiterRouter.get('/sessions/:id', async (req, res) => {
@@ -1203,9 +1221,11 @@ recruiterRouter.get('/sessions/:id', async (req, res) => {
 
     // Admins hold an inspection permit: they may open ANY session (their own
     // test runs or a user's live one) to verify every stage of the pipeline.
+    // Approved marketplace recruiters hold the same permit.
     const viewerIsAdmin = user.role === 'ADMIN';
+    const viewerIsRecruiter = !viewerIsAdmin && await isApprovedRecruiter(user.id);
     const viewerIsOwner = !!session && session.userId === user.id;
-    if (!session || (!viewerIsOwner && !viewerIsAdmin)) {
+    if (!session || (!viewerIsOwner && !viewerIsAdmin && !viewerIsRecruiter)) {
       return res.status(404).json({ error: 'Session not found or unauthorized.' });
     }
 
@@ -1231,7 +1251,7 @@ recruiterRouter.get('/sessions/:id', async (req, res) => {
       }
     }
 
-    res.json({ success: true, session, viewerIsAdmin, viewerIsOwner });
+    res.json({ success: true, session, viewerIsAdmin, viewerIsRecruiter, viewerIsOwner });
   } catch (err: any) {
     if (err instanceof RecruiterAiUnavailableError) {
       return res.status(503).json({ error: 'The interview engine is temporarily unavailable. Please retry in a moment.', retryable: true });
@@ -1242,10 +1262,10 @@ recruiterRouter.get('/sessions/:id', async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// 3b. Admin Permit: Force-Advance Round
-// Lets an ADMIN conclude the active round as passed and open the next one,
-// so every stage of the pipeline can be walked through and QA'd without
-// having to genuinely clear each round against the AI.
+// 3b. Moderator Permit: Force-Advance Round
+// Lets an ADMIN or an approved marketplace RECRUITER conclude the active round
+// as passed and open the next one, so every stage of the pipeline can be
+// walked through without having to genuinely clear each round against the AI.
 // -----------------------------------------------------------------------------
 recruiterRouter.post('/sessions/:id/advance', async (req, res) => {
   try {
@@ -1254,7 +1274,9 @@ recruiterRouter.post('/sessions/:id/advance', async (req, res) => {
 
     const user = await prisma.user.findUnique({ where: { email: viewer.email } });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    if (user.role !== 'ADMIN') return res.status(403).json({ error: 'Admin permit required.' });
+    if (user.role !== 'ADMIN' && !(await isApprovedRecruiter(user.id))) {
+      return res.status(403).json({ error: 'Admin or recruiter permit required.' });
+    }
 
     const session = await prisma.interviewSession.findUnique({
       where: { id: req.params.id },
@@ -1415,8 +1437,8 @@ recruiterRouter.get('/sessions/:id/report', async (req, res) => {
       }
     });
 
-    const viewerIsAdmin = user.role === 'ADMIN';
-    if (!session || (session.userId !== user.id && !viewerIsAdmin)) {
+    const viewerIsModerator = user.role === 'ADMIN' || await isApprovedRecruiter(user.id);
+    if (!session || (session.userId !== user.id && !viewerIsModerator)) {
       return res.status(404).json({ error: 'Session not found or unauthorized.' });
     }
     if (session.status === 'IN_PROGRESS') {

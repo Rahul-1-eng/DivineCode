@@ -106,6 +106,7 @@ export default function ProfilePage() {
 
   const [savingUser, setSavingUser] = useState(false);
   const [savingHandles, setSavingHandles] = useState(false);
+  const [syncingStats, setSyncingStats] = useState(false);
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiAnalysisResult, setAiAnalysisResult] = useState<any>(null);
@@ -186,8 +187,17 @@ export default function ProfilePage() {
     try {
       await fetchApi('/api/v2/profile/save-handles', { method: 'POST', body: JSON.stringify({ codeforcesHandle: cfHandle, leetcodeHandle: lcHandle }) });
       alert("Handles verified and linked successfully!"); window.location.reload();
-    } catch (err: any) { alert(err.message || "Failed to save handles."); } 
+    } catch (err: any) { alert(err.message || "Failed to save handles."); }
     finally { setSavingHandles(false); }
+  }
+
+  async function refreshPlatformStats() {
+    setSyncingStats(true);
+    try {
+      await fetchApi('/api/v2/profile/sync-ratings', { method: 'POST' });
+      alert('Platform stats refreshed!'); window.location.reload();
+    } catch (err: any) { alert(err.message || 'Failed to refresh stats.'); }
+    finally { setSyncingStats(false); }
   }
 
   if (status === 'loading' || loading) return (
@@ -378,10 +388,16 @@ export default function ProfilePage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
                 {userData.externalHandles.map((h: any) => (
                   <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-card)', padding: 12, borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                    <span style={{ fontSize: 14 }}>{h.platform}: <b style={{ color: 'var(--accent-primary)' }}>{h.handle}</b></span>
+                    <span style={{ fontSize: 14 }}>
+                      {h.platform}: <b style={{ color: 'var(--accent-primary)' }}>{h.handle}</b>
+                      {h.rating != null && <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>· {h.rating}{h.maxRating != null ? ` (max ${h.maxRating})` : ''}</span>}
+                    </span>
                     <button onClick={() => unlinkHandle(h.platform, h.handle)} style={{ color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: 13 }}>Unlink</button>
                   </div>
                 ))}
+                <button onClick={refreshPlatformStats} disabled={syncingStats} style={{...ghost, padding: '10px 20px', fontSize: 14, width: '100%'}}>
+                  {syncingStats ? 'Syncing with platforms...' : '🔄 Refresh Platform Stats'}
+                </button>
               </div>
             )}
             

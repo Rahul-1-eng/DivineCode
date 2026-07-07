@@ -7,14 +7,15 @@
 import { Job, Worker } from 'bullmq';
 import { Server } from 'socket.io';
 import { syncCodeforcesContest } from '../modules/external-sync/codeforcesSyncService';
+import { syncUserRatings } from '../modules/external-sync/profileSyncService';
 import { judgeQueuedSubmission } from '../modules/judge/judge0Service';
 import { processContestRewards } from '../modules/ratings/ratingService';
 import { endContestV2 } from '../modules/contests/contestService';
 import { CodeforcesContestSyncJob, JudgeSubmissionJob, ContestRewardsJob, PlagiarismCheckJob, QUEUE_NAMES } from '../queues/jobTypes';
 import { getSharedRedisConnection } from '../queues/redis';
-import { startCronJobs, enqueuePlagiarismCheck } from '../queues/queues';
+import { startCronJobs, enqueuePlagiarismCheck, enqueueCodeforcesContestSync } from '../queues/queues';
 import { prisma } from '../prisma/client';
-import { ContestStatus } from '@prisma/client';
+import { ContestStatus, Platform } from '@prisma/client';
 // apps/api/src/workers/index.ts
 
 import { 
@@ -168,11 +169,11 @@ async function handleAutoFinalizeJob(job: Job) {
       where: { status: ContestStatus.RUNNING, endTime: { lte: new Date() } },
       select: { id: true }
     });
-    
+
     for (const contest of expiredContests) {
       try {
         await endContestV2(contest.id, 'SYSTEM_CRON');
-        
+
         if (activeIoInstance) {
           activeIoInstance.to(`contest:${contest.id}`).emit('standings:update', { contestId: contest.id });
         }
@@ -181,6 +182,46 @@ async function handleAutoFinalizeJob(job: Job) {
         console.error(`[Cron] Failed to auto-finalize contest ${contest.id}:`, err.message);
       }
     }
+  }
+
+  if (job.name === 'sync-running-cf-contests') {
+    // Keep standings live: enqueue a CF sync for every running contest that
+    // actually has Codeforces problems. Time-bucketed dedupe key means at
+    // most one queued sync per contest per cron window.
+    const running = await prisma.contest.findMany({
+      where: {
+        status: ContestStatus.RUNNING,
+        problems: { some: { platform: Platform.CODEFORCES } }
+      },
+      select: { id: true }
+    });
+
+    const bucket = Math.floor(Date.now() / 120000);
+    for (const contest of running) {
+      await enqueueCodeforcesContestSync(contest.id, `cf-sync:${contest.id}:${bucket}`);
+    }
+    if (running.length > 0) console.log(`[Cron] Enqueued CF sync for ${running.length} running contest(s).`);
+  }
+
+  if (job.name === 'refresh-external-ratings') {
+    // Nightly full refresh, sequential on purpose — one user at a time keeps
+    // us far under Codeforces/LeetCode rate limits regardless of user count.
+    const users = await prisma.externalHandle.findMany({
+      distinct: ['userId'],
+      select: { userId: true }
+    });
+
+    let refreshed = 0;
+    for (const { userId } of users) {
+      try {
+        await syncUserRatings(userId);
+        refreshed += 1;
+      } catch (err: any) {
+        console.error(`[Cron] Rating refresh failed for user ${userId}:`, err.message);
+      }
+      await new Promise(resolve => setTimeout(resolve, 1500)); // politeness gap between users
+    }
+    console.log(`[Cron] Nightly ratings refresh complete: ${refreshed}/${users.length} users.`);
   }
 }
 
@@ -215,8 +256,11 @@ export function startQueueWorkers(io?: Server) {
   });
 
   startCronJobs();
-  const autoFinalizeWorker = new Worker('auto-finalize', handleAutoFinalizeJob, { 
-    connection: sharedConnection 
+  // Concurrency 2: the slow nightly ratings refresh must not block the
+  // every-minute expired-contest finalizer sharing this queue.
+  const autoFinalizeWorker = new Worker('auto-finalize', handleAutoFinalizeJob, {
+    connection: sharedConnection,
+    concurrency: 2
   });
 
   // Plagiarism Worker initialized

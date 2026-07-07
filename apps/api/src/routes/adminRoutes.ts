@@ -10,6 +10,7 @@ import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
 import { normalizeCodeForAST, calculateStructuralSimilarity } from '../utils/plagiarism';
 import { sendMail, emailHealth, adminEmail } from '../modules/email/emailService';
 import { clearBanCache } from '../modules/moderation/banGuard';
+import { getMonitorSnapshot } from '../modules/moderation/activityMonitor';
 
 export const adminRouter = Router();
 
@@ -41,6 +42,61 @@ adminRouter.get('/email/health', async (req, res) => {
   try {
     const result = await emailHealth(req.query.test ? adminEmail() : undefined);
     return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Live monitoring — who is online right now, what every user is doing, and the
+// rolling activity feed. The admin panel polls this and offers block/unblock
+// directly on each row.
+// -----------------------------------------------------------------------------
+adminRouter.get('/monitor', async (req, res) => {
+  try {
+    const search = String(req.query.search || '').trim().toLowerCase();
+    const snapshot = getMonitorSnapshot(300);
+
+    // Resolve every email seen in telemetry to a real account (username, role,
+    // ban state) in one query so each feed row can carry a block button.
+    const emails = Array.from(new Set([
+      ...snapshot.presence.map(p => p.email),
+      ...snapshot.events.map(e => e.email)
+    ]));
+    const users = emails.length === 0 ? [] : await prisma.user.findMany({
+      where: { email: { in: emails } },
+      select: { id: true, username: true, email: true, name: true, role: true, bannedUntil: true, banReason: true }
+    });
+    const byEmail = new Map(users.map(u => [u.email.toLowerCase(), u]));
+    const now = Date.now();
+
+    const decorate = (email: string) => {
+      const u = byEmail.get(email.toLowerCase());
+      return {
+        userId: u?.id || null,
+        username: u?.username || email.split('@')[0],
+        email,
+        role: u?.role || 'USER',
+        isBanned: !!u?.bannedUntil && u.bannedUntil.getTime() > now,
+        bannedUntil: u?.bannedUntil || null,
+        banReason: u?.banReason || null
+      };
+    };
+
+    const matches = (d: ReturnType<typeof decorate>) =>
+      !search || d.username.toLowerCase().includes(search) || d.email.toLowerCase().includes(search);
+
+    const ONLINE_WINDOW_MS = 5 * 60 * 1000;
+    const online = snapshot.presence
+      .filter(p => now - p.lastSeen < ONLINE_WINDOW_MS)
+      .map(p => ({ ...decorate(p.email), lastSeen: p.lastSeen, lastAction: p.lastAction, lastPath: p.lastPath }))
+      .filter(matches);
+
+    const events = snapshot.events
+      .map(e => ({ id: e.id, at: e.at, method: e.method, path: e.path, action: e.action, ...decorate(e.email) }))
+      .filter(matches);
+
+    return res.json({ success: true, online, events, generatedAt: now });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }

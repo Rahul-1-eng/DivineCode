@@ -1,13 +1,37 @@
 /**
  * @file profileSyncService.ts
  * @author Rahul Kumar Sahoo
- * @description Core application logic for the platform feature.
+ * @description Pulls live ratings/solved counts from Codeforces, LeetCode,
+ * AtCoder and CodeChef for every linked handle and recomputes the user's
+ * unified global rating. Called after handle linking, from the manual
+ * refresh route, and by the daily refresh cron.
  */
 
 import { Platform } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { estimateUnifiedRating } from '../ratings/recommendationMath';
 import axios from 'axios';
+
+// LeetCode has no REST API; the public GraphQL endpoint is the official way
+// to read solved counts. (The old leetcode-stats herokuapp proxy is dead.)
+async function fetchLeetCodeSolvedCount(handle: string): Promise<number | null> {
+  const res = await axios.post(
+    'https://leetcode.com/graphql',
+    {
+      query: `query userStats($username: String!) {
+        matchedUser(username: $username) {
+          submitStatsGlobal { acSubmissionNum { difficulty count } }
+        }
+      }`,
+      variables: { username: handle }
+    },
+    { headers: { 'Content-Type': 'application/json', Referer: 'https://leetcode.com' }, timeout: 10000 }
+  );
+  const acStats = res.data?.data?.matchedUser?.submitStatsGlobal?.acSubmissionNum;
+  if (!Array.isArray(acStats)) return null;
+  const all = acStats.find((s: any) => s.difficulty === 'All');
+  return Number(all?.count) || 0;
+}
 
 export async function syncUserRatings(userId: string) {
   const handles = await prisma.externalHandle.findMany({ where: { userId } });
@@ -17,21 +41,20 @@ export async function syncUserRatings(userId: string) {
     try {
       if (h.platform === Platform.CODEFORCES) {
         // Fetch official Codeforces Rating
-        const res = await axios.get(`https://codeforces.com/api/user.info?handles=${h.handle}`);
+        const res = await axios.get(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(h.handle)}`, { timeout: 10000 });
         if (res.data.status === 'OK') {
           const rating = res.data.result[0].rating || 1200;
           const maxRating = res.data.result[0].maxRating || rating;
           ratingInputs.push({ platform: Platform.CODEFORCES, rating, solvedCount: 50 });
-          await prisma.externalHandle.update({ where: { id: h.id }, data: { rating, maxRating } });
+          await prisma.externalHandle.update({ where: { id: h.id }, data: { rating, maxRating, lastSyncAt: new Date() } });
         }
       } else if (h.platform === Platform.LEETCODE) {
-        // Fetch LeetCode stats using a reliable public proxy API
-        const res = await axios.get(`https://leetcode-stats-api.herokuapp.com/${h.handle}`);
-        if (res.data.status === 'success') {
-          const solvedCount = res.data.totalSolved || 0;
+        const solvedCount = await fetchLeetCodeSolvedCount(h.handle);
+        if (solvedCount !== null) {
           // Estimate an LC rating bonus based on questions solved
           const estimatedLcRating = 1200 + (solvedCount * 1.5);
           ratingInputs.push({ platform: Platform.LEETCODE, rating: estimatedLcRating, solvedCount });
+          await prisma.externalHandle.update({ where: { id: h.id }, data: { rating: Math.round(estimatedLcRating), lastSyncAt: new Date() } });
         }
       } else if (h.platform === Platform.ATCODER) {
         // AtCoder publishes each user's full contest history as JSON.
@@ -42,7 +65,7 @@ export async function syncUserRatings(userId: string) {
           const maxRating = res.data.reduce((m: number, r: any) => Math.max(m, Number(r.NewRating) || 0), rating);
           // AtCoder ratings run ~400 lower than Codeforces at the same skill level
           ratingInputs.push({ platform: Platform.ATCODER, rating: rating + 400, solvedCount: res.data.length });
-          await prisma.externalHandle.update({ where: { id: h.id }, data: { rating, maxRating } });
+          await prisma.externalHandle.update({ where: { id: h.id }, data: { rating, maxRating, lastSyncAt: new Date() } });
         }
       } else if (h.platform === Platform.CODECHEF) {
         // No public CodeChef API — extract the rating number from the profile page.
@@ -54,7 +77,7 @@ export async function syncUserRatings(userId: string) {
         if (match) {
           const rating = Number(match[1]);
           ratingInputs.push({ platform: Platform.CODECHEF, rating, solvedCount: 30 });
-          await prisma.externalHandle.update({ where: { id: h.id }, data: { rating } });
+          await prisma.externalHandle.update({ where: { id: h.id }, data: { rating, lastSyncAt: new Date() } });
         }
       }
     } catch (error) {
@@ -62,11 +85,15 @@ export async function syncUserRatings(userId: string) {
     }
   }
 
-  // Calculate the new unified Global Rating using your mathematical weights
-  let newGlobalRating = 1200;
-  if (ratingInputs.length > 0) {
-    newGlobalRating = estimateUnifiedRating(ratingInputs);
+  // Every fetch failed (network fault / platform down) — keep the existing
+  // global rating instead of silently resetting the user to 1200.
+  if (ratingInputs.length === 0) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { globalRating: true } });
+    return user?.globalRating ?? 1200;
   }
+
+  // Calculate the new unified Global Rating using your mathematical weights
+  const newGlobalRating = estimateUnifiedRating(ratingInputs);
 
   // Update the user's global profile
   await prisma.user.update({

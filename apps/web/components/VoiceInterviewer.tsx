@@ -8,6 +8,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { fetchApi } from '../lib/api';
+import { speakText, stopSpeaking, primeVoices } from '../lib/voice';
 
 // --- Structural Types ---
 interface QuestionPayload {
@@ -76,7 +77,6 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
   
   // Hardware Interface Refs
   const recognitionRef = useRef<any>(null);
-  const synthesisRef = useRef<SpeechSynthesis | null>(null);
   const transcriptBuffer = useRef('');
 
   const activeVideoUrl = buildReferenceVideoUrl(currentQuestion);
@@ -91,12 +91,8 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    synthesisRef.current = window.speechSynthesis;
-    
-    // Force voice allocation on mount to prevent rendering latency on first synthetic utterance
-    if (window.speechSynthesis.onvoiceschanged !== undefined) {
-      window.speechSynthesis.onvoiceschanged = () => synthesisRef.current?.getVoices();
-    }
+    // Warm the shared TTS engine (async voice list + first-gesture audio unlock)
+    primeVoices();
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -141,7 +137,7 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
     // Critical cleanup: ensure no hanging audio hardware allocations survive unmount
     return () => {
       if (recognitionRef.current) recognitionRef.current.abort();
-      if (synthesisRef.current) synthesisRef.current.cancel();
+      stopSpeaking();
     };
   }, []);
 
@@ -194,38 +190,25 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
       const fallbackText = 'The voice evaluation service is temporarily unavailable, but your response has been recorded. Please summarize your thought process and time complexity.';
       setChatLog(prev => [...prev, { role: 'interviewer', text: fallbackText }]);
       setMetrics({ tech: 60, fluency: 60, tips: 'Fallback mode enabled while the AI service is unavailable.' });
-      executeSpeechSynthesis(fallbackText);
-      setIsAiSpeaking(false);
+      executeSpeechSynthesis(fallbackText); // onEnd clears isAiSpeaking
     }
   }, [chatLog, currentQuestion.id, code, onSuccess]);
 
-  // 3. Audio Synthesis Execution
+  // 3. Audio Synthesis Execution — delegated to the shared lib/voice.ts engine
+  // (chunking, voice-list loading, cancel/speak race, keep-alive all handled there)
   const executeSpeechSynthesis = (text: string) => {
-    if (!synthesisRef.current) return;
-    
     // Halt input stream while AI is broadcasting to prevent recursive microphone feedback loops
     if (recognitionRef.current) recognitionRef.current.abort();
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voices = synthesisRef.current.getVoices();
-    
-    // Prioritize high-fidelity neural voices if available in the host OS
-    let premiumVoice = voices.find(v => 
-      v.name.includes('Google UK English') || 
-      v.name.includes('Microsoft Ava') || 
-      v.name.includes('Samantha')
-    );
-
-    if (!premiumVoice && voices.length > 0) {
-      premiumVoice = voices.find(v => v.lang.startsWith('en')) || voices[0];
-    }
-    
-    if (premiumVoice) utterance.voice = premiumVoice;
-    utterance.rate = 1.0; 
-    utterance.pitch = 1.05; 
-    
-    utterance.onend = () => setIsAiSpeaking(false);
-    synthesisRef.current.speak(utterance);
+    speakText(text, {
+      rate: 1.0,
+      pitch: 1.05,
+      onEnd: () => setIsAiSpeaking(false),
+      onBlocked: () => {
+        setIsAiSpeaking(false);
+        toast('Tap anywhere on the page to enable the interviewer voice.', { icon: '🔊' });
+      }
+    });
   };
 
   // 4. Hardware Input Toggle
@@ -237,7 +220,7 @@ export default function VoiceInterviewer({ currentQuestion, code, onSuccess }: V
       processAudioToAi(transcriptBuffer.current);
     } else {
       // Clear previous states and engage microphone hardware
-      if (synthesisRef.current) synthesisRef.current.cancel();
+      stopSpeaking();
       setIsAiSpeaking(false);
       setTranscript('');
       transcriptBuffer.current = '';

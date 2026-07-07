@@ -4,7 +4,7 @@
  * @description Page-level experience and view logic.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
@@ -25,7 +25,7 @@ export default function AdminDashboard() {
   const [error, setError] = useState('');
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<'reports' | 'interview' | 'plagiarism' | 'users' | 'feedback'>('reports');
+  const [activeTab, setActiveTab] = useState<'reports' | 'interview' | 'plagiarism' | 'monitor' | 'feedback'>('reports');
 
   // Plagiarism Scanner State
   const [scanContestId, setScanContestId] = useState('');
@@ -33,9 +33,12 @@ export default function AdminDashboard() {
   const [plagiarismPairs, setPlagiarismPairs] = useState<any[] | null>(null);
   const [selectedPair, setSelectedPair] = useState<any>(null);
 
-  // User Moderation State
+  // Live Monitoring + Moderation State — the Monitoring tab is the single
+  // place where the admin watches what every user is doing and blocks them.
   const [users, setUsers] = useState<any[]>([]);
   const [userSearch, setUserSearch] = useState('');
+  const userSearchRef = useRef('');
+  const [monitor, setMonitor] = useState<{ online: any[]; events: any[] } | null>(null);
   const [banTarget, setBanTarget] = useState<any>(null);
   const [banHours, setBanHours] = useState('24');
   const [banReason, setBanReason] = useState('');
@@ -51,11 +54,32 @@ export default function AdminDashboard() {
     } catch (err) { console.error('Failed to load users', err); }
   };
 
+  const loadMonitor = async (search = '') => {
+    try {
+      const data = await fetchApi(`/api/v2/admin/monitor${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+      if (data.success) setMonitor({ online: data.online, events: data.events });
+    } catch (err) { console.error('Failed to load monitor feed', err); }
+  };
+
+  const runMonitorSearch = () => {
+    userSearchRef.current = userSearch;
+    loadMonitor(userSearch);
+    loadUsers(userSearch);
+  };
+
   useEffect(() => {
-    if (activeTab === 'users' && users.length === 0) loadUsers();
     if (activeTab === 'feedback' && !feedbackData) {
       fetchApi('/api/v2/feedback/all').then(res => { if (res.success) setFeedbackData(res); }).catch(() => {});
     }
+  }, [activeTab]);
+
+  // The Monitoring tab is live: refresh the feed every 5s while it is open.
+  useEffect(() => {
+    if (activeTab !== 'monitor') return;
+    loadMonitor(userSearchRef.current);
+    loadUsers(userSearchRef.current);
+    const timer = setInterval(() => loadMonitor(userSearchRef.current), 5000);
+    return () => clearInterval(timer);
   }, [activeTab]);
 
   const handleBlock = async () => {
@@ -68,6 +92,7 @@ export default function AdminDashboard() {
       setBanTarget(null);
       setBanReason('');
       loadUsers(userSearch);
+      loadMonitor(userSearch);
     } catch (err: any) { alert(err.message || 'Block failed'); }
   };
 
@@ -75,7 +100,18 @@ export default function AdminDashboard() {
     try {
       await fetchApi(`/api/v2/admin/users/${userId}/unblock`, { method: 'POST' });
       loadUsers(userSearch);
+      loadMonitor(userSearch);
     } catch (err: any) { alert(err.message || 'Unblock failed'); }
+  };
+
+  // "3m ago" style timestamps for the live feed
+  const timeAgo = (ts: number) => {
+    const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (s < 10) return 'just now';
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    return new Date(ts).toLocaleString();
   };
 
   const checkEmailHealth = async (withTest: boolean) => {
@@ -270,10 +306,10 @@ const handleApproveQuestion = async (questionId: string) => {
                 🧠 Pending AI Interviews ({pendingQuestions.length})
             </button>
             <button
-                onClick={() => setActiveTab('users')}
-                style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: activeTab === 'users' ? '#fbbf24' : '#1e293b', color: activeTab === 'users' ? '#000' : '#94a3b8', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}
+                onClick={() => setActiveTab('monitor')}
+                style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: activeTab === 'monitor' ? '#fbbf24' : '#1e293b', color: activeTab === 'monitor' ? '#000' : '#94a3b8', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}
             >
-                👥 User Moderation
+                🛰️ Live Monitoring{monitor ? ` (${monitor.online.length} online)` : ''}
             </button>
             <button
                 onClick={() => setActiveTab('feedback')}
@@ -425,19 +461,78 @@ const handleApproveQuestion = async (questionId: string) => {
               </div>
           )}
 
-          {activeTab === 'users' && (
+          {activeTab === 'monitor' && (
             <div style={{ padding: '24px' }}>
-              <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
                 <input
                   value={userSearch}
                   onChange={e => setUserSearch(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && loadUsers(userSearch)}
-                  placeholder="Search by username, email or name…"
+                  onKeyDown={e => e.key === 'Enter' && runMonitorSearch()}
+                  placeholder="Filter by username or email…"
                   style={{ flex: 1, minWidth: 240, padding: '12px 16px', background: '#1e293b', color: '#fff', border: '1px solid #334155', borderRadius: 8, outline: 'none' }}
                 />
-                <button onClick={() => loadUsers(userSearch)} style={{ background: '#fbbf24', color: '#000', border: 'none', padding: '12px 24px', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}>Search</button>
+                <button onClick={runMonitorSearch} style={{ background: '#fbbf24', color: '#000', border: 'none', padding: '12px 24px', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer' }}>Search</button>
+                <span style={{ color: '#4ade80', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 8px #4ade80' }} />
+                  Live — refreshes every 5s
+                </span>
               </div>
 
+              {/* WHO IS ONLINE RIGHT NOW */}
+              <h3 style={{ margin: '0 0 12px', color: '#eef2ff' }}>🟢 Online Now ({monitor?.online.length || 0})</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginBottom: 28 }}>
+                {!monitor || monitor.online.length === 0 ? (
+                  <div style={{ color: '#94a3b8', padding: '16px 0', gridColumn: '1 / -1' }}>No users active in the last 5 minutes. Activity appears here the moment anyone touches the platform.</div>
+                ) : monitor.online.map(u => (
+                  <div key={u.email} style={{ background: 'rgba(2,6,23,0.5)', border: '1px solid #1e293b', borderRadius: 12, padding: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ color: '#38bdf8', fontWeight: 'bold' }}>@{u.username} {u.role === 'ADMIN' && <span style={{ color: '#fbbf24', fontSize: 11 }}>ADMIN</span>}</span>
+                      <span style={{ color: '#64748b', fontSize: 12 }}>{timeAgo(u.lastSeen)}</span>
+                    </div>
+                    <div style={{ color: '#e2e8f0', fontSize: 13, marginBottom: 10 }}>{u.lastAction}</div>
+                    {u.isBanned && <div style={{ color: '#f87171', fontSize: 12, fontWeight: 'bold', marginBottom: 8 }}>⛔ Blocked</div>}
+                    {u.role !== 'ADMIN' && u.userId && (u.isBanned
+                      ? <button onClick={() => handleUnblock(u.userId)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}>Unblock</button>
+                      : <button onClick={() => { setBanTarget({ id: u.userId, username: u.username }); setBanHours('24'); setBanReason(''); }} style={{ background: 'transparent', color: '#f87171', border: '1px solid rgba(248,113,113,0.5)', padding: '6px 14px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}>Block…</button>)}
+                  </div>
+                ))}
+              </div>
+
+              {/* LIVE ACTIVITY STREAM */}
+              <h3 style={{ margin: '0 0 12px', color: '#eef2ff' }}>📡 Activity Stream</h3>
+              <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto', border: '1px solid #1e293b', borderRadius: 12, marginBottom: 28 }}>
+                <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#64748b', fontSize: 12, textTransform: 'uppercase', background: 'rgba(2, 6, 23, 0.8)', position: 'sticky', top: 0 }}>
+                      <th style={{ padding: '12px 16px' }}>When</th>
+                      <th style={{ padding: '12px 16px' }}>User</th>
+                      <th style={{ padding: '12px 16px' }}>Activity</th>
+                      <th style={{ padding: '12px 16px' }}>Endpoint</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>Moderation</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {!monitor || monitor.events.length === 0 ? (
+                      <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>No activity captured yet. This feed fills up as users work — submissions, interviews, payments, chats, everything.</td></tr>
+                    ) : monitor.events.map(e => (
+                      <tr key={e.id} style={{ borderTop: '1px solid #1e293b' }}>
+                        <td style={{ padding: '10px 16px', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: 13 }}>{timeAgo(e.at)}</td>
+                        <td style={{ padding: '10px 16px', color: e.isBanned ? '#f87171' : '#38bdf8', fontWeight: 'bold', fontSize: 13 }}>@{e.username}{e.isBanned ? ' ⛔' : ''}</td>
+                        <td style={{ padding: '10px 16px', color: '#e2e8f0', fontSize: 13 }}>{e.action}</td>
+                        <td style={{ padding: '10px 16px', color: '#64748b', fontFamily: 'monospace', fontSize: 12 }}>{e.method} {e.path.replace('/api/v2', '')}</td>
+                        <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                          {e.role !== 'ADMIN' && e.userId && (e.isBanned
+                            ? <button onClick={() => handleUnblock(e.userId)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}>Unblock</button>
+                            : <button onClick={() => { setBanTarget({ id: e.userId, username: e.username }); setBanHours('24'); setBanReason(''); }} style={{ background: 'transparent', color: '#f87171', border: '1px solid rgba(248,113,113,0.5)', padding: '5px 12px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}>Block…</button>)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* FULL USER DIRECTORY (offline users can be blocked from here too) */}
+              <h3 style={{ margin: '0 0 12px', color: '#eef2ff' }}>👥 All Users</h3>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
                   <thead>

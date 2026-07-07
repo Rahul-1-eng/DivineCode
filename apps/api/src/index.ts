@@ -24,6 +24,7 @@ import { setupDuelSockets } from './modules/duel/duelSocketService';
 import { upsertGoogleUser } from './storage';
 import { loginUser } from './modules/auth/authService';
 import { banGuard } from './modules/moderation/banGuard';
+import { activityMonitor } from './modules/moderation/activityMonitor';
 
 declare global {
   namespace Express {
@@ -102,6 +103,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 app.use('/api/v2/ai', aiLimiter);
 app.use('/api/v2/interview/*/mock', aiLimiter);
+
+// Live telemetry for the admin Monitoring tab: every authenticated request
+// updates presence and meaningful actions land in the activity feed.
+app.use('/api', activityMonitor());
 
 // Blocked accounts: every mutating /api request is rejected while a ban is
 // active. Reads stay open so the user can see why they were blocked.

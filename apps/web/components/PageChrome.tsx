@@ -66,9 +66,18 @@ function loaderThemeFor(url: string): { icon: string; label: string } {
   return { icon: '⚡', label: 'Loading…' };
 }
 
+// Full-screen "rooms" that already carry their own exit control (Abort / Back
+// to Bookings). A floating back button there overlaps the app chrome AND
+// invites accidental navigation mid-interview.
+const IMMERSIVE_ROUTES = ['/recruiter/session', '/recruiter/call'];
+
+const BTN_LEFT = 14;
+const BTN_SIZE = 42;
+
 export default function PageChrome() {
   const router = useRouter();
   const [navTarget, setNavTarget] = useState<string | null>(null);
+  const [btnTop, setBtnTop] = useState(14);
 
   useEffect(() => {
     const start = (url: string, { shallow }: { shallow?: boolean } = {}) => { if (!shallow) setNavTarget(url); };
@@ -84,10 +93,54 @@ export default function PageChrome() {
   }, [router]);
 
   const isHome = router.pathname === '/';
+  const isImmersive = IMMERSIVE_ROUTES.some(p => router.pathname.startsWith(p));
   const goBack = () => {
     if (window.history.length > 1) router.back();
     else router.push('/');
   };
+
+  // The button must never sit on top of a page's own text or controls. After
+  // each navigation, probe what is rendered underneath it and slide down in
+  // small steps until it floats over empty space. Runs twice because most
+  // pages render their headers again after async data lands.
+  useEffect(() => {
+    if (isHome || isImmersive) return;
+    setBtnTop(14);
+
+    const overlapsContent = (top: number): boolean => {
+      const probes: Array<[number, number]> = [
+        [BTN_LEFT + 3, top + 3],
+        [BTN_LEFT + BTN_SIZE - 3, top + 3],
+        [BTN_LEFT + BTN_SIZE / 2, top + BTN_SIZE / 2],
+        [BTN_LEFT + 3, top + BTN_SIZE - 3],
+        [BTN_LEFT + BTN_SIZE - 3, top + BTN_SIZE - 3]
+      ];
+      for (const [x, y] of probes) {
+        for (const el of document.elementsFromPoint(x, y)) {
+          if (!(el instanceof HTMLElement)) continue;
+          if (el.closest('[data-global-back]')) continue;
+          const interactive = !!el.closest('a, button, input, select, textarea, [role="button"]');
+          // Full-width elements are page scaffolding (containers, section
+          // backgrounds) — only their own inline text counts as a collision.
+          const ownText = Array.from(el.childNodes).some(
+            n => n.nodeType === Node.TEXT_NODE && (n.textContent || '').trim().length > 0
+          );
+          if (interactive || ownText) return true;
+        }
+      }
+      return false;
+    };
+
+    const settle = () => {
+      let top = 14;
+      while (top < 240 && overlapsContent(top)) top += 8;
+      setBtnTop(top);
+    };
+
+    const t1 = setTimeout(settle, 300);
+    const t2 = setTimeout(settle, 1400);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [router.asPath, isHome, isImmersive]);
 
   const theme = navTarget ? loaderThemeFor(navTarget) : null;
 
@@ -97,9 +150,11 @@ export default function PageChrome() {
         <title>{titleForRoute(router.pathname)}</title>
       </Head>
 
-      {/* Floating back button — every page except home */}
-      {!isHome && (
+      {/* Floating back button — every page except home and full-screen rooms.
+          `top` is collision-computed so it never covers page text or controls. */}
+      {!isHome && !isImmersive && (
         <motion.button
+          data-global-back="1"
           initial={{ opacity: 0, x: -16 }}
           animate={{ opacity: 1, x: 0 }}
           whileHover={{ scale: 1.08, x: -3 }}
@@ -108,8 +163,9 @@ export default function PageChrome() {
           aria-label="Go back"
           title="Go back"
           style={{
-            position: 'fixed', top: 14, left: 14, zIndex: 1200,
-            width: 42, height: 42, borderRadius: '50%',
+            position: 'fixed', top: btnTop, left: BTN_LEFT, zIndex: 1200,
+            transition: 'top 0.25s ease',
+            width: BTN_SIZE, height: BTN_SIZE, borderRadius: '50%',
             background: 'var(--bg-panel-solid, #0f172a)',
             border: '1px solid var(--border-color, rgba(148,163,184,0.25))',
             color: 'var(--accent-primary, #22d3ee)',

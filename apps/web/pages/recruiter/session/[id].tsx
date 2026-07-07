@@ -10,6 +10,7 @@ import { useRouter } from 'next/router';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { fetchApi } from '../../../lib/api';
+import { speakText, stopSpeaking, primeVoices } from '../../../lib/voice';
 // Note: Adjust this import based on your specific Monaco/Code editor wrapper location
 import Editor from '@monaco-editor/react';
 
@@ -157,7 +158,7 @@ export default function LiveInterviewSandbox() {
   const [verdict, setVerdict] = useState<'PASSED' | 'FAILED' | null>(null);
   // Admin permit flags resolved server-side: admin = may force-advance rounds;
   // owner = may answer (admins inspecting another user's session are observers).
-  const [viewer, setViewer] = useState({ admin: false, owner: true });
+  const [viewer, setViewer] = useState({ admin: false, recruiter: false, owner: true });
   const [isAdvancing, setIsAdvancing] = useState(false);
 
   // Hardware State
@@ -167,7 +168,6 @@ export default function LiveInterviewSandbox() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const recognitionRef = useRef<any>(null);
   const chatLogRef = useRef<HTMLDivElement>(null);
-  const speechQueueRef = useRef(0);
 
   // Live Code Execution State (OA_DSA round only)
   const [language, setLanguage] = useState('cpp');
@@ -196,7 +196,7 @@ export default function LiveInterviewSandbox() {
       const res = await fetchApi(`/api/v2/recruiter/sessions/${id}`);
       const s = res.session;
       setSession(s);
-      setViewer({ admin: !!res.viewerIsAdmin, owner: res.viewerIsOwner !== false });
+      setViewer({ admin: !!res.viewerIsAdmin, recruiter: !!res.viewerIsRecruiter, owner: res.viewerIsOwner !== false });
       setPendingAnswer(null);
       if (s.status === 'PASSED' || s.status === 'FAILED') setVerdict(s.status);
 
@@ -225,6 +225,9 @@ export default function LiveInterviewSandbox() {
     if (!id) return;
 
     loadSession();
+
+    // Warm the shared TTS engine (async voice list + first-gesture audio unlock)
+    primeVoices();
 
     // Initialize Local Candidate Webcam
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -261,7 +264,7 @@ export default function LiveInterviewSandbox() {
     return () => {
       // Hardware Cleanup Pipeline
       if (recognitionRef.current) recognitionRef.current.abort();
-      if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
+      stopSpeaking();
       if (videoRef.current?.srcObject) {
         (videoRef.current.srcObject as MediaStream).getTracks().forEach(track => track.stop());
       }
@@ -306,8 +309,7 @@ export default function LiveInterviewSandbox() {
     if (!activeRound) return;
 
     setIsAdvancing(true);
-    window.speechSynthesis?.cancel();
-    speechQueueRef.current = 0;
+    stopSpeaking();
     setIsAiSpeaking(false);
 
     try {
@@ -318,7 +320,7 @@ export default function LiveInterviewSandbox() {
 
       if (res.nextRound) {
         applyNextRound(activeRound.id, true, res.nextRound);
-        toast.success(`Round ${res.skippedRound} skipped — admin permit.`, { icon: '⏭️' });
+        toast.success(`Round ${res.skippedRound} skipped.`, { icon: '⏭️' });
       } else {
         setSession((prev: any) => ({
           ...prev,
@@ -434,23 +436,19 @@ export default function LiveInterviewSandbox() {
     }
   };
 
-  // 3. Audio Execution (Phase 1 Baseline)
+  // 3. Audio Execution — delegated to the shared lib/voice.ts engine
+  // (chunking, voice-list loading, cancel/speak race, keep-alive all handled there)
   const synthesizeNeuralVoice = (text: string) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.05;
-    utterance.pitch = 0.95;
-
-    // Utterances queue natively; only clear the speaking flag once the queue drains
-    speechQueueRef.current += 1;
     setIsAiSpeaking(true);
-    const settle = () => {
-      speechQueueRef.current = Math.max(0, speechQueueRef.current - 1);
-      if (speechQueueRef.current === 0) setIsAiSpeaking(false);
-    };
-    utterance.onend = settle;
-    utterance.onerror = settle;
-    window.speechSynthesis.speak(utterance);
+    speakText(text, {
+      rate: 1.05,
+      pitch: 0.95,
+      onEnd: () => setIsAiSpeaking(false),
+      onBlocked: () => {
+        setIsAiSpeaking(false);
+        toast('Tap anywhere on the page to enable the interviewer voice.', { icon: '🔊' });
+      }
+    });
   };
 
   const toggleMic = () => {
@@ -458,8 +456,7 @@ export default function LiveInterviewSandbox() {
       recognitionRef.current?.stop();
       setIsListening(false);
     } else {
-      window.speechSynthesis.cancel();
-      speechQueueRef.current = 0;
+      stopSpeaking();
       setIsAiSpeaking(false);
 
       try {
@@ -534,9 +531,9 @@ export default function LiveInterviewSandbox() {
           <span style={{ background: 'var(--bg-card)', padding: '4px 10px', borderRadius: 6, fontSize: 13, border: '1px solid var(--border-color)', fontWeight: 'bold' }}>
             Round {session.currentRound}: {currentRound?.type.replace(/_/g, ' ')}
           </span>
-          {viewer.admin && !viewer.owner && (
+          {(viewer.admin || viewer.recruiter) && !viewer.owner && (
             <span style={{ background: 'rgba(251, 191, 36, 0.15)', color: '#fbbf24', padding: '4px 10px', borderRadius: 6, fontSize: 13, border: '1px solid rgba(251, 191, 36, 0.4)', fontWeight: 'bold' }}>
-              👁️ ADMIN OBSERVER
+              👁️ {viewer.admin ? 'ADMIN' : 'RECRUITER'} OBSERVER
             </span>
           )}
         </div>
@@ -671,7 +668,7 @@ export default function LiveInterviewSandbox() {
              >
                 {isThinking ? '⏳ Evaluating…' : !viewer.owner ? '👁️ Observer Mode' : isListening ? '🛑 Stop Recording & Submit' : '🎤 Hold to Speak'}
              </button>
-             {viewer.admin && !verdict && session.status === 'IN_PROGRESS' && (
+             {(viewer.admin || viewer.recruiter) && !verdict && session.status === 'IN_PROGRESS' && (
                <button
                  onClick={forceAdvanceRound}
                  disabled={isAdvancing || isThinking}

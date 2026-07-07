@@ -9,6 +9,7 @@ import { prisma } from '../prisma/client';
 import { Platform } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { resolvedViewerFromRequest } from '../modules/contests/contestRules';
+import { syncUserRatings } from '../modules/external-sync/profileSyncService';
 
 export const profileRouter = Router();
 
@@ -299,9 +300,41 @@ profileRouter.post('/save-handles', async (req, res) => {
       });
     }
 
-    return res.json({ success: true, message: 'Handles linked successfully!' });
+    // Pull live ratings for the freshly linked handles right away. Best-effort:
+    // the handles are already saved, so a platform API hiccup must not fail the request.
+    let globalRating: number | null = null;
+    try {
+      globalRating = await syncUserRatings(user.id);
+    } catch (syncErr: any) {
+      console.error(`[ProfileSync] Post-link rating sync failed for ${user.id}:`, syncErr?.message);
+    }
+
+    return res.json({ success: true, message: 'Handles linked successfully!', globalRating });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// Manual "Refresh stats" — re-fetches ratings from every linked platform.
+profileRouter.post('/sync-ratings', async (req, res) => {
+  try {
+    let viewer;
+    try {
+      viewer = await resolvedViewerFromRequest(req, true);
+    } catch (authError) {
+      return res.status(401).json({ error: 'Authentication failed' });
+    }
+    const email = viewer?.email;
+    if (!email) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const globalRating = await syncUserRatings(user.id);
+    const handles = await prisma.externalHandle.findMany({ where: { userId: user.id } });
+    return res.json({ success: true, globalRating, handles });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Rating sync failed.' });
   }
 });
 
