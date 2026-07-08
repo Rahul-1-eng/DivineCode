@@ -25,7 +25,7 @@ import { sendNotification } from './notificationRoutes';
 export const recruiterRouter = Router();
 
 const SESSION_COST = 100;
-const FREE_TRIALS = 3;
+const FREE_TRIALS = 0;
 
 // Phone OTP is ON by default: anyone could type any mobile number, so the
 // number must clear a code before it anchors free trials. Delivery is SMS when
@@ -206,54 +206,7 @@ recruiterRouter.get('/entitlement', async (req, res) => {
 // code goes out by SMS (Fast2SMS) when configured, else to the account email;
 // if neither channel exists, verification is skipped (legacy direct-set path).
 // -----------------------------------------------------------------------------
-recruiterRouter.post('/phone/request-otp', async (req, res) => {
-  try {
-    const viewer = await resolvedViewerFromRequest(req, true);
-    if (!viewer.email) return res.status(401).json({ error: 'Unauthorized' });
 
-    const user = await prisma.user.findUnique({ where: { email: viewer.email } });
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    // Verify a new number, or the already-saved one for legacy accounts.
-    const phone = normalizePhone(req.body?.phone) || user.phone;
-    if (!phone) return res.status(400).json({ error: 'Enter a valid 10-digit mobile number.' });
-
-    const taken = await prisma.user.findFirst({ where: { phone, NOT: { id: user.id } }, select: { id: true } });
-    if (taken) {
-      return res.status(409).json({ error: 'This mobile number is already linked to another account — free trials are one set per person.', code: 'PHONE_TAKEN' });
-    }
-
-    if (!phoneOtpRequired()) {
-      // OTP disabled (default) or no delivery channel — save the number
-      // directly rather than blocking trials.
-      await prisma.user.update({ where: { id: user.id }, data: { phone, phoneVerified: false, pendingPhone: null, phoneOtpHash: null, phoneOtpExpiresAt: null } });
-      return res.json({ success: true, otpRequired: false, phoneSaved: true });
-    }
-
-    const code = generateOtp();
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        pendingPhone: phone,
-        phoneOtpHash: hashOtp(code),
-        phoneOtpExpiresAt: new Date(Date.now() + 10 * 60 * 1000)
-      }
-    });
-
-    const channel = await deliverOtp(phone, user.email, code);
-    res.json({
-      success: true,
-      otpRequired: true,
-      channel,
-      message: channel === 'SMS'
-        ? `OTP sent to +91 ${phone.slice(0, 2)}******${phone.slice(-2)}.`
-        : `SMS gateway not configured — the OTP was sent to your email ${user.email}.`
-    });
-  } catch (err: any) {
-    console.error('[OTP Request Error]', err);
-    res.status(500).json({ error: 'Failed to send the OTP. Please retry.' });
-  }
-});
 
 recruiterRouter.post('/phone/verify-otp', async (req, res) => {
   try {

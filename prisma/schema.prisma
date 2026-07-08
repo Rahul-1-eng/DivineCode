@@ -18,7 +18,7 @@ model User {
   rating                      Int                      @default(1200)
   duelRating                  Int                      @default(1200)
   globalRating                Int                      @default(1200)
-  coins                       Int                      @default(0)
+  coins                       Int                      @default(300)
   createdAt                   DateTime                 @default(now())
   updatedAt                   DateTime                 @updatedAt
   resetPasswordToken          String?                  @unique
