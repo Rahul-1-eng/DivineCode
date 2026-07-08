@@ -64,9 +64,18 @@ export async function deliverOtp(phone: string, email: string, code: string): Pr
       console.error('[OTP] Fast2SMS send failed:', err?.response?.data?.message || err?.message);
     }
   }
+  
   if (emailEnabled()) {
-    mailPhoneOtp(email, code, phone);
-    return 'EMAIL';
+    // ADDED: await the email and check if it actually succeeded
+    const emailSentSuccessfully = await mailPhoneOtp(email, code, phone);
+    
+    if (emailSentSuccessfully) {
+      return 'EMAIL';
+    } else {
+      // If SMTP fails, throw an error so the frontend knows it failed
+      throw new Error('Our email server could not dispatch the OTP. Please check backend logs.');
+    }
   }
+  
   throw new Error('OTP_CHANNEL_UNAVAILABLE');
 }
