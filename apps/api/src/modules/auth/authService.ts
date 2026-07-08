@@ -7,7 +7,8 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { prisma } from '../../prisma/client';
 import jwt from "jsonwebtoken";
-import { sendMail } from '../email/emailService';
+import { sendMail, mailPhoneOtp } from '../email/emailService';
+
 export async function registerUser({ username, email, name, password }: any) {
   if (!username || !email || !password) throw new Error('Username, email and password are required fields.');
 
@@ -140,4 +141,52 @@ export async function resetPassword({ token, newPassword }: any) {
   });
 
   return { success: true, message: 'Your password has been reset successfully. You can now log in.' };
+}
+
+// ============================================================================
+// NEW: OTP ROUTING LOGIC (Mobile uniqueness check + Email delivery)
+// ============================================================================
+
+export async function requestTrialOtp({ phone, email }: { phone: string, email: string }) {
+  if (!phone || !email) {
+    throw new Error('Both mobile number and email are required to claim a trial.');
+  }
+
+  // Clean the inputs
+  const cleanPhone = String(phone).replace(/\D/g, ''); // Strip out any dashes/spaces
+  const cleanEmail = String(email).trim().toLowerCase();
+
+  // 1. UNIQUENESS CHECK (Prevent multiple free trials)
+  const existingTrial = await prisma.user.findFirst({
+    where: { 
+      // Assuming you have a 'phone' field in your Prisma User model
+      phone: cleanPhone 
+    }
+  });
+
+  if (existingTrial) {
+    throw new Error('This mobile number has already been used for a free trial.');
+  }
+
+  // 2. GENERATE OTP
+  const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+  // ⚠️ CRITICAL: You must save this OTP somewhere so you can verify it when the user submits it.
+  // Example if using Redis:
+  // await redis.set(`otp:${cleanPhone}`, otpCode, 'EX', 600); // Expires in 10 mins
+
+  // 3. SEND OTP VIA EMAIL (Cost-saving measure)
+  console.log(`Sending OTP for phone ${cleanPhone} to email ${cleanEmail}...`);
+  
+  const emailSent = await mailPhoneOtp(cleanEmail, otpCode, cleanPhone);
+
+  if (!emailSent) {
+    // If SMTP fails, the frontend will now correctly show an error instead of a fake success.
+    throw new Error('Failed to send the verification code. Please check our email servers and try again.');
+  }
+
+  return { 
+    success: true, 
+    message: 'Verification code sent to your email address!' 
+  };
 }

@@ -57,26 +57,29 @@ function brandedHtml(title: string, bodyHtml: string, cta?: { label: string; url
   </div>`;
 }
 
-// Fire-and-forget by design: a dead SMTP connection must never fail the API
-// request that triggered the mail. Callers do not await this.
-export function sendMail(to: string | string[], subject: string, title: string, bodyHtml: string, cta?: { label: string; url: string }): void {
+// UPDATED: By default fire-and-forget, but now returns a Promise<boolean> so critical
+// paths (like OTPs) can await it to confirm delivery.
+export async function sendMail(to: string | string[], subject: string, title: string, bodyHtml: string, cta?: { label: string; url: string }): Promise<boolean> {
   const t = getTransporter();
   const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
-  if (recipients.length === 0) return;
+  if (recipients.length === 0) return false;
   if (!t) {
     console.warn(`[Email] Skipped "${subject}" → ${recipients.join(', ')} (GMAIL_USER / GMAIL_APP_PASSWORD not configured)`);
-    return;
+    return false;
   }
-  t.sendMail({
-    from: `"DivineCode" <${GMAIL_USER}>`,
-    to: recipients.join(', '),
-    subject,
-    html: brandedHtml(title, bodyHtml, cta)
-  }).then(() => {
+  try {
+    await t.sendMail({
+      from: `"DivineCode" <${GMAIL_USER}>`,
+      to: recipients.join(', '),
+      subject,
+      html: brandedHtml(title, bodyHtml, cta)
+    });
     console.log(`[Email] Sent "${subject}" → ${recipients.join(', ')}`);
-  }).catch((err: any) => {
+    return true;
+  } catch (err: any) {
     console.error(`[Email] Failed "${subject}" → ${recipients.join(', ')}:`, err?.message);
-  });
+    return false;
+  }
 }
 
 // The admin inbox is the platform Gmail itself.
@@ -398,8 +401,9 @@ export function mailCoinPurchaseUnderVerification(to: string, p: { id: string; c
 // to the account's email instead, so verification still actually happens.
 // -----------------------------------------------------------------------------
 
-export function mailPhoneOtp(to: string, code: string, phone: string): void {
-  sendMail(to,
+// UPDATED: Now returns a Promise<boolean>
+export async function mailPhoneOtp(to: string, code: string, phone: string): Promise<boolean> {
+  return sendMail(to,
     `${code} is your DivineCode verification code`,
     'Verify your mobile number',
     `Your one-time code to verify mobile number <strong>+91 ${phone}</strong> is:<br/><br/>
