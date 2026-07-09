@@ -182,7 +182,7 @@ export default function GlobalNavigationAndMashupCreator() {
         body: JSON.stringify({ 
           title, 
           durationMinutes: duration, 
-          type: contestMode === 'SOLO' ? 'INDIVIDUAL' : 'GROUP', 
+          type: contestMode === 'SOLO' ? 'SOLO' : 'GROUP', 
           startTime: startTimeStr ? new Date(startTimeStr).toISOString() : undefined,
           ownerEmail: session.user.email,
           ownerName: session.user.name || 'Admin',
