@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin
+Disallow: /signin
+Disallow: /forgot-password
+Disallow: /reset-password
+
+Sitemap: https://divine-code-web.vercel.app/sitemap.xml
