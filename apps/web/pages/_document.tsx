@@ -15,25 +15,29 @@ export default function Document() {
         <link rel="apple-touch-icon" href="/favicon.ico?v=2" />
         <link rel="shortcut icon" href="/favicon.ico?v=2" />
         <link rel="manifest" href="/manifest.json" />
+        <link rel="canonical" href="https://divine-code-web.vercel.app/" />
 
         {/* Primary Meta Tags */}
-        <meta name="title" content="DivineCode Pro | Distributed Algorithmic Training Platform" />
-        <meta name="description" content="A real-time multiplayer coding arena featuring an AI Voice Interviewer, AST Plagiarism Detection, and Codeforces synchronization." />
+        <title>DivineCode | Competitive Programming and AI Interviews</title>
+        <meta name="title" content="DivineCode | Competitive Programming and AI Interviews" />
+        <meta name="description" content="DivineCode is a competitive programming platform for DSA practice, live contests, coding duels, AI mock interviews, and recruiter sessions." />
+        <meta name="robots" content="index, follow, max-image-preview:large" />
+        <meta name="googlebot" content="index, follow" />
         <meta name="theme-color" content="#020617" />
 
         {/* Open Graph / LinkedIn / Facebook */}
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://divine-code-web.vercel.app/" />
-        <meta property="og:title" content="DivineCode Pro | Distributed Algorithmic Training Platform" />
-        <meta property="og:description" content="A real-time multiplayer coding arena featuring an AI Voice Interviewer, AST Plagiarism Detection, and Codeforces synchronization." />
-        <meta property="og:image" content="https://divine-code-web.vercel.app/og-image.png" />
+        <meta property="og:title" content="DivineCode | Competitive Programming and AI Interviews" />
+        <meta property="og:description" content="Practice DSA, compete in live contests, duel in real time, and prepare for technical interviews with DivineCode." />
+        <meta property="og:image" content="https://divine-code-web.vercel.app/logo.png" />
 
         {/* Twitter */}
         <meta property="twitter:card" content="summary_large_image" />
         <meta property="twitter:url" content="https://divine-code-web.vercel.app/" />
-        <meta property="twitter:title" content="DivineCode Pro | Distributed Algorithmic Training Platform" />
-        <meta property="twitter:description" content="A real-time multiplayer coding arena featuring an AI Voice Interviewer, AST Plagiarism Detection, and Codeforces synchronization." />
-        <meta property="twitter:image" content="https://divine-code-web.vercel.app/og-image.png" />
+        <meta property="twitter:title" content="DivineCode | Competitive Programming and AI Interviews" />
+        <meta property="twitter:description" content="Practice DSA, compete in live contests, duel in real time, and prepare for technical interviews with DivineCode." />
+        <meta property="twitter:image" content="https://divine-code-web.vercel.app/logo.png" />
       </Head>
       <body>
         <Main />

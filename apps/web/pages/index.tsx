@@ -9,6 +9,7 @@ import { useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
+import Head from 'next/head';
 import { io } from 'socket.io-client';
 import { useTheme } from 'next-themes';
 import NotificationBell from '../components/NotificationBell';
@@ -265,6 +266,21 @@ const navLinks = [
 
   return (
     <>
+      <Head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'WebSite',
+              name: 'DivineCode',
+              alternateName: 'DivineCode Pro',
+              url: 'https://divine-code-web.vercel.app/',
+              description: 'Competitive programming practice, live coding contests, coding duels, and AI technical interviews.',
+            }),
+          }}
+        />
+      </Head>
       <AnimatedBackground />
 
       <style>{`
