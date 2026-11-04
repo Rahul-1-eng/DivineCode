@@ -21,6 +21,7 @@ export default function Document() {
         <title>DivineCode | Competitive Programming and AI Interviews</title>
         <meta name="title" content="DivineCode | Competitive Programming and AI Interviews" />
         <meta name="description" content="DivineCode is a competitive programming platform for DSA practice, live contests, coding duels, AI mock interviews, and recruiter sessions." />
+        <meta name="google-site-verification" content="SIAV4zdzeV3LJURPDtOZNFORokqRy29lARhhZHulEhg" />
         <meta name="robots" content="index, follow, max-image-preview:large" />
         <meta name="googlebot" content="index, follow" />
         <meta name="theme-color" content="#020617" />
